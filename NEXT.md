@@ -1,9 +1,42 @@
 # NEXT
 
-## 目前位置
+## 目前位置（2026-10-09 17:25Z）
 
-**Core §1 完成；Core §2 / §4 的工具全部就緒。soak #4 FAILED（R7、R8，都是量測程式的問題，raw 完整）→ decision 008 修訂 3 → 待跑 soak #5。
-補送 update 的診斷 run 與 soak #3 的最終校準正在跑；之後：soak #5 → 用 soak #3 + #5 凍結 policy v1 → INC-001。**
+**Core 的工具鏈都已完成並測試（602 passed），還沒有任何資料結果。**
+- **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
+- **LLM 方法**：dump-all、retrieval、agent 的程式已就緒，等使用者批准模型、預算與成本。
+- **已完成的 Core 範圍**：
+
+  | 項目 | decision |
+  |---|---|
+  | 環境鎖定與 soak | 001、004、007、008 |
+  | run group 收集協定 | 009，含修訂 1–4 |
+  | label 與 review | 006、010、016、018 |
+  | canonical snapshot 與凍結的 policy v1 | 011；renderer v2 |
+  | docker_stats 覆蓋 | 012 |
+  | 分層評分 | 013 |
+  | 統計 baseline v2 | 014 |
+  | leakage audit | 015 |
+  | evidence relevance | 017 |
+  | Agent 工具與執行框架 | 019、020 |
+  | dump-all 與 retrieval | 021 |
+  | 失敗分類 | 022 |
+  | held-out 協定（Proposed） | 023 |
+  | paired 比較 | 023 §7 |
+  | 端到端測試 | — |
+  | README | — |
+
+- **本 session 的三輪審查**，找到並修正的都是真實資料才會出現的 bug：
+  - 程式碼審查：10 項；
+  - 時鐘與單位稽核：9 項；
+  - 在無 fault 的真實 snapshot 上試跑：發現 CPU 量測 bug、統計 baseline 在無 fault 時大量誤報、render 把 46% log 行的時間截掉、leakage 樣板出現大量假的 fault 專屬樣板。
+- **背景進行中**：非正式冒煙測試（`collect smoke`，資料只寫在 scratch），等 heavy lock 空出後自動執行，用來檢查整條真實 pipeline 的後半段。
+- **回來時請先看下面的「Blocked / 需要使用者」**。
+
+## 上次完成
+
+### 2026-10-08 晚 – 10-09（session 4）：細項紀錄
+
 - 記憶體設定已凍結（soak #2）。soak #3（raw export 的新 lock）：R1–R6、R8、R9 通過，R7 失敗 → 維持 FAILED。
 - soak #4（同一個 lock）：R7 失敗在 OpenSearch 清佇列時的 ambient 拒收、R8 失敗在一行 `{}`（空的 MetricsData）；raw 完整（accounting 平衡）。修訂 3 只放行 opensearch exporter 的關閉錯誤、把 `{}` 計為空訊息；memcg 探測 container 改名 `ii-probe-…`（policy 當 harness 排除）。soak #4 維持 FAILED。
 - R7 失敗原因（診斷 run 重現）：pipeline 都正常關閉後，collector 把 self-telemetry 推給自己已關閉的 4318 → exit 1。
@@ -41,8 +74,6 @@
 - **Held-out 協定（decision 023，Proposed）**：與 Pilot 相同的 10 個 fault、每個 K 個（使用者決定）、隨機 block 順序、方法執行前 review、freeze 紀錄、Gate 用單一 paired 檢定。
   已實作與 K 無關的分析：`python -m eval compare --method A --against B --set pilot`（paired run-group bootstrap、leave-one-fault-out）。
 - 沒有進入 Advanced / Optional；沒有任何付費用量。測試：602 passed（`-m "not network and not docker_daemon"`）。
-
-## 上次完成
 
 ### 2026-10-08 session 3（decision 004–007、soak 工具、label schema、soak #1）
 
