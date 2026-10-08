@@ -26,3 +26,15 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# Secrets / credentials never go into git (MACHINE_POLICY: no tokens, SSH or Tailscale credentials)
+.env
+.env.*
+.envrc
+.netrc
+secrets/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+id_ecdsa*
