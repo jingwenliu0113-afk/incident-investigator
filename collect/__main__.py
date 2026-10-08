@@ -1,6 +1,6 @@
 """python -m collect run — collect one run group under the Mac heavy lock (decision 009).
 
-    ./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%
+    ./tools/with-mac-lock uv run python -m collect run --set pilot --flag paymentFailure --variant 100%
 """
 
 from __future__ import annotations
@@ -28,6 +28,9 @@ class UsageError(Exception):
 
 
 def _check_args(ns: argparse.Namespace) -> None:
+    if ns.split == "heldout":
+        raise UsageError("held-out collection needs its own protocol decision first (fault list, durations, split); "
+                         "only --set pilot is collected for now")
     if ns.flag not in FLAG_FAULT_TYPES:
         raise UsageError(f"flag {ns.flag!r} is not a Core fault (decision 006)")
     catalog = load_flag_catalog(FLAG_FILE)
@@ -40,6 +43,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="collect one run group (needs the Mac heavy lock)")
+    run.add_argument("--set", dest="split", required=True, choices=["pilot", "heldout"],
+                     help="the set this run group belongs to, fixed now (SPEC §5: pilot incidents never enter the test)")
     run.add_argument("--flag", required=True)
     run.add_argument("--variant", required=True)
     run.add_argument("--seed", type=int, help="default: a fresh random seed (recorded)")
@@ -153,7 +158,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     layout = DataLayout(PROJECT_DIR / "data/external")
     rg = next_id(layout, "RG")
     seed = ns.seed if ns.seed is not None else random.SystemRandom().randrange(2**31)
-    plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=PILOT_FAULT_MINUTES)
+    plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=PILOT_FAULT_MINUTES,
+                split=ns.split)
     stack = LiveStack(PROJECT_DIR, UPSTREAM_DIR, layout.root)
     work = layout.root / "staging" / rg
     import signal

@@ -9,6 +9,7 @@
     "injection_version",
     "run_group_id",
     "incident_ids",
+    "split",
     "seed",
     "fault",
     "schedule",
@@ -31,6 +32,13 @@
         "type": "string",
         "pattern": "^INC-[0-9]{3,}(?!\\n)$"
       }
+    },
+    "split": {
+      "description": "set fixed at collection: pilot incidents never enter the held-out test (SPEC §5, §10)",
+      "enum": [
+        "pilot",
+        "heldout"
+      ]
     },
     "seed": {
       "type": "integer"

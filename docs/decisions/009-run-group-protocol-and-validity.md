@@ -116,6 +116,13 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 5. （同日 review 修正）收尾的每一步（還原 flag 檔、關 samples、停 event watch、複製 raw）各自執行，任何一步失敗只記在 `teardown_errors`，
    後面的步驟（特別是複製 raw）與 `down` 照常執行；失敗的 run 記為 `aborted_error` 並保留 run record。判定有效性時出錯也一樣保留 record。
 
+## 修訂 3（2026-10-08，第一個 incident 收集之前）：run group 在收集時就固定所屬的集合
+
+- `collect run` 必須指定 `--set pilot|heldout`，記在 `injection.json` 的 `split`（資料格式：`fault_injection.schema.json` 新增必填欄位）。
+  incident 屬於哪個集合在收集當下就固定，之後的評分依它選 incident；SPEC §5 / §10「Pilot 永不進 test、同一 run group 不跨 split」因此可以由程式檢查。
+- `--set heldout` 目前一律拒絕：held-out 的收集協定（fault 清單、時長、split 大小）要先另寫 decision。
+- 之前沒有任何 injection 紀錄（RG-001 中止、沒有 injection），不影響既有資料。
+
 ## 收集結果
 
 ### RG-001（2026-10-08 15:21Z，paymentFailure 100%，**aborted_unstable**，沒有注入 fault、沒有 incident id）

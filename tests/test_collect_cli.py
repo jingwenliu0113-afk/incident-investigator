@@ -13,7 +13,7 @@ from collect.rungroup import next_id
     (["--flag", "paymentFailure", "--variant", "off"], "no variant"),  # the baseline value injects nothing
 ])
 def test_run_rejects_protocol_violations_before_touching_docker(args, message, capsys):
-    assert main(["run", *args]) == 2
+    assert main(["run", "--set", "pilot", *args]) == 2
     assert message in capsys.readouterr().err
 
 
@@ -28,7 +28,7 @@ def test_pilot_runs_have_one_fixed_fault_duration():
 
     assert cli.PILOT_FAULT_MINUTES == 10  # decision 009 (amended)
     with pytest.raises(SystemExit):
-        main(["run", "--flag", "paymentFailure", "--variant", "100%", "--fault-minutes", "3"])
+        main(["run", "--set", "pilot", "--flag", "paymentFailure", "--variant", "100%", "--fault-minutes", "3"])
 
 
 def test_errors_exit_2_with_a_message_not_a_traceback(tmp_path, monkeypatch, capsys):
@@ -55,3 +55,11 @@ def test_freeze_cli_refuses_without_passing_calibrations(tmp_path, capsys):
     (tmp_path / "c.json").write_text('{"policy": {"sha256": "sha256:0"}, "freeze_check": {"pass": false}}')
     assert main(["freeze", "--calibration", str(tmp_path / "c.json")]) == 2
     assert "calibrated with" in capsys.readouterr().err
+
+
+def test_every_run_names_its_set_and_held_out_waits_for_its_protocol(capsys):
+    # SPEC §5 / §10: Pilot incidents never enter the test; the set is fixed when the run group is collected
+    with pytest.raises(SystemExit):
+        main(["run", "--flag", "paymentFailure", "--variant", "100%"])  # --set is required
+    assert main(["run", "--set", "heldout", "--flag", "paymentFailure", "--variant", "100%"]) == 2
+    assert "held-out" in capsys.readouterr().err

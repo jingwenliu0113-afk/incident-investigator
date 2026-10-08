@@ -25,7 +25,7 @@ Claude Code session 在 Mac 啟動。RTX 5070 Ti 桌機只是一台按需遠端�
 例如：
 
 ```bash
-./tools/with-mac-lock uv run python -m collect run --flag <flag> --variant <variant>   # e.g. --flag paymentFailure --variant 100%
+./tools/with-mac-lock uv run python -m collect run --set pilot --flag <flag> --variant <variant>   # e.g. --flag paymentFailure --variant 100%
 ```
 
 `with-mac-lock` 會：

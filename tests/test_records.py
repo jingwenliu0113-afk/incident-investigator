@@ -50,6 +50,7 @@ def injection(**overrides):
         "injection_version": 1,
         "run_group_id": "RG-001",
         "incident_ids": ["INC-001"],
+        "split": "pilot",
         "seed": 42,
         "fault": {"mechanism": "flagd", "flag": "paymentFailure", "variant": "100%"},
         "schedule": {"normal_start": "2026-10-08T11:40:00Z", "fault_on": "2026-10-08T11:50:00Z",

@@ -42,6 +42,7 @@ class Plan:
     drain_minutes: float = 3
     interval: float = 15  # seconds between state samples; Locust and memcg every 4th
     confirm_timeout: float = 10  # seconds for flagd to serve the new variant
+    split: str = "pilot"  # fixed at collection: pilot incidents never enter the held-out test (SPEC §5, §10)
 
 
 MAX_CLOCK_DRIFT = 1.0  # seconds the host <-> VM offset may move during a run (decision 009, amended)
@@ -388,6 +389,7 @@ def store_run_group(record: dict, work_dir: Path, layout: DataLayout, *, lock_sh
             "injection_version": 1,
             "run_group_id": rg,
             "incident_ids": incident_ids,
+            "split": record["plan"]["split"],
             "seed": record["plan"]["seed"],
             "fault": {"mechanism": "flagd", "flag": record["plan"]["flag"], "variant": record["plan"]["variant"]},
             "schedule": record["schedule"],

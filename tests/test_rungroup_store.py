@@ -31,7 +31,7 @@ def finished(tmp_path, status="valid"):
     from collect.rawfile import scan_raw_file
     rec = {
         "run_group_id": "RG-001", "status": status, "reasons": [] if status == "valid" else ["normal_period_not_clean"],
-        "plan": {"seed": 7, "flag": "paymentFailure", "variant": "100%"},
+        "plan": {"seed": 7, "flag": "paymentFailure", "variant": "100%", "split": "pilot"},
         "flag": {"path": "demo.flagd.json", "baseline_sha256": "sha256:" + "b" * 64, "injected_sha256": "sha256:" + "c" * 64},
         "schedule": {"normal_start": "2026-10-08T12:05:00Z", "fault_on": "2026-10-08T12:17:00Z",
                      "fault_off": "2026-10-08T12:27:00Z", "end": "2026-10-08T12:32:00Z"},
@@ -105,3 +105,10 @@ def test_an_inconsistent_raw_export_is_refused_before_anything_moves(tmp_path):
     with pytest.raises(ValueError, match="inconsistent"):
         store_run_group(rec, work, layout, lock_sha256=LOCK)
     assert not layout.raw_dir("RG-001").exists() and (work / "raw" / "traces.jsonl").exists()  # a retry can still store it
+
+
+def test_the_injection_record_carries_the_set(tmp_path):
+    layout = DataLayout(tmp_path / "data")
+    rec, work = finished(tmp_path)
+    store_run_group(rec, work, layout, lock_sha256=LOCK)
+    assert json.loads(layout.injection_path("RG-001").read_text())["split"] == "pilot"
