@@ -137,6 +137,9 @@
 | retrieval（q = 8、k = 25） | 2 | 約 9 萬（概覽約 1.8 萬 × 2 + 檢索結果約 5 萬） | 約 2–3 千 |
 | agent（40 次工具、工具輸出 ≤ 120k、30 回合） | ≤ 31 | 典型約 40–60 萬，最壞約 180 萬（每回合重送整段對話；prompt caching 可大幅降低） | 約 1–3 萬 |
 
+- **實測（2026-10-09，soak #5 的 38 分鐘無 fault snapshot，用計量用的假模型，proxy tokens）**：dump-all 一次請求 131k；
+  retrieval 兩次請求 17k + 19k（無 fault 時查詢命中很少；有 fault 時第二次最多再加約 50k）；agent 模擬 25 次工具呼叫的探索：26 回合、input 累計 422k、
+  最後一回合 59k、工具輸出 51k（工具輸出用滿 120k 時累計約 0.8–1M）。實際 tokenizer 的數字尚未量（需要 API）。
 - Pilot（10 個 incident）× 3 個方法：input 約 0.6–2 千萬 tokens（agent 佔大部分）。held-out 的數量在其協定決定。
 - 成本 = tokens × 所選模型的單價（使用者確認目前價格）；建議先在 1–2 個 Pilot incident 上跑一次，量到實際 token 後再估全部。
 - 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
