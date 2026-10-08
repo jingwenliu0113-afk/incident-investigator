@@ -538,27 +538,7 @@
             ],
             "properties": {
               "value": {
-                "oneOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "required": [
-                      "$double"
-                    ],
-                    "properties": {
-                      "$double": {
-                        "enum": [
-                          "NaN",
-                          "Infinity",
-                          "-Infinity"
-                        ]
-                      }
-                    }
-                  }
-                ]
+                "$ref": "#/$defs/double"
               }
             }
           }
@@ -579,7 +559,35 @@
               "max",
               "bucket_counts",
               "explicit_bounds"
-            ]
+            ],
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sum": {
+                "$ref": "#/$defs/optional_double"
+              },
+              "min": {
+                "$ref": "#/$defs/optional_double"
+              },
+              "max": {
+                "$ref": "#/$defs/optional_double"
+              },
+              "bucket_counts": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "explicit_bounds": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/double"
+                }
+              }
+            }
           }
         },
         {
@@ -601,7 +609,72 @@
               "zero_threshold",
               "positive",
               "negative"
-            ]
+            ],
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sum": {
+                "$ref": "#/$defs/optional_double"
+              },
+              "min": {
+                "$ref": "#/$defs/optional_double"
+              },
+              "max": {
+                "$ref": "#/$defs/optional_double"
+              },
+              "scale": {
+                "type": "integer"
+              },
+              "zero_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "zero_threshold": {
+                "$ref": "#/$defs/double"
+              },
+              "positive": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "offset",
+                  "bucket_counts"
+                ],
+                "properties": {
+                  "offset": {
+                    "type": "integer"
+                  },
+                  "bucket_counts": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "negative": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "offset",
+                  "bucket_counts"
+                ],
+                "properties": {
+                  "offset": {
+                    "type": "integer"
+                  },
+                  "bucket_counts": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         {
@@ -617,8 +690,70 @@
               "count",
               "sum",
               "quantile_values"
-            ]
+            ],
+            "properties": {
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "sum": {
+                "$ref": "#/$defs/double"
+              },
+              "quantile_values": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "quantile",
+                    "value"
+                  ],
+                  "properties": {
+                    "quantile": {
+                      "$ref": "#/$defs/double"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/double"
+                    }
+                  }
+                }
+              }
+            }
           }
+        }
+      ]
+    },
+    "double": {
+      "description": "a double; NaN / ±Infinity as {\"$double\": ...} (decision 011 §2)",
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "$double"
+          ],
+          "properties": {
+            "$double": {
+              "enum": [
+                "NaN",
+                "Infinity",
+                "-Infinity"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "optional_double": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/double"
+        },
+        {
+          "type": "null"
         }
       ]
     }

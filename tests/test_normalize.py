@@ -279,3 +279,27 @@ def test_check_snapshot_sees_through_escapes_and_bytes(setup, tmp_path):
     problems = check_snapshot(copy, policy)
     assert any(p.startswith("metric_series.jsonl: line 1: lexicon") for p in problems)
     assert any(p.startswith("spans.jsonl: line 1: lexicon") for p in problems)
+
+
+def test_point_values_encode_non_finite_doubles_and_proto3_zero_defaults():
+    # decision 011 §2: one encoding for NaN / ±Infinity everywhere; null means absent, and a proto3 double omitted
+    # by OTLP JSON was 0 (only the `optional` histogram sum / min / max may be absent)
+    from collect.normalize import _point_values, _validators
+
+    h = _point_values("histogram", {"count": "2", "sum": "NaN", "min": "-Infinity", "max": "Infinity",
+                                    "bucketCounts": ["1", "1"], "explicitBounds": [1.0]})
+    assert h["sum"] == {"$double": "NaN"} and h["min"] == {"$double": "-Infinity"} and h["max"] == {"$double": "Infinity"}
+    assert _point_values("histogram", {"count": "0"})["sum"] is None
+    e = _point_values("exponential_histogram", {"count": "1", "sum": "Infinity"})
+    assert e["sum"] == {"$double": "Infinity"} and e["zero_threshold"] == 0
+    sm = _point_values("summary", {"count": "3", "quantileValues": [{}, {"quantile": 1.0, "value": "NaN"}]})
+    assert sm["sum"] == 0 and sm["quantile_values"] == [{"quantile": 0, "value": 0},
+                                                        {"quantile": 1.0, "value": {"$double": "NaN"}}]
+    v = _validators()["metric_points.jsonl"]
+    base = {"id": "p-" + "0" * 16, "series_id": "m-" + "0" * 16, "service": "cart", "metric": "x",
+            "start_time_unix_nano": 1, "time_unix_nano": 2, "flags": 0, "first_in_window": False}
+    assert not list(v.iter_errors({**base, "kind": "histogram", **h}))
+    assert not list(v.iter_errors({**base, "kind": "exponential_histogram", **e}))
+    assert not list(v.iter_errors({**base, "kind": "summary", **sm}))
+    assert list(v.iter_errors({**base, "kind": "histogram", **h, "sum": "NaN"}))  # a bare string is not a double
+    assert list(v.iter_errors({**base, "kind": "summary", **sm, "sum": None}))  # a summary always has a sum

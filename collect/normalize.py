@@ -500,25 +500,31 @@ def _span_record(run: _Run, s: dict, tid: str, sid: str, parent: str | None, sta
             "resource_id": rid, "scope": run.scope(scope), "service": svc}
 
 
+def _dbl(d):
+    """OTLP JSON writes NaN / ±Infinity as strings; the canonical form is {"$double": ...} (decision 011 §2)."""
+    return {"$double": d} if isinstance(d, str) else d
+
+
 def _point_values(kind: str, p: dict) -> dict:
+    # proto3 doubles that are not `optional` are omitted by OTLP JSON when 0: .get(key, 0), never `or` (keeps NaN strings)
     if kind in ("gauge", "sum"):
         if "asInt" in p:
             return {"value": int(p["asInt"])}
-        d = p.get("asDouble")
-        return {"value": {"$double": d} if isinstance(d, str) else d}
+        return {"value": _dbl(p.get("asDouble", 0))}
     if kind == "histogram":
-        return {"count": int(p.get("count") or 0), "sum": p.get("sum"), "min": p.get("min"), "max": p.get("max"),
-                "bucket_counts": [int(c) for c in p.get("bucketCounts") or []],
-                "explicit_bounds": list(p.get("explicitBounds") or [])}
+        return {"count": int(p.get("count") or 0), "sum": _dbl(p.get("sum")), "min": _dbl(p.get("min")),
+                "max": _dbl(p.get("max")), "bucket_counts": [int(c) for c in p.get("bucketCounts") or []],
+                "explicit_bounds": [_dbl(b) for b in p.get("explicitBounds") or []]}
     if kind == "exponential_histogram":
         def buckets(b):
             return {"offset": int((b or {}).get("offset") or 0), "bucket_counts": [int(c) for c in (b or {}).get("bucketCounts") or []]}
-        return {"count": int(p.get("count") or 0), "sum": p.get("sum"), "min": p.get("min"), "max": p.get("max"),
-                "scale": int(p.get("scale") or 0), "zero_count": int(p.get("zeroCount") or 0),
-                "zero_threshold": p.get("zeroThreshold"), "positive": buckets(p.get("positive")),
+        return {"count": int(p.get("count") or 0), "sum": _dbl(p.get("sum")), "min": _dbl(p.get("min")),
+                "max": _dbl(p.get("max")), "scale": int(p.get("scale") or 0), "zero_count": int(p.get("zeroCount") or 0),
+                "zero_threshold": _dbl(p.get("zeroThreshold", 0)), "positive": buckets(p.get("positive")),
                 "negative": buckets(p.get("negative"))}
-    return {"count": int(p.get("count") or 0), "sum": p.get("sum"),
-            "quantile_values": [{"quantile": q.get("quantile"), "value": q.get("value")} for q in p.get("quantileValues") or []]}
+    return {"count": int(p.get("count") or 0), "sum": _dbl(p.get("sum", 0)),
+            "quantile_values": [{"quantile": _dbl(q.get("quantile", 0)), "value": _dbl(q.get("value", 0))}
+                                for q in p.get("quantileValues") or []]}
 
 
 # -------------------------------------------------------------------- fail-closed checks

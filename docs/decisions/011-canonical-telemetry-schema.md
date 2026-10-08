@@ -137,4 +137,9 @@
 3. **check_snapshot 也檢查解碼後的字串**：檔案層級的 byte grep 讀的是跳脫後的 JSON，`\n`、`\u00e9` 會吃掉 token 的邊界、base64 會完全藏住 token；
    含跳脫字元或 `$bytes` 的行另外解碼（含 key 與 base64 內容）再檢查。
 
+4. **metric point 的 double 編碼一致**（資料格式修正）：histogram / exponential histogram / summary 的 sum、min、max、zero_threshold、
+   explicit_bounds 與 quantile 值，NaN / ±Infinity 一律寫成 `{"$double": ...}`（原本只有 gauge / sum 這樣做）；proto3 非 `optional` 的 double
+   （summary 的 sum 與 quantile、zero_threshold）被 OTLP JSON 省略時是 0，不是 null。schema 補上這些欄位的型別，check_snapshot 會擋下裸字串。
+   soak #3 的 raw 只有 explicit-bucket histogram 且都是有限值，既有輸出不受影響。
+
 policy 檔的 sha 隨 FA-11 重新釘選（狀態仍是 `calibrating`）。
