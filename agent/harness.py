@@ -134,3 +134,45 @@ def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: 
     transcript = {"incident_id": incident_id, "method": dict(method), "stop_reason": stop, "turns": turns,
                   "corrections": corrections, "messages": messages, "exposure": list(session.exposure), "usage": pred["usage"]}
     return pred, transcript
+
+
+def submit_round(model, system: str, messages: list[dict], snapshot, incident_id: str, method: dict,
+                 tokens: dict) -> tuple[dict | None, str]:
+    """One answering step with only submit_diagnosis available (dump-all, retrieval): the model's call is checked;
+    problems or a reply without a submission are sent back, at most MAX_CORRECTIONS times (decision 020 §3)."""
+    tools = [t for t in api_tools() if t["name"] == "submit_diagnosis"]
+    corrections = 0
+    while True:
+        response = model.complete(system, messages, tools)
+        tokens["input"] += response.get("usage", {}).get("input_tokens", 0)
+        tokens["output"] += response.get("usage", {}).get("output_tokens", 0)
+        messages.append({"role": "assistant", "content": response["content"]})
+        uses = [b for b in response["content"] if b.get("type") == "tool_use" and b.get("name") == "submit_diagnosis"]
+        if uses:
+            pred, problems = _prediction(uses[0].get("input") or {}, incident_id, method, snapshot.window["start_ns"],
+                                         snapshot.services)
+            if pred is not None:
+                messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": uses[0]["id"],
+                                                               "content": "accepted"}]})
+                return pred, "submitted"
+            reply = [{"type": "tool_result", "tool_use_id": uses[0]["id"], "is_error": True,
+                      "content": "error: the diagnosis has problems, fix them and submit again: " + "; ".join(problems)}]
+            reason = "invalid_submission"
+        else:
+            reply = [{"type": "text", "text": "Call submit_diagnosis with your answer."}]
+            reason = "no_submission"
+        corrections += 1
+        if corrections > MAX_CORRECTIONS:
+            return None, reason
+        messages.append({"role": "user", "content": reply})
+
+
+def finish(pred: dict | None, incident_id: str, method: dict, tokens: dict, *, proxy: int, tool_calls: int,
+           retrievals: int, t_start: float, price_per_mtok: dict | None) -> dict:
+    pred = pred or _abstain(incident_id, method)
+    cost = None if price_per_mtok is None else (tokens["input"] * price_per_mtok["input"]
+                                               + tokens["output"] * price_per_mtok["output"]) / 1e6
+    pred["usage"] = {"tokens_in": tokens["input"], "tokens_out": tokens["output"], "proxy_tokens": proxy,
+                     "tool_calls": tool_calls, "retrievals": retrievals, "latency_s": round(time.monotonic() - t_start, 3),
+                     "cost_usd": cost}
+    return pred

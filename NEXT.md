@@ -34,7 +34,9 @@
 - **Agent 執行框架 v1（decision 020，`agent/prompt.py`、`agent/harness.py`）**：共用任務說明（只有 decision 014 那一句框架與答案空間）、
   tool-use 迴圈、`submit_diagnosis` 結構化提交（驗證失敗最多更正 2 次，否則算放棄作答）、回合 / 工具預算到了強制提交、usage 與 transcript。
   只有模型介面，**沒有接任何付費 API**。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：565 passed（`-m "not network and not docker_daemon"`）。
+- **Dump-all 與 retrieval baseline（decision 021）**：共同的概覽區塊；dump-all = 概覽 → error 等級 record 依樣板分組 → 每分鐘輪流的時間分層樣本，在 B 內從尾端截；
+  retrieval = 模型提 ≤ q 個查詢 → 每個 BM25（FTS5）取 k 筆 → 依時間排序交回 → 提交。預算建議值（B 120k、q 8、k 25、Agent 40 次工具 / 120k tokens / 30 回合）**待使用者決定**。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：569 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
