@@ -87,7 +87,7 @@ def test_service_minute_stats_and_point_deltas(snap_dir):
               for t, v in ((10, 10), (20, 7), (30, 9))]
     assert point_deltas(updown, monotonic=False) == [{"time_unix_nano": 20, "delta": -3, "reset": False},
                                                      {"time_unix_nano": 30, "delta": 2, "reset": False}]
-    assert DERIVE_VERSION == 2
+    assert DERIVE_VERSION == 3
 
 
 def test_lone_surrogates_are_cleaned_in_every_field_so_readers_never_crash(tmp_path):
@@ -128,3 +128,16 @@ def test_evidence_existence_counts_cited_ids_that_resolve_in_the_snapshot(snap_d
     out = existence(cited, snap)
     assert out == {"cited": 5, "resolved": 3, "rate": 0.6, "unresolved": [series["id"], "l-" + "f" * 16]}
     assert existence([], snap) == {"cited": 0, "resolved": 0, "rate": None, "unresolved": []}
+
+
+def test_container_minute_stats_and_the_statistical_baseline_on_a_real_snapshot(snap_dir):
+    from baselines.statistical import predict
+    from collect.derive import container_minute_stats
+    from eval.score import check_prediction
+
+    layout, norm = snap_dir
+    snap = open_snapshot(norm, layout)
+    stats = container_minute_stats(snap)
+    assert stats["version"] == DERIVE_VERSION and stats["services"]["checkout"][1]["cpu"] == 1  # docker_stats gauge, minute 1
+    pred = predict(snap, "INC-001")
+    assert check_prediction(pred) == [] and pred["usage"]["latency_s"] >= 0

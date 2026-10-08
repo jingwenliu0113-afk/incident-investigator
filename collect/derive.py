@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-DERIVE_VERSION = 2  # 2: non-monotonic cumulative sums may go down (only a new start time resets)
+DERIVE_VERSION = 3  # 2: non-monotonic cumulative sums may go down; 3: container_minute_stats
 WARN_SEVERITY = 13  # OTLP severity_number: WARN and above
 
 
@@ -58,3 +58,27 @@ def point_deltas(points: list[dict], monotonic: bool) -> list[dict]:
             out.append({"time_unix_nano": p["time_unix_nano"], "delta": value if reset else value - prev["value"], "reset": reset})
         prev = p
     return out
+
+
+DOCKER_STATS_SCOPE = "dockerstatsreceiver"
+
+
+def container_minute_stats(snapshot) -> dict:
+    """Per service and per minute since the window start: docker_stats CPU utilization (mean) and memory usage (last)."""
+    wanted = {"container.cpu.utilization": "cpu", "container.memory.usage.total": "memory"}
+    series = {}
+    for s in snapshot.series():
+        if s["metric"] in wanted and DOCKER_STATS_SCOPE in ((s.get("scope") or {}).get("name") or ""):
+            series[s["id"]] = (s["service"], wanted[s["metric"]])
+    origin = snapshot.window["start_ns"]
+    acc: dict = defaultdict(lambda: defaultdict(lambda: {"cpu": [], "memory": []}))
+    for p in snapshot.points():
+        if p["series_id"] in series and isinstance(p.get("value"), (int, float)):
+            svc, feature = series[p["series_id"]]
+            acc[svc][(p["time_unix_nano"] - origin) // 60_000_000_000][feature].append((p["time_unix_nano"], p["value"]))
+    out = {}
+    for svc, minutes in acc.items():
+        out[svc] = {m: {"cpu": sum(v for _, v in d["cpu"]) / len(d["cpu"]) if d["cpu"] else None,
+                        "memory": max(d["memory"])[1] if d["memory"] else None}
+                    for m, d in sorted(minutes.items())}
+    return {"version": DERIVE_VERSION, "services": out}
