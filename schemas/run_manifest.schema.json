@@ -14,7 +14,6 @@
     "machine",
     "startup",
     "traffic",
-    "seed",
     "window",
     "files"
   ],
@@ -194,24 +193,14 @@
           }
         },
         "seed": {
-          "oneOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ]
+          "description": "Always null: the run group's seed fixes the normal and recovery lengths, hence fault_on / fault_off, so it is ground truth (injection.json, run.json, label; decision 002 amendment).",
+          "type": "null"
         },
         "seed_applied": {
           "description": "true only if the generator really consumed the seed; upstream 3.1.0 locust has no seed hook.",
           "type": "boolean"
         }
       }
-    },
-    "seed": {
-      "description": "Master seed of the collection run (orchestrator randomness).",
-      "type": "integer"
     },
     "window": {
       "description": "Telemetry collection window of this incident (UTC). Fault timing is ground truth and is NOT here.",

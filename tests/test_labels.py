@@ -130,7 +130,7 @@ def test_malformed_injection_or_manifest_are_problems_not_exceptions():
 
 
 def test_traffic_profile_must_be_what_the_manifest_recorded():
-    changed = manifest(traffic={"generator_service": "load-generator", "seed": 42, "seed_applied": False,
+    changed = manifest(traffic={"generator_service": "load-generator", "seed": None, "seed_applied": False,
                                 "settings": {**TRAFFIC_PROFILES["locust-upstream-3.1.0"], "LOCUST_USERS": "500"}})
     assert any("traffic_profile" in p for p in check(label(), manifest=changed))
 
@@ -165,7 +165,6 @@ def test_services_must_exist_and_origin_must_be_affected():
 
 def test_label_must_agree_with_the_incident_manifest():
     assert any("incident_id" in p for p in check(label(), manifest=manifest(incident_id="INC-002")))
-    assert any("seed" in p for p in check(label(), manifest=manifest(seed=1)))
     # the fault must overlap the telemetry window of this incident, or there is nothing to diagnose
     early = manifest(window={"start": "2026-10-08T11:30:00Z", "end": "2026-10-08T11:45:00Z"})
     assert any("window" in p for p in check(label(), manifest=early))

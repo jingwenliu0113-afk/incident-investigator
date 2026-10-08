@@ -70,3 +70,10 @@ Run 1 冷啟動時有 connection refused 與大量 504；run 2 只有啟動瞬�
 
 - 同一 fault config 的不同 run group 之間，request mix 與時間點本來就會有差異；這個差異算在誤差範圍內，不算 pipeline bug。
 - 3.0.0（k6）與 3.1.0（Locust）的 traffic 無法比較；本專案只用 3.1.0，絕不混用。
+
+
+## 修訂（2026-10-08，第一個 incident 收集之前）
+
+「決策」中「master seed 同時記在 manifest（`seed`）與 ground truth injection record」改為**只記在 ground truth**
+（`injection.json`、`run.json`、label）：seed 決定 normal 與 recovery 的長度，加上 manifest 的 window 就能算出 fault 時間（decision 002 修訂）。
+manifest 的 `traffic.seed` 一律為 `null`，`traffic.seed_applied` 仍是 `false`。

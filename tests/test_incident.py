@@ -62,7 +62,8 @@ def test_normalize_incident_writes_snapshot_report_and_a_formal_manifest(stored)
     assert stored.normalize_report_path("INC-001").exists()
     manifest = json.loads(stored.manifest_path("INC-001").read_text())
     assert check_manifest(manifest, formal=True, lock_sha256=LOCK) == []
-    assert manifest["window"] == {"start": HOST_START, "end": HOST_END} and manifest["seed"] == 7
+    assert manifest["window"] == {"start": HOST_START, "end": HOST_END}
+    assert "seed" not in manifest and manifest["traffic"]["seed"] is None  # the seed fixes the fault schedule: truth side
     assert sorted(f["path"] for f in manifest["files"]) == sorted(
         f"normalized/{n}" for n in ("snapshot.json", "resources.jsonl", "spans.jsonl", "logs.jsonl",
                                     "metric_series.jsonl", "metric_points.jsonl"))

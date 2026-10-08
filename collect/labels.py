@@ -92,8 +92,6 @@ def check_label(
     if manifest is not None:
         if manifest["incident_id"] != label["incident_id"]:
             problems.append(f"manifest incident_id {manifest['incident_id']} is not {label['incident_id']}")
-        if manifest["seed"] != label["seed"]:
-            problems.append(f"manifest seed {manifest['seed']} is not the label's {label['seed']}")
         if manifest["traffic"]["settings"] != TRAFFIC_PROFILES[label["traffic_profile"]]:
             problems.append(f"traffic_profile {label['traffic_profile']!r} is not the traffic the manifest recorded")
         w, w_problems = _timestamps({"window/start": manifest["window"]["start"], "window/end": manifest["window"]["end"]})

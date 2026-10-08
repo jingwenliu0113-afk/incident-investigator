@@ -55,7 +55,7 @@ def normalize_incident(layout: DataLayout, incident_id: str, *, lock_sha256: str
         window_host=(run["incident_window"]["start"], run["incident_window"]["end"]),
         clock_offsets=list(run["clock_offset_seconds"]))
     incident_dir = layout.incident_dir(incident_id)
-    prov, seed = run["provenance"], run["plan"]["seed"]
+    prov = run["provenance"]
     from env.lock import sha256_path
 
     manifest = {
@@ -66,9 +66,9 @@ def normalize_incident(layout: DataLayout, incident_id: str, *, lock_sha256: str
         "env_lock": prov["env_lock"],
         "machine": prov["machine"],
         "startup": {"compose_command": prov["compose_command"], "started_at": run["up_at"]},
-        "traffic": {"generator_service": TRAFFIC_SERVICE, "settings": prov["traffic_settings"], "seed": seed,
+        # the seed fixes the normal / recovery lengths, hence the fault schedule: it stays on the truth side (decision 002)
+        "traffic": {"generator_service": TRAFFIC_SERVICE, "settings": prov["traffic_settings"], "seed": None,
                     "seed_applied": False},  # decision 003: Locust has no seed hook
-        "seed": seed,
         "window": dict(run["incident_window"]),
         "files": [],
     }

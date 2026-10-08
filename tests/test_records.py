@@ -37,8 +37,7 @@ def manifest(**overrides):
         "startup": {"compose_command": ["docker", "compose", "up"], "started_at": "2026-10-08T11:30:00Z"},
         "traffic": {"generator_service": "load-generator",
                     "settings": {"LOCUST_USERS": "5", "LOCUST_BROWSER_TRAFFIC_ENABLED": "false"},
-                    "seed": 42, "seed_applied": False},
-        "seed": 42,
+                    "seed": None, "seed_applied": False},
         "window": {"start": "2026-10-08T11:40:00Z", "end": "2026-10-08T12:00:00Z"},
         "files": [],
     }
@@ -107,12 +106,15 @@ def test_valid_manifest_passes_formal_check():
 
 def test_manifest_must_not_carry_ground_truth_fields():
     for leaked in ({"fault": {"flag": "paymentFailure"}}, {"run_group_id": "RG-001"},
-                   {"fault_start": "2026-10-08T11:50:00Z"}, {"origin_service": "payment"}):
+                   {"fault_start": "2026-10-08T11:50:00Z"}, {"origin_service": "payment"},
+                   {"seed": 42}):  # decision 002 amendment: the seed fixes normal / recovery lengths -> fault_on / fault_off
         assert check_manifest(manifest(**leaked), formal=False), leaked
+    traffic = {"generator_service": "load-generator", "settings": {"LOCUST_USERS": "5"}, "seed": 42, "seed_applied": False}
+    assert check_manifest(manifest(traffic=traffic), formal=False)
 
 
 def test_manifest_traffic_settings_must_not_mention_fault_flags(catalog):
-    m = manifest(traffic={"generator_service": "load-generator", "seed": 1, "seed_applied": False,
+    m = manifest(traffic={"generator_service": "load-generator", "seed": None, "seed_applied": False,
                           "settings": {"LOCUST_USERS": "5", "NOTE": "paymentFailure on"}})
     assert any("paymentFailure" in p for p in check_manifest(m, formal=False, flag_catalog=catalog))
 

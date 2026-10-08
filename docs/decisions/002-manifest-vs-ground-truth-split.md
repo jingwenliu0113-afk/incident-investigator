@@ -50,3 +50,13 @@
   - 若 normal period 固定長度，時間窗本身就暗示了 fault_on 時間 → 收集時用 seed 隨機化 normal period 長度。
   - 原始 telemetry 裡可能有 flag evaluation 的 span / log（例如 `feature_flag.key`）→ normalize 階段與 leakage audit 必須處理。
   - flagd-ui 的 scheduler 啟動事件只寫 stdout（不進 OTLP），但 flagd 本身的 trace 可能帶 flag key → 同上。
+
+
+## 修訂（2026-10-08，第一個 incident 收集之前；review 確認的問題）
+
+- 「決策」第 1 點把 `seed` 放在 manifest。decision 009（含修訂）之後，seed 是 normal period 與 recovery 長度的**唯一**隨機來源
+  （`collect.rungroup._draws`），而 manifest 的 `window.start` 就是 normal 開始：有 seed 加上 repo 的程式，就能把 fault_on / fault_off 算到秒，
+  等於把 ground truth 放在 manifest。
+- 改為：**seed 只放在 ground-truth 側**（`injection.json`、`run.json`、label）。manifest 不再有頂層 `seed`，`traffic.seed` 一律是 `null`；
+  schema 會擋下兩者。label 的 seed 仍與 `injection.json` 比對（SPEC Core §1「記錄 random seed」仍然成立，只是記在 ground-truth 側）。
+- 仍然存在、而且由協定公開的資訊：window 長度與「fault_on 在 window 開始後 10–15 分鐘」這個範圍（decision 009）。
