@@ -80,7 +80,7 @@ raw = collector **收到、尚未經過任何 processor** 的 OTLP 資料，加�
   - SDK 端 `otel.sdk.*`（8 個開了 self-observability 的 service；任何非空的 `error.type` 都算 loss）。
   - collector stdout（執行中即時串流保存；debug exporter 的輸出有 sampling，只當錯誤與重啟的佐證，不拿來算數量）；`docker events`（重啟 / OOM）。
 - 檢查式（traces / logs）：兩個內部快照之間，Δ `otlp` receiver（accepted + refused）與 Δ `file/raw_*`（sent + send_failed）一致；檔案裡的項目數 ≥ 最後快照的 sent，重複另外回報。
-- 下列任一成立，該 run group 標記為 **raw 不完整**：collector 重啟、stop exit code 137、沒有 graceful stop 判定的其他 exit code（見文末修訂）、memory_limiter 有 refusal、file exporter `Rejecting data`、raw 檔有解析錯誤（最後一行截斷除外，另外回報）。
+- 下列任一成立，該 run group 標記為 **raw 不完整**：collector 重啟、stop exit code 137、沒有 graceful stop 判定的其他 exit code（見文末修訂）、accounting 對不上或無法計算（見文末修訂 2）、memory_limiter 有 refusal、file exporter `Rejecting data`、raw 檔有解析錯誤（最後一行截斷除外，另外回報）。
   標記後的處理（判為無效或在 label 標記）與「穩定判斷條件」一起在收集第一個 incident 前定案。
 - Ambient loss 不算 raw 路徑的 loss：OpenSearch 拒收、Prometheus 500、host_metrics process scraper 錯誤、`ask_agent`（decision 005）。
 
@@ -169,6 +169,34 @@ Error: failed to shutdown service after error: failed to shutdown meter provider
 - **直接放寬成「exit 0 或 1 都算」**：exit 1 也可能來自 file exporter 關檔失敗等真正的問題；新標準要求看到 log 證據，只接受已知、無害的那一種。
 - **用新標準重判 soak #3**：沒有關閉過程的 log；而且看過結果後改標準再重判同一份資料，就是 CLAUDE.md 禁止的事。
 
+## 修訂 2（2026-10-08 約 14:40Z：loss accounting 的具體形式，依 soak #3 的實際計數器定案；任何 fault raw 之前）
+
+第 6 節只定了資料來源與檢查方向，`raw_export.json` 的 `accounting` 寫明「看到實際計數器後才定形式」。soak #3 的 raw 裡實際觀察到：
+
+- collector 自己的計數器（`service.name = otelcol-contrib`；jaeger 也用同名的 `otelcol_*`，要排除）每 60 s 一次，同一次 export 的點相差幾微秒。
+  名稱：`otelcol_receiver_{accepted,refused,failed}_{spans,metric_points,log_records}{receiver,transport}`、
+  `otelcol_exporter_{sent,send_failed}_*{exporter}`（`send_failed` 只有非 0 時才出現）、`otelcol_processor_{incoming,outgoing}_items{otel.signal,processor}`。
+- 38 次 export **每一次**，三種 signal 的「raw pipeline 的 receiver accepted 總和」都**完全等於** `file/raw_*` 的 sent；memory_limiter 的 incoming 等於 outgoing。
+- SDK 端：唯一的 `error.type` 是 kafka 啟動時（比 collector 早 10 s 起來，DNS 找不到 collector）一次失敗的 160 筆 log，之後不再增加。
+
+定案（`collect/accounting.py`）：
+
+1. **視窗**：run group 的 incident 視窗（normal 開始到 recovery 結束）。base = 視窗開始時或之前最後一次 export；final = 視窗結束時或之後第一次 export
+   （drain 3 分鐘保證有）。沒有 final、或兩次 export 的 process 起點不同（collector 重啟、計數歸零）→ `accounting_unavailable`。
+2. **每個 signal 的 Δ**（final − base）：raw pipeline 的 receiver（與 `env/otelcol-config-raw.yml` 一致，有測試）accepted / refused / failed；
+   `file/raw_<signal>` 的 sent / send_failed；memory_limiter 的 dropped =（incoming − outgoing）與具名 refused 計數取大者。
+3. **旗標**（加進第 6 節「raw 不完整」，run group 因此無效）：
+   - `memory_limiter_refused`：任何 signal 的 dropped > 0；
+   - `exporter_rejected`：`file/raw_*` 的 send_failed > 0；
+   - `accounting_mismatch:<signal>`：不滿足 `accepted ≤ sent ≤ accepted + refused + failed`（refused 的 batch 可能已經寫進 raw，SDK 重送造成重複，
+     由 normalize 去重），或檔案裡的項目（含重複）少於 final 那次的累計 sent。soak #3 的觀察是完全相等，所以不設容忍值。
+   - `accounting_unavailable`：見 1。
+4. **SDK 端的 loss 只記錄、不標旗**：每個服務、每個 `otel.sdk.*` 計數器與 `error.type` 在視窗內的增量（同樣用前後兩次 export 夾住），記在 `accounting.sdk_errors`。
+   這些資料在到達 collector 之前就遺失了，raw 忠實記錄了 collector 收到的東西；它是 incident 的一部分（例如 fault 讓服務送不出 telemetry），
+   要在報告裡揭露，但不是 raw 路徑的缺失。
+5. collector 最後一次 self-telemetry（關閉時推送失敗，見修訂）不影響計算：final 是視窗結束後的第一次正常 export。
+6. soak 報告也附上視窗的 accounting，但不加入判定（R1–R9 已固定）。
+
 ## 結果
 
 ### soak #3（新 lock，判定 FAILED：R7；見上方修訂）
@@ -186,4 +214,6 @@ up 12:04:19Z；視窗 12:10:02Z – 12:40:09Z（31 分鐘）；drain 3 分鐘；
 - collector 記憶體：memcg 的 p95 是 399.7 MiB（幾乎貼著上限），視窗內碰到 `memory.max` 2,196 次（soak #2 沒有 raw 時是 203 次）；
   增加的部分是寫 raw 檔產生的 page cache（可回收）。沒有 OOM、沒有重啟；collector log 裡 `memory_limiter` 拒收次數為 0。不在判定範圍內，只記錄。
 - 已知 ambient（decision 005）：`ask_agent` 失敗 136 次；OpenSearch 失敗請求 1,078、丟掉 20,158 筆、mapping 拒收 7,562。
-- normalize policy v1 的校準（decision 011 §4）在這份 raw 上跑完整個 soak 視窗：151.5 s、最大 RSS 約 0.91 GB。
+- loss accounting（修訂 2）在 soak 視窗 12:10:02–12:40:09 上：traces accepted = sent = 207,973、metrics 234,419、logs 65,363；
+  refused / failed / send_failed / memory_limiter dropped 都是 0；沒有任何旗標；視窗內沒有 SDK 錯誤（kafka 啟動時的 160 筆在視窗之前）。
+- normalize policy v1 的校準（decision 011 §4）在這份 raw 上跑完整個 soak 視窗：整個 `calibrate` 指令 151.5 s（其中 normalize 90.7 s）、最大 RSS 約 0.91 GB。

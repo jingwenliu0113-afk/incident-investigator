@@ -214,15 +214,225 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(collector_restarted|collector_sigkilled|collector_unclean_stop|copy_failed|memory_limiter_refused|exporter_rejected|missing_file:(traces|metrics|logs)|parse_errors:(traces|metrics|logs))(?!\\n)$"
+        "pattern": "^(collector_restarted|collector_sigkilled|collector_unclean_stop|copy_failed|memory_limiter_refused|exporter_rejected|accounting_unavailable|accounting_mismatch:(traces|metrics|logs)|missing_file:(traces|metrics|logs)|parse_errors:(traces|metrics|logs))(?!\\n)$"
       }
     },
     "complete": {
       "type": "boolean"
     },
     "accounting": {
-      "description": "Loss accounting (decision 008 §6); its exact shape is fixed once real collector counters are observed.",
-      "type": "object"
+      "description": "Loss accounting (decision 008 §6, shape fixed on soak #3 counters): deltas over the incident window between the collector exports that bracket it; SDK errors are reported, not flagged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "accounting_version",
+        "window_ns",
+        "snapshots",
+        "signals",
+        "sdk_errors",
+        "flags"
+      ],
+      "properties": {
+        "accounting_version": {
+          "const": 1
+        },
+        "window_ns": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "snapshots": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "base",
+            "final"
+          ],
+          "properties": {
+            "base": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "final": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        },
+        "signals": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "traces": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accepted",
+                "refused",
+                "failed",
+                "sent",
+                "send_failed",
+                "memory_limiter_dropped",
+                "file_items",
+                "final_sent"
+              ],
+              "properties": {
+                "accepted": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refused": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sent": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "send_failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "memory_limiter_dropped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "final_sent": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "metrics": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accepted",
+                "refused",
+                "failed",
+                "sent",
+                "send_failed",
+                "memory_limiter_dropped",
+                "file_items",
+                "final_sent"
+              ],
+              "properties": {
+                "accepted": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refused": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sent": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "send_failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "memory_limiter_dropped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "final_sent": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "logs": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "accepted",
+                "refused",
+                "failed",
+                "sent",
+                "send_failed",
+                "memory_limiter_dropped",
+                "file_items",
+                "final_sent"
+              ],
+              "properties": {
+                "accepted": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "refused": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "sent": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "send_failed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "memory_limiter_dropped": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "final_sent": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        },
+        "sdk_errors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
     }
   },
   "$defs": {

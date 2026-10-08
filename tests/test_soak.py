@@ -606,6 +606,9 @@ def test_soak_drains_stops_the_collector_and_copies_raw_before_down(tmp_path, ra
     assert report["raw"]["collector"]["stop_exit_code"] == 1 and report["raw"]["collector"]["graceful_stop"] is True
     assert (tmp_path / "out" / "otel-collector-shutdown.log").read_text() == SHUTDOWN_LOG
     assert report["raw"]["container_minutes"] == {}  # decision 012: docker_stats coverage of the copied metrics
+    # decision 008 §6: reported for the soak window, not judged (R1–R9 are fixed)
+    assert report["raw_accounting"]["flags"] == ["accounting_unavailable"]  # the fake raw has no collector counters
+    assert set(report["criteria"]) == {f"R{i}" for i in range(1, 10)}
     # decision 009 §2: collection checks that *this* lock passed a soak
     from env.lock import LOCK_PATH, PROJECT_DIR, sha256_path
     assert report["env_lock_sha256"] == sha256_path(PROJECT_DIR / LOCK_PATH)

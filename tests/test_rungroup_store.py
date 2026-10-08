@@ -37,6 +37,8 @@ def finished(tmp_path, status="valid"):
                               "cp_seconds": 1.0, "copied": True},
                 "files": {sig: scan_raw_file(work / "raw" / f"{sig}.jsonl", sig) for sig in ("traces", "metrics", "logs")}},
     }
+    rec["raw_accounting"] = {"accounting_version": 1, "window_ns": [1, 2], "snapshots": {"base": 1, "final": 3},
+                             "signals": {}, "sdk_errors": {"kafka": {"otel.sdk.exporter.log.exported X": 4}}, "flags": []}
     if status == "valid":
         rec["incident_window"] = {"start": "2026-10-08T12:05:00Z", "end": "2026-10-08T12:32:00Z"}
     return rec, work
@@ -58,7 +60,9 @@ def test_valid_run_gets_an_incident_and_records_on_the_right_sides(tmp_path, cat
     assert out["incident_ids"] == ["INC-001"]
     raw = layout.raw_dir("RG-001")
     assert sorted(p.name for p in raw.iterdir()) == ["logs.jsonl", "metrics.jsonl", "raw_export.json", "traces.jsonl"]
-    assert json.loads((raw / "raw_export.json").read_text())["complete"] is True
+    export = json.loads((raw / "raw_export.json").read_text())
+    assert export["complete"] is True
+    assert export["accounting"]["sdk_errors"] == {"kafka": {"otel.sdk.exporter.log.exported X": 4}}  # decision 008 §6
     truth = layout.run_group_truth_dir("RG-001")
     injection = json.loads((truth / "injection.json").read_text())
     assert check_injection(injection, catalog) == []

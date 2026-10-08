@@ -52,6 +52,7 @@ class Stack:
         self.restart_at, self.fivexx_until, self.confirm = restart_at, fivexx_until, confirm
         self.calls, self.events, self.n5xx, self.flag_writes = [], [], 0, []
         self.unseen = set()  # containers docker_stats never reported (decision 012)
+        self.dropped = 0  # spans the memory_limiter dropped (decision 008 §6)
 
     def minute(self):
         return self.clock.t / 60
@@ -107,7 +108,14 @@ class Stack:
                           for sig in ("traces", "metrics", "logs")},
                 "container_minutes": {c: [(T0 + timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M")
                                           for m in range(int(self.minute()) + 1)]
-                                      for c in SUT if c not in self.unseen}}
+                                      for c in SUT if c not in self.unseen},
+                # the collector's own counters: one export at up, one after the drain (decision 008 §6)
+                "collector_snapshots": [
+                    {"t": int(T0.timestamp()) * 10**9, "start": 1, "values": {}},
+                    {"t": int(self.clock.time()) * 10**9, "start": 1, "values": {
+                        "otelcol_processor_incoming_items{otel.signal=traces,processor=memory_limiter}": 10 + self.dropped,
+                        "otelcol_processor_outgoing_items{otel.signal=traces,processor=memory_limiter}": 10}}],
+                "sdk_errors": []}
 
 
 @pytest.fixture
@@ -173,6 +181,16 @@ def test_valid_run_follows_the_protocol_and_restores_the_flag_file(tmp_path, fla
     # decision 012: every container is announced to docker_stats once the stack is up, before the warm-up
     assert stack.calls.index("verify_running") < stack.calls.index("rescan") < stack.calls.index(("ofrep", "paymentFailure"))
     assert rec["container_rescan"] == {"updated": 28, "failed": []} and rec["container_metric_gaps"] == {}
+    assert rec["raw_accounting"]["flags"] == [] and rec["raw_accounting"]["snapshots"]["final"] is not None
+
+
+def test_loss_on_the_raw_path_during_the_window_invalidates_the_run(tmp_path, flag_path):
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    stack.dropped = 3
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and rec["reasons"] == ["raw_incomplete"]
+    assert rec["raw_accounting"]["flags"] == ["memory_limiter_refused"]
 
 
 def test_a_container_without_docker_stats_in_the_window_invalidates_the_run(tmp_path, flag_path):

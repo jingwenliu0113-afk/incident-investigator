@@ -29,6 +29,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
+from collect.accounting import account
 from env import compose, soak
 from env.compose import ComposeError, compose_command, pinned_override_yaml, render_config, service_images
 from env.imageref import parse_image_ref
@@ -375,6 +376,10 @@ def cmd_soak(
                                     events=events, raw=report.get("raw")))
         report.update(docker_events=events, opensearch=soak.opensearch_rejections(collector_log),
                       sampling_errors=[s for s in samples if s["kind"] == "error"])
+        if raw := report.get("raw"):  # decision 008 §6: reported for the window, not judged
+            report["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or [],
+                                               raw["files"], start_ns=soak.ts_ns(window_start),
+                                               end_ns=soak.ts_ns(window_end))
         if report.get("aborted") or report["sampling_errors"]:
             report["pass"] = False
     finally:

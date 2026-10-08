@@ -12,9 +12,11 @@ import random
 import re
 import shutil
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
+from collect.accounting import account
 from collect.faults import check_context, inject, write_atomic
 from collect.layout import DataLayout
 from collect.rawexport import SIGNALS, build_raw_export, check_raw_export, raw_flags
@@ -77,6 +79,10 @@ class Stack(Protocol):
     def ofrep(self, flag: str, context: dict) -> tuple[str, object]: ...
     def vm_time(self) -> float: ...
     def finalize_raw(self, out_dir: Path) -> dict: ...  # env.soak.finalize_raw
+
+
+def _ns(ts: str) -> int:
+    return int(datetime.fromisoformat(ts).timestamp()) * 10**9
 
 
 def _sha(doc_bytes: bytes, scratch: Path) -> str:
@@ -231,7 +237,10 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             record["reasons"].append("normal_period_not_clean")
         if events is None:
             record["reasons"].append("event_stream_missing")
-    if raw is None or raw_flags(raw["collector"], raw["files"]):
+    if raw is not None and {"normal_start", "end"} <= times.keys():
+        record["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or [],
+                                           raw["files"], start_ns=_ns(times["normal_start"]), end_ns=_ns(times["end"]))
+    if raw is None or raw_flags(raw["collector"], raw["files"]) or record.get("raw_accounting", {}).get("flags"):
         record["reasons"].append("raw_incomplete")
     if raw is not None and {"normal_start", "end"} <= times.keys():
         record["container_metric_gaps"] = container_metric_gaps(
@@ -282,7 +291,7 @@ def store_run_group(record: dict, work_dir: Path, layout: DataLayout, *, lock_sh
             shutil.move(src, raw_dir / src.name)
     raw = record.get("raw")
     if raw is not None:
-        export = build_raw_export(rg, lock_sha256, raw["collector"], raw["files"])
+        export = build_raw_export(rg, lock_sha256, raw["collector"], raw["files"], accounting=record.get("raw_accounting"))
         if problems := check_raw_export(export):
             raise ValueError(f"raw export record of {rg} is inconsistent: {problems}")
         (raw_dir / "raw_export.json").write_text(json.dumps(export, indent=2) + "\n")

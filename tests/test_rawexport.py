@@ -57,6 +57,21 @@ def test_exit_1_with_a_graceful_shutdown_verdict_is_complete(scans):
     assert check_raw_export(rec) == []
 
 
+def test_accounting_flags_join_the_record_and_are_schema_checked(scans):
+    accounting = {"accounting_version": 1, "window_ns": [1, 2], "snapshots": {"base": None, "final": 3},
+                  "signals": {"traces": {"accepted": 5, "refused": 0, "failed": 0, "sent": 4, "send_failed": 0,
+                                         "memory_limiter_dropped": 0, "file_items": 4, "final_sent": 4}},
+                  "sdk_errors": {}, "flags": ["accounting_mismatch:traces"]}
+    rec = build_raw_export("RG-001", LOCK, collector(), scans, accounting=accounting)
+    assert rec["complete"] is False and rec["flags"] == ["accounting_mismatch:traces"]
+    assert check_raw_export(rec) == []
+    for flag in ("accounting_unavailable", "memory_limiter_refused", "exporter_rejected"):
+        assert check_raw_export(build_raw_export("RG-001", LOCK, collector(), scans,
+                                                 accounting=dict(accounting, flags=[flag]))) == []
+    bad = build_raw_export("RG-001", LOCK, collector(), scans, accounting=dict(accounting, signals={"traces": {"sent": -1}}))
+    assert check_raw_export(bad) != []
+
+
 def test_missing_or_broken_files_make_the_export_incomplete(tmp_path, scans):
     scans = dict(scans, logs=None)
     rec = build_raw_export("RG-001", LOCK, collector(), scans)

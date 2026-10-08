@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from collect.accounting import collector_snapshots, sdk_error_series
 from collect.rawfile import container_minutes, scan_raw_file
 from env.lock import pinned_images
 from env.runtime import PROJECT_LABEL, SERVICE_LABEL
@@ -427,8 +428,11 @@ def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str,
     files = {sig: scan_raw_file(dest / f"{sig}.jsonl", sig) if (dest / f"{sig}.jsonl").is_file() else None
              for sig in RAW_SIGNALS}
     metrics = dest / "metrics.jsonl"
+    have = metrics.is_file()
     return {"collector": collector, "files": files,
-            "container_minutes": container_minutes(metrics) if metrics.is_file() else {}}  # decision 012
+            "container_minutes": container_minutes(metrics) if have else {},  # decision 012
+            "collector_snapshots": collector_snapshots(metrics) if have else [],  # decision 008 §6
+            "sdk_errors": sdk_error_series(metrics) if have else []}
 
 
 def rescan_container_metrics(lock: dict, env: dict[str, str], run: Run = _run) -> dict:
@@ -494,3 +498,7 @@ def write_report(out_dir: Path, report: dict) -> None:
         if report.get("raw_error"):
             lines.append(f"- raw error: {report['raw_error']}")
     (out_dir / "report.md").write_text("\n".join(lines) + "\n")
+
+
+def ts_ns(ts: str) -> int:
+    return int(_ts(ts).timestamp()) * 10**9
