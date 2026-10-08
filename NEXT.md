@@ -2,11 +2,11 @@
 
 ## 目前位置
 
-**Core §1「鎖定 OpenTelemetry Demo 版本」：鎖定與 smoke test 完成；baseline 穩定化進行中（soak #2 待跑）。**
-soak #1（product-catalog 64 MiB）FAILED：R1 / R2 因 checkout 在 baseline 被 OOM-kill，R6 因 product-catalog 貼近上限。
-依規則：product-catalog 一次性升到 128 MiB（decision 004），checkout 比照 004 調到 64 MiB（decision 007）。下一步是 soak #2。
-Day 1 清單：1（鎖版本）✅、2（label schema）✅、3（manifest schema）✅；4（canonical telemetry schema）、5（收集 1 個 incident）、6（刪掉 live system 後重播）還沒開始。
-沒有進入 Advanced / Optional。
+**Core §1 完成（baseline soak #2 通過，記憶體設定凍結）；Core §2 / M2 進行中：raw export 與 run group 工具已完成，等 soak #3。**
+- soak #2 PASSED（decision 004 / 007）：product-catalog 128 MiB、checkout 64 MiB 凍結。
+- decision 008（raw export）改變了 lock → 依 008 §8 要再跑一次含 R7–R9 的 soak #3，通過後才能收集第一個 incident（decision 009 §2 會檢查）。
+- Day 1 清單：1 ✅、2 ✅（label schema）、3 ✅；4（canonical telemetry schema）設計中；5（收集 1 個 incident）工具已就緒、待 soak #3；6 未開始。
+- 沒有進入 Advanced / Optional。
 
 ## 上次完成
 
@@ -26,8 +26,19 @@ Day 1 清單：1（鎖版本）✅、2（label schema）✅、3（manifest schem
 - 依規則：product-catalog → 128 MiB（004，唯一一次升級）；checkout → 64 MiB（decision 007，比照 004 的規則，可一次升到 128）。lock 已重新 resolve。
 - **Day 1 #2 label schema**：decision 006、`schemas/incident_label.schema.json`、`collect/labels.py`（commit `5aba810`）。
 - 兩個 review workflow（label schema + R2 修正）：18 個確認的問題都已修正。
-- M2 raw export 的唯讀研究 workflow 已啟動（結果寫進下一個 decision log）。
-- 測試：272 passed（`-m "not network"`）。
+- M2 raw export 研究（4 主題 + 逐條反向覆核 + 彙整）→ **decision 008**（raw pipeline 在任何 processor 之前、寫進 collector container、收尾時 `cp` 出來；
+  raw 以 run group 為單位放在 `data/external/raw/<RG>/`，Agent 只能讀 `incidents/<INC>/normalized/**`，SPEC §2 目錄差異已記錄）。
+  已實作（TDD）：`env/otelcol-config-raw.yml`、`collect/rawfile.py`（串流掃描 OTLP JSONL）、`DataLayout.raw_dir` / `is_agent_readable`、
+  soak 的 R7–R9 與 drain → stop → cp 收尾。研究筆記與 decision 001 的三處文件差異已更正。
+- GitHub：private repo `jingwenliu0113-afk/incident-investigator` 設為 `origin`，`main` 已 push 並追蹤 `origin/main`
+  （push 前稽核全部 history：沒有 telemetry / 資料 / Docker artifact / secret；`.gitignore` 補上 secret 與金鑰檔）。之後每個測試通過的 commit 都 push。
+- soak #2 PASSED → 記憶體設定凍結。raw export 的 overlay 與 lock 已更新；鎖定的 collector 0.159.0 `validate` 通過合併後的 config。
+- **decision 009（run group 收集協定）**：暖機 → 穩定閘門 G1–G3（最近 5 分鐘）→ normal（10 + U(0,5) 分鐘，seed 決定）→ fault → recovery → drain → raw → down；
+  normal period 有異常、raw 不完整、flag 生效未確認、sampling 錯誤都判為無效（保留紀錄、不給 incident id）。
+  已實作（TDD）：`collect/faults.py`（原子寫入 flag 檔、targeting rule、OFREP 確認）、`collect/validity.py`、`collect/rungroup.py`（orchestrator 與落地）、
+  `collect/live.py`（真實 Docker）、`python -m collect run`。
+- Core §4 canonical schema 的設計 workflow（3 個方向 + 3 個評審 + 彙整）已啟動。
+- 測試：352 passed（`-m "not network"`；`docker_daemon` 會跑一個幾秒的 `--rm` collector validate container）。
 
 ### 2026-10-08 session 2（smoke test + baseline commit）
 
@@ -52,25 +63,20 @@ Day 1 清單：1（鎖版本）✅、2（label schema）✅、3（manifest schem
 
 ## 下一步（Core，依序）
 
-1. **soak #2**（Mac heavy lock）：`./tools/with-mac-lock uv run python -m env soak --minutes 30 --warmup-minutes 5`。
-   判定用修訂後的 R2 與多服務 R6（decision 004「修訂」）。
-   - 通過 → 在 004 / 007 寫結果，設定凍結，進 M2。
-   - product-catalog 在 128 MiB 仍失敗 → **不再調整，回報使用者**（004 只允許一次升級）。
-   - checkout 在 64 MiB 因 R1 / R2 / R6 失敗 → 先更新 007，一次性調到 128 MiB，重跑 soak。
-   - 其他服務（currency、shipping、valkey-cart…）出現 OOM / restart → 依 007 決策 6 處理。R3 / R4 / R5 失敗 → 先調查，不調記憶體。
-2. **Core §2 frozen snapshot（M2）**：先寫 raw export 的 decision log（研究 workflow 的結果；file exporter / 新 pipeline、處理前還是處理後的資料等，見研究筆記 §4）。
-   已知的設計輸入：OpenSearch 會因 mapping 衝突丟 log，**不能當 source of truth**。
-3. **Core §4 canonical telemetry schema**（Day 1 #4）：依 raw export 的格式設計，純 Mac 開發。
-4. **Day 1 #5 收集 1 個 incident 前必須先定案**（每項都要 decision log；可能改到鎖定環境 → 重新 `resolve`）：
-   - **穩定判斷條件**：只排除暖機期不夠。開始 normal period 前要求 `verify-running` 乾淨，且最近 N 分鐘錯誤率回到 baseline（只剩 `ask_agent`）；
-     收集期間若有**新增**重啟或 probe 失敗，該 run 標為無效或在 label 中標記。`verify-running` 需要小幅擴充：比較的是新增的重啟數，而不是累積值。
-   - `ask_agent`：known ambient failure（decision 005）；M2 之後再判斷是否污染 RCA 評測。
-   - 研究筆記 §6 列出的 ground-truth 洩漏面（OpenFeature `feature_flag.*`、直接寫出 flag 名稱的 log 等）要在 normalize 前處理。
-5. Pilot fault 清單（M3/M5）：見研究筆記 §2 與 decision 006 的 flag 對照；每個 flag 的 a priori origin / affected / symptom 在那時決定。
+1. **soak #3**（新 lock，含 raw export；Mac heavy lock）：`./tools/with-mac-lock uv run python -m env soak --minutes 30 --warmup-minutes 5`。
+   判定 R1–R9（decision 004 修訂 + 008 §8）。通過後把實測數字（bytes/item、items/min、檔案大小、stop / cp 時間、時鐘差、內部計數器名稱）填進 decision 008「結果」，
+   並用實際的 raw metrics 完成 loss accounting（`otelcol_*`、`otel.sdk.*`；008 §6）。不通過 → 先調查，不改凍結的記憶體設定。
+2. **Day 1 #5 收集第一個 incident**：`./tools/with-mac-lock uv run python -m collect run --flag <flag> --variant <v> --fault-minutes 10`。
+   第一個 incident 用來驗證 pipeline，選答案最不模糊的 fault；選哪個與它的 a priori label 要寫 decision log（屬於 Pilot，永遠不進 final test）。
+3. **Core §4 canonical telemetry schema + normalize**（Day 1 #4）：依設計 workflow 的結果寫 decision log，再 TDD 實作；
+   產出 `incidents/<INC>/normalized/` 與 manifest（decision 002），並依 Core §6 事先固定的規則去掉 flagd / harness 的 telemetry（009 §5）。
+4. **Day 1 #6**：刪掉 live system 後，只靠 frozen snapshot 重做分析。
+5. Pilot fault 清單（M3/M5）：每個 flag 的 a priori origin / affected / symptom 與 fault 持續時間（decision 006 / 009）。
 
 ## Blocked
 
-- 目前沒有 blocker。
+- **soak #3 等 Mac heavy lock**：2026-10-08 11:14:59Z 起由 `llm-serving-lab` 持有（pid 97925，`batch_4b.sh`）。
+  依 MACHINE_POLICY 不搶占；lock 釋放後再跑 soak #3，期間做不需要 heavy lock 的 Core 工作（canonical schema、normalize）。
 - 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
   執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
   （理由：跑 decision 004 的 soak test；當時 daemon 是停止狀態，沒有其他 workload 在跑），接著先 `compose down --volumes` 清掉本 Project 被 restart policy 拉起的 container。
