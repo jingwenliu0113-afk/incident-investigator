@@ -99,3 +99,13 @@ def test_the_command_prints_the_power_mode_and_maps_why_it_stopped_to_an_exit_co
         monkeypatch.setattr(pl, "pilot_loop", lambda layout, **kw: {"stopped": stopped, "runs": [], "logs": []})
         assert cli.main(["pilot-loop", "--labeler", "agent:test"]) == code
     assert '"powermode": "2"' in capsys.readouterr().out  # decision 025: printed before the first run
+
+
+def test_each_step_runs_in_the_project_directory_and_its_output_goes_to_its_log(tmp_path):
+    from collect.pilot_loop import PROJECT_DIR, _subprocess
+
+    log = tmp_path / "step.log"
+    log.write_text("$ pwd\n")
+    assert _subprocess(["pwd"], log) == 0
+    assert log.read_text().splitlines() == ["$ pwd", str(PROJECT_DIR)]
+    assert _subprocess(["sh", "-c", "echo oops >&2; exit 4"], log) == 4 and "oops" in log.read_text()
