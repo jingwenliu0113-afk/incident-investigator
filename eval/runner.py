@@ -55,6 +55,7 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> l
 
 def score_method(layout: DataLayout, method: str, split: str, out_root: Path) -> dict:
     out_dir = Path(out_root) / split / method
+    out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
     for inc, rg in incidents_in(layout, split):
         pred = json.loads((out_dir / f"{inc}.json").read_text())

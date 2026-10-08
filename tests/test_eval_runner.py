@@ -60,3 +60,9 @@ def test_a_method_reads_only_the_snapshot_and_its_predictions_are_checked_and_sc
     monkeypatch.setitem(METHODS, "broken", bad)
     with pytest.raises(ValueError, match="prediction"):
         run_method(layout, "broken", "pilot", tmp_path / "r2")
+
+
+def test_an_empty_set_scores_to_an_empty_table(tmp_path):
+    result = score_method(DataLayout(tmp_path / "data"), "stat-anomaly", "pilot", tmp_path / "results")
+    assert result["aggregate"]["n_incidents"] == 0
+    assert "n = 0" in (tmp_path / "results" / "pilot" / "stat-anomaly" / "table.md").read_text()
