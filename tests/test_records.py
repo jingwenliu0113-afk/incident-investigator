@@ -105,6 +105,17 @@ def test_valid_manifest_passes_formal_check():
     assert check_manifest(manifest(), formal=True, lock_sha256=LOCK_SHA) == []
 
 
+def test_a_manifest_may_record_the_power_mode_and_older_ones_without_it_stay_valid():
+    # decision 025: machine.power is optional (manifests written before it remain valid)
+    m = manifest()
+    m["machine"] = {**m["machine"], "power": {"source": "AC Power", "settings": {"powermode": "2"}}}
+    assert check_manifest(m, formal=True, lock_sha256=LOCK_SHA) == []
+    m["machine"]["power"] = None
+    assert check_manifest(m, formal=True, lock_sha256=LOCK_SHA) == []
+    m["machine"]["power"] = {"source": "AC Power", "settings": {"powermode": 2}}
+    assert check_manifest(m, formal=True, lock_sha256=LOCK_SHA)  # raw pmset values are strings
+
+
 def test_manifest_must_not_carry_ground_truth_fields():
     for leaked in ({"fault": {"flag": "paymentFailure"}}, {"run_group_id": "RG-001"},
                    {"fault_start": "2026-10-08T11:50:00Z"}, {"origin_service": "payment"},

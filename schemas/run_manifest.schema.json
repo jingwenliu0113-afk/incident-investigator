@@ -149,6 +149,43 @@
               }
             }
           ]
+        },
+        "power": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "source",
+                "settings"
+              ],
+              "description": "macOS power source and pmset power-mode settings in use when the run started (decision 025)",
+              "properties": {
+                "source": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "settings": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "propertyNames": {
+                    "enum": [
+                      "powermode",
+                      "lowpowermode",
+                      "highpowermode"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
         }
       }
     },

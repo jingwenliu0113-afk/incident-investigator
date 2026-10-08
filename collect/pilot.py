@@ -98,7 +98,8 @@ MAX_INVALID_ATTEMPTS = 3  # run groups of one fault that ended without an incide
 
 
 def plan_status(layout, split: str) -> list[dict]:
-    """Per planned fault, in plan order: its run groups (id, status), its usable incident and its excluded incidents.
+    """Per planned fault, in plan order: its run groups (id, status), its usable incident, its excluded incidents and the
+    power settings each valid run group was collected under (decision 025).
 
     A run group recorded before `--set` existed (no split in its plan) was a Pilot run (decision 010)."""
     runs = []
@@ -106,12 +107,14 @@ def plan_status(layout, split: str) -> list[dict]:
         r = json.loads(path.read_text())
         plan = r.get("plan") or {}
         if plan.get("split", "pilot") == split:
-            runs.append((r["run_group_id"], r.get("status"), plan.get("flag"), plan.get("variant"), r.get("incident_ids") or []))
+            power = ((r.get("provenance") or {}).get("machine") or {}).get("power")  # decision 025; None: not recorded
+            runs.append((r["run_group_id"], r.get("status"), plan.get("flag"), plan.get("variant"), r.get("incident_ids") or [],
+                         power))
     out = []
     for e in PLANS[split]:
         mine = [r for r in runs if (r[2], r[3]) == (e["flag"], e["variant"])]
         usable, excluded = None, []
-        for _, status, _, _, incs in mine:
+        for _, status, _, _, incs, _ in mine:
             for inc in incs if status == "valid" else []:
                 review = layout.label_path(inc).with_name("label_review.json")
                 if review.exists() and json.loads(review.read_text()).get("fault_exercised") is False:
@@ -119,7 +122,7 @@ def plan_status(layout, split: str) -> list[dict]:
                 elif usable is None:
                     usable = inc
         out.append({"flag": e["flag"], "variant": e["variant"], "run_groups": [(r[0], r[1]) for r in mine],
-                    "incident": usable, "excluded": excluded})
+                    "incident": usable, "excluded": excluded, "power": {r[0]: r[5] for r in mine if r[1] == "valid"}})
     return out
 
 

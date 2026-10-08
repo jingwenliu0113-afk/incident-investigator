@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from collect.provenance import docker_facts, host_facts, machine_info, project_git_state
+from collect.provenance import docker_facts, host_facts, machine_info, power_facts, project_git_state
 
 
 class FakeRun:
@@ -85,6 +85,41 @@ def test_machine_info_records_role_not_hostname():
     assert info["role"] == "mac"
     assert info["docker"]["platform"] == "linux/arm64"
     assert "hostname" not in json.dumps(info)
+
+
+PMSET = ("System-wide power settings:\nCurrently in use:\n standby              1\n"
+         " sleep                0 (sleep prevented by coreaudiod)\n powermode            0\n womp                 1\n")
+BATT = "Now drawing from 'AC Power'\n -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true\n"
+
+
+def test_power_facts_record_the_power_source_and_the_power_mode_in_use():
+    # decision 025: automatic / low / high power mode changes timing, so every run records what was in use
+    run = FakeRun({("pmset", "-g"): PMSET, ("pmset", "-g", "batt"): BATT})
+    assert power_facts(run) == {"source": "AC Power", "settings": {"powermode": "0"}}
+    low = FakeRun({("pmset", "-g"): " lowpowermode         1\n", ("pmset", "-g", "batt"): "Now drawing from 'Battery Power'\n"})
+    assert power_facts(low) == {"source": "Battery Power", "settings": {"lowpowermode": "1"}}
+    assert power_facts(FakeRun({})) is None  # no pmset: nothing to record, never a guess
+
+
+def test_machine_info_records_power_on_a_mac_only():
+    mac = FakeRun({
+        ("uname", "-srm"): "Darwin 27.0.0 arm64\n",
+        ("sysctl", "-n", "machdep.cpu.brand_string"): "Apple M4 Pro\n",
+        ("sysctl", "-n", "hw.ncpu"): "12\n",
+        ("sysctl", "-n", "hw.memsize"): "51539607552\n",
+        ("docker", "info", "--format", "{{json .}}"): DOCKER_INFO,
+        ("pmset", "-g"): PMSET, ("pmset", "-g", "batt"): BATT,
+    })
+    assert machine_info("mac", mac)["power"] == {"source": "AC Power", "settings": {"powermode": "0"}}
+    linux = FakeRun({
+        ("uname", "-srm"): "Linux 6.8.0-45-generic x86_64\n",
+        ("nproc", "--all"): "24\n",
+        ("cat", "/proc/cpuinfo"): "model name\t: AMD Ryzen 9 7900X\n",
+        ("cat", "/proc/meminfo"): "MemTotal:       65536000 kB\n",
+        ("docker", "info", "--format", "{{json .}}"): DOCKER_INFO,
+    })
+    info = machine_info("gpu-server", linux)
+    assert info["power"] is None and ("pmset", "-g") not in linux.calls
 
 
 def test_machine_info_rejects_unknown_role():

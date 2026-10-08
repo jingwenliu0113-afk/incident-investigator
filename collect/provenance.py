@@ -7,6 +7,7 @@ hardware facts, never the hostname, so manifests can be shared as samples.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -58,10 +59,30 @@ def docker_facts(run: Run = _run) -> dict | None:
     }
 
 
+POWER_KEYS = ("powermode", "lowpowermode", "highpowermode")
+
+
+def power_facts(run: Run = _run) -> dict | None:
+    """macOS power source and the power-mode settings in use (`pmset`, read only; decision 025), or None without pmset."""
+    try:
+        settings, battery = run(["pmset", "-g"]), run(["pmset", "-g", "batt"])
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    found = {}
+    for line in settings.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] in POWER_KEYS:
+            found[parts[0]] = parts[1]
+    source = re.search(r"Now drawing from '([^']+)'", battery)
+    return {"source": source.group(1) if source else None, "settings": found}
+
+
 def machine_info(role: str, run: Run = _run) -> dict:
     if role not in MACHINE_ROLES:
         raise ValueError(f"machine role must be one of {MACHINE_ROLES}, got {role!r}")
-    return {"role": role, **host_facts(run), "docker": docker_facts(run)}
+    host = host_facts(run)
+    power = power_facts(run) if host["os"].startswith("Darwin") else None
+    return {"role": role, **host, "docker": docker_facts(run), "power": power}
 
 
 def project_git_state(project_dir: Path, run: Run = _run) -> dict:

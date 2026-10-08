@@ -2,7 +2,7 @@
 
 ## 目前位置（2026-10-08 18:45Z，台北 10-09 02:45）
 
-**Core 的工具鏈都已完成並測試（604 passed），還沒有任何正式資料結果。**
+**Core 的工具鏈都已完成並測試（608 passed），還沒有任何正式資料結果。**
 - **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
 - **LLM 方法**：dump-all、retrieval、agent 的程式已就緒，等使用者批准模型、預算與成本。
 - **已完成的 Core 範圍**：
@@ -23,6 +23,7 @@
   | 失敗分類 | 022 |
   | held-out 協定（Proposed） | 023 |
   | 預算、用量與可見資料的報告 | 024 |
+  | 收集時的電力模式紀錄 | 025 |
   | paired 比較 | 023 §7 |
   | 端到端測試 | — |
   | README | — |
@@ -49,6 +50,8 @@
 - **decision 024（SPEC §7 報告）**：每次 `eval run` 把預算、model、可見資料範圍寫進 `run_config.json`；評分表新增「Budgets, usage and visible data」
   （usage 各欄的 n / mean / median / max、總成本、停止原因、實際看過的 record 與概覽比例）。只報告、不計分。
   另加測試：dump-all / retrieval 送給模型的所有文字都通過詞彙檢查、不描述收集協定（decision 015 §6）。測試 604 passed。
+- **decision 025**：run record 與 manifest 記錄收集開始時的電源與 `pmset` 電力設定（唯讀，不改任何設定）；`collect status` 列出每個有效 run 的模式。
+  要用哪一種模式收集是使用者的決定（A5）。測試 608 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成
@@ -184,7 +187,11 @@
    held-out 的 LLM 設定與費用；gold 標註量（全標最多 20N 筆，或修訂 017 改抽樣，建議抽樣）；Gate 三個條件的操作定義；
    Pilot 驗證失敗的 fault 是移除（預設）還是補收；需要新 policy / env lock 時的處理（預設排除受影響的 incident）；方法 bug 修正後重跑的費用。
 4. **`/usr/bin/git` 失效（Xcode 更新後 xcrun 架構錯誤，見 C）**：請開一次 Xcode 完成安裝，或用 `sudo xcode-select -s /Library/Developer/CommandLineTools`（需 sudo，我不會執行）。在修好之前，正式收集也要在 `PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH` 下執行，否則 preflight 與 normalize 的 git 檢查會失敗。
-5. **告訴我 Mac 已回到正常電力模式**：之後（heavy lock 空出時）從 `collect next --set pilot`（paymentFailure 100%）開始正式 Pilot 收集，10 個 fault 約 8 小時 lock 時間（每個約 45 分鐘，無效的要重收）。
+5. **正式收集用哪一種電力模式**（decision 025）：run 從現在起會記錄 `pmset` 的 `powermode`（目前是 0 = 自動）。請告訴我正式收集要固定用哪一種
+   （例如高效能），我再加上 preflight 檢查；在那之前一個 set 的所有正式 run 應在同一種模式下收集（`collect status` 會列出每個 run 的模式）。
+6. **`data/samples/` 的縮小範例要不要進 git**：SPEC §2 建議放一份可進 git 的縮小範例（README 的 dataset schema / demo 用），
+   但 GitHub 規則禁止推 incident snapshot。預設不放；若要放，請指定範圍（例如 Pilot 一個 incident 的約 100 筆 record）。
+7. **告訴我 Mac 已回到正常電力模式**：之後（heavy lock 空出時）從 `collect next --set pilot`（paymentFailure 100%）開始正式 Pilot 收集，10 個 fault 約 8 小時 lock 時間（每個約 45 分鐘，無效的要重收）。
 
 ### B. LLM 方法的估算（第 A1 項用）
 

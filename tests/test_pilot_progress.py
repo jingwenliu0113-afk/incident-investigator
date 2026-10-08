@@ -8,14 +8,16 @@ from collect.layout import DataLayout
 from collect.pilot import MAX_INVALID_ATTEMPTS, PLANS, next_planned, plan_status
 
 
-def run_group(layout, rg, flag, variant, status, inc=None, split="pilot", exercised=None):
+def run_group(layout, rg, flag, variant, status, inc=None, split="pilot", exercised=None, power=None):
     truth = layout.run_group_truth_dir(rg)
     truth.mkdir(parents=True)
     plan = {"run_group_id": rg, "seed": 1, "flag": flag, "variant": variant, "fault_minutes": 10}
     if split is not None:
         plan["split"] = split
-    (truth / "run.json").write_text(json.dumps({"run_group_id": rg, "plan": plan, "status": status,
-                                                "incident_ids": [inc] if inc else []}))
+    record = {"run_group_id": rg, "plan": plan, "status": status, "incident_ids": [inc] if inc else []}
+    if power is not None:
+        record["provenance"] = {"machine": {"role": "mac", "power": power}}
+    (truth / "run.json").write_text(json.dumps(record))
     if exercised is not None:
         d = layout.label_path(inc).parent
         d.mkdir(parents=True, exist_ok=True)
@@ -32,6 +34,18 @@ def test_status_follows_the_plan_order_and_next_is_the_first_without_a_usable_in
     assert [s["flag"] for s in status] == [e["flag"] for e in PLANS["pilot"]]
     assert status[0]["incident"] == "INC-001" and status[0]["run_groups"] == [("RG-001", "aborted_unstable"), ("RG-002", "valid")]
     assert next_planned(layout, "pilot")["flag"] == "productCatalogFailure"
+
+
+def test_status_shows_the_power_mode_each_valid_run_group_was_collected_in(tmp_path):
+    # decision 025: reported so a set collected under mixed power modes is visible (older records: not recorded)
+    layout = DataLayout(tmp_path)
+    run_group(layout, "RG-001", "paymentFailure", "100%", "aborted_unstable", power={"source": "AC Power", "settings": {}})
+    run_group(layout, "RG-002", "paymentFailure", "100%", "valid", inc="INC-001",
+              power={"source": "AC Power", "settings": {"powermode": "2"}})
+    run_group(layout, "RG-003", "productCatalogFailure", "on", "valid", inc="INC-002")
+    status = plan_status(layout, "pilot")
+    assert status[0]["power"] == {"RG-002": {"source": "AC Power", "settings": {"powermode": "2"}}}
+    assert status[1]["power"] == {"RG-003": None}
 
 
 def test_an_unexercised_fault_is_collected_once_more_and_repeated_failures_stop_for_a_person(tmp_path):
