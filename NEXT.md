@@ -150,6 +150,10 @@
 - 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
 
 ### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
+- **2026-10-09 17:05Z：`/usr/bin/git` 暫時失效**（xcrun 載入 `/Applications/Xcode.app/.../libxcrun.dylib` 時出現 arm64 / arm64e 架構錯誤；Xcode.app 在 17:05–17:06Z 剛被修改，看起來正在更新）。
+  影響：專案的 provenance（collect preflight、normalize 的乾淨 checkout 檢查）會失敗。暫時做法：在本 session 的 shell 用
+  `PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH`（CommandLineTools 的 git 正常；沒有改任何系統設定），測試 601 passed。
+  若 Xcode 更新結束後仍失敗，需要使用者處理（例如開一次 Xcode 完成安裝，或用 `xcode-select` 切換，需 sudo）。
 - **2026-10-09 晚上（使用者指示）：Mac 使用自動電力模式 → 正式 incident collection 延後**（會產生 performance-sensitive 的正式結果）。
   一般 heavy 工作、correctness、資料處理、開發測試照常。電力模式恢復正常（使用者告知）且 heavy lock 空出後，從 `collect next --set pilot`（目前是 paymentFailure 100%）繼續。
 - **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
