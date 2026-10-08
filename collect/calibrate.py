@@ -190,3 +190,37 @@ def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> di
                                           seconds=seconds, max_rss_bytes=rss)
     (out_dir / "calibration.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     return result
+
+
+def freeze(policy_path: Path, calibrations: list[Path]) -> dict:
+    """Freeze a calibrating policy (decision 011): every calibration must be of this exact file and meet F1–F6.
+
+    Writes status "frozen", the attribute-key inventory (union of the calibrations' attribute_keys) and where it came
+    from. POLICY_SHA256 in collect/policy.py must then be re-pinned to the returned sha256 (tests/test_policy.py checks).
+    """
+    from env.lock import sha256_path
+
+    current = sha256_path(policy_path)
+    if not calibrations:
+        raise ValueError("freezing needs at least one calibration")
+    loaded = []
+    for path in calibrations:
+        cal = json.loads(Path(path).read_text())
+        if cal["policy"]["sha256"] != current:
+            raise ValueError(f"{path} was calibrated with {cal['policy']['sha256']}, not the current file {current}")
+        if not cal["freeze_check"]["pass"]:
+            failing = {k: v["detail"] for k, v in cal["freeze_check"].items() if k != "pass" and not v["pass"]}
+            raise ValueError(f"{path} does not meet the freeze criteria: {failing}")
+        loaded.append((path, cal))
+    raw = json.loads(policy_path.read_text())
+    if raw.get("status") != "calibrating":
+        raise ValueError(f"policy status is {raw.get('status')!r}: only a calibrating policy can be frozen (decision 011 §4)")
+    inventory: dict[str, set[str]] = {}
+    for _, cal in loaded:
+        for key, names in cal["report"]["attribute_keys"].items():
+            inventory.setdefault(key, set()).update(names)
+    sources = [{"soak": cal["soak"], "calibration_sha256": sha256_path(path)} for path, cal in loaded]
+    raw.update(status="frozen", attribute_key_inventory={k: sorted(v) for k, v in sorted(inventory.items())},
+               frozen_from=sources)
+    policy_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n")
+    return {"sha256": sha256_path(policy_path), "sources": sources}

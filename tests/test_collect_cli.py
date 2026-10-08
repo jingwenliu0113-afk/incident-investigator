@@ -49,3 +49,9 @@ def test_errors_exit_2_with_a_message_not_a_traceback(tmp_path, monkeypatch, cap
     assert main(["replay", "--incident", "INC-404"]) == 2
     err = capsys.readouterr().err
     assert err.count("error:") == 3 and "Traceback" not in err
+
+
+def test_freeze_cli_refuses_without_passing_calibrations(tmp_path, capsys):
+    (tmp_path / "c.json").write_text('{"policy": {"sha256": "sha256:0"}, "freeze_check": {"pass": false}}')
+    assert main(["freeze", "--calibration", str(tmp_path / "c.json")]) == 2
+    assert "calibrated with" in capsys.readouterr().err

@@ -88,3 +88,34 @@ def test_the_soak_window_starts_at_the_earliest_item_whatever_its_timestamp_widt
     out = calibrate(soak(tmp_path, lines=lines), tmp_path / "c")
     sig = out["report"]["signals"]
     assert sig["traces"]["kept"] == 1 and all(sig[s].get("out_of_window", 0) == 0 for s in sig), _json.dumps(sig)
+
+
+def test_freeze_needs_passing_calibrations_of_this_exact_policy_and_records_them(tmp_path):
+    import hashlib
+    import shutil
+
+    from collect.calibrate import freeze
+    from collect.policy import POLICY_PATH, load_policy
+
+    policy_path = tmp_path / "policy.json"
+    shutil.copy(POLICY_PATH, policy_path)
+    clean = {sig: [ln for ln in ls if not any(t in ln for t in ("garbage collection", "kafkaQueueProblems", "Feature Flag",
+                                                                "paymentFailure"))]
+             for sig, ls in raw_lines().items()}
+    clean["logs"].append(logs_line(res("shipping"), [log(T0 + 120 * S, "quote sent")]))
+    a = calibrate(soak(tmp_path, "a", lines=clean), tmp_path / "ca", policy=load_policy(policy_path))
+    b = calibrate(soak(tmp_path, "b", lines=clean), tmp_path / "cb", policy=load_policy(policy_path))
+    bad = calibrate(soak(tmp_path, "bad"), tmp_path / "cbad", policy=load_policy(policy_path))  # fails F3 / F4
+    with pytest.raises(ValueError, match="freeze criteria"):
+        freeze(policy_path, [tmp_path / "ca" / "calibration.json", tmp_path / "cbad" / "calibration.json"])
+    assert json.loads(policy_path.read_text())["status"] == "calibrating"
+    frozen = freeze(policy_path, [tmp_path / "ca" / "calibration.json", tmp_path / "cb" / "calibration.json"])
+    raw = json.loads(policy_path.read_text())
+    assert raw["status"] == "frozen" and frozen["sha256"] == "sha256:" + hashlib.sha256(policy_path.read_bytes()).hexdigest()
+    assert raw["attribute_key_inventory"] == {k: sorted(set(a["report"]["attribute_keys"][k]) | set(b["report"]["attribute_keys"][k]))
+                                              for k in a["report"]["attribute_keys"]}
+    assert [s["soak"] for s in raw["frozen_from"]] == [str(tmp_path / "a"), str(tmp_path / "b")]
+    assert all(s["calibration_sha256"].startswith("sha256:") for s in raw["frozen_from"])
+    with pytest.raises(ValueError, match="calibrated with"):  # the file changed: old calibrations no longer apply
+        freeze(policy_path, [tmp_path / "ca" / "calibration.json"])
+    assert bad["freeze_check"]["pass"] is False

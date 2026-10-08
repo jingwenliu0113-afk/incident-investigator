@@ -47,6 +47,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     norm.add_argument("--incident", required=True)
     cal = sub.add_parser("calibrate", help="dry normalize + inventory on a soak's raw (no fault), before freezing")
     cal.add_argument("--soak", type=Path, required=True)
+    frz = sub.add_parser("freeze", help="freeze the calibrating policy from passing calibrations of this exact file")
+    frz.add_argument("--calibration", type=Path, action="append", required=True, help="a calibration.json (repeat)")
     rep = sub.add_parser("replay", help="Day 1 #6: analyse an incident from its snapshot alone (live system deleted)")
     rep.add_argument("--incident", required=True)
     lab = sub.add_parser("label", help="write an incident's a priori (catalog) label; fault facts come from injection.json")
@@ -78,6 +80,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(out, indent=2))
         return 0 if out["every_id_resolves"] and not out["checks"] else 1
 
+    if ns.command == "freeze":
+        from collect.calibrate import freeze
+        from collect.policy import POLICY_PATH
+
+        try:
+            out = freeze(POLICY_PATH, ns.calibration)
+        except (ValueError, OSError, KeyError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps({**out, "next": "re-pin POLICY_SHA256 in collect/policy.py to this sha256, run the tests, "
+                                         "record the freeze in decision 011, commit"}, indent=2))
+        return 0
     if ns.command == "label":
         from datetime import UTC, datetime
 
