@@ -212,7 +212,8 @@ def _lines(path: Path):
 
 
 def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, report_path: Path,
-              staging_dir: Path) -> dict:
+              staging_dir: Path, code: dict | None = None) -> dict:
+    """`code`: git state of the normalizer's checkout, recorded in the report (EXPERIMENT_RULES: record the commit)."""
     ws, we = _check_inputs(inputs, policy, incident_dir)
     key = hashlib.blake2b(dumps(sorted(inputs.raw_sha256.values())).encode(), digest_size=32).digest()
     run = _Run(policy, key)
@@ -452,6 +453,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
     report = {
         "report_version": 1,
         "policy": {"version": policy.raw["version"], "sha256": policy.sha256},
+        "code": code,
         "raw_sha256": inputs.raw_sha256,
         "window": {"host": list(inputs.window_host), "clock_offsets": inputs.clock_offsets, "data_ns": [ws, we]},
         "signals": {sig: dict(v) for sig, v in stats.items()},

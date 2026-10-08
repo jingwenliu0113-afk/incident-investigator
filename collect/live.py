@@ -55,6 +55,16 @@ class RealClock:
         return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def project_tree_problems(state: dict) -> list[str]:
+    """A formal manifest needs a committed, clean project tree (records.check_manifest): refuse before the run."""
+    problems = []
+    if state.get("commit") is None:
+        problems.append("project has no git commit; a formal run needs one")
+    if state.get("dirty"):
+        problems.append("project checkout is dirty; commit first (a formal manifest needs a clean tree)")
+    return problems
+
+
 class LiveStack:
     def __init__(self, project_dir: Path, upstream_dir: Path, data_root: Path):
         self.project_dir, self.upstream_dir, self.data_root = project_dir, upstream_dir, data_root
@@ -71,6 +81,12 @@ class LiveStack:
         except soak.LockNotHeld as e:
             problems.append(str(e))
         problems += [f"verify: {p}" for p in verify_against_disk(self.lock, self.upstream_dir, self.project_dir)]
+        from collect.provenance import project_git_state
+
+        try:
+            problems += project_tree_problems(project_git_state(self.project_dir))
+        except (OSError, subprocess.CalledProcessError) as e:
+            problems.append(f"project git state unreadable: {str(e)[:200]}")
         if not soak.raw_export_expected(self.lock):
             problems.append("the locked stack has no raw pipeline (decision 008)")
         if passing_soak(self.data_root, self.lock_sha256) is None:

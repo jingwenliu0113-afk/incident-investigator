@@ -173,7 +173,9 @@ def test_normalize_is_ground_truth_blind(setup, monkeypatch):
     import builtins
     import inspect
 
-    assert list(inspect.signature(normalize).parameters) == ["inputs", "policy", "incident_dir", "report_path", "staging_dir"]
+    # `code` is the normalizer's own git state (commit / dirty): nothing from the run group or its label
+    assert list(inspect.signature(normalize).parameters) == ["inputs", "policy", "incident_dir", "report_path", "staging_dir",
+                                                             "code"]
     layout, inputs = setup
     opened = []
     real_open = builtins.open

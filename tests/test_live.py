@@ -2,7 +2,7 @@
 
 import json
 
-from collect.live import foreign_running, passing_soak
+from collect.live import foreign_running, passing_soak, project_tree_problems
 
 LOCK = "sha256:" + "1" * 64
 
@@ -30,3 +30,10 @@ def test_foreign_running_lists_containers_of_other_projects():
     ps = "rtu-maintenance-platform-db-1\trtu-maintenance-platform\ncheckout\tii-otel-demo\nloose\t\n"
     assert foreign_running(lambda cmd, env: ps, {}, project="ii-otel-demo") == ["loose", "rtu-maintenance-platform-db-1"]
     assert foreign_running(lambda cmd, env: "", {}, project="ii-otel-demo") == []
+
+
+def test_a_formal_run_needs_a_committed_clean_project_tree():
+    # the formal manifest refuses a dirty tree: catch it before a 35-50 minute run, not at normalize time
+    assert project_tree_problems({"commit": "a" * 40, "dirty": False}) == []
+    assert project_tree_problems({"commit": "a" * 40, "dirty": True}) != []
+    assert project_tree_problems({"commit": None, "dirty": False}) != []

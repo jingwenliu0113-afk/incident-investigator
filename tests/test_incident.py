@@ -13,6 +13,7 @@ from collect.records import check_manifest
 from normalize_fixtures import HOST_END, HOST_START, write_raw
 
 LOCK = "sha256:" + "1" * 64
+CODE = {"commit": "d" * 40, "dirty": False}  # the normalizer's own checkout
 
 
 def frozen():
@@ -55,7 +56,7 @@ def test_find_run_by_incident_id(stored):
 
 
 def test_normalize_incident_writes_snapshot_report_and_a_formal_manifest(stored):
-    out = normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen())
+    out = normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen(), code=CODE)
     inc = stored.incident_dir("INC-001")
     assert (inc / "normalized" / "snapshot.json").exists()
     assert stored.normalize_report_path("INC-001").exists()
@@ -67,6 +68,7 @@ def test_normalize_incident_writes_snapshot_report_and_a_formal_manifest(stored)
                                     "metric_series.jsonl", "metric_points.jsonl"))
     assert "RG-001" not in stored.manifest_path("INC-001").read_text()  # the run group stays on the truth side
     assert out["content_sha256"].startswith("sha256:")
+    assert out["code"] == CODE  # the normalizer version behind the snapshot (EXPERIMENT_RULES: record the commit)
 
 
 def test_invalid_or_incomplete_runs_are_never_normalized(stored):
@@ -74,17 +76,46 @@ def test_invalid_or_incomplete_runs_are_never_normalized(stored):
     run = json.loads(truth.read_text())
     truth.write_text(json.dumps({**run, "status": "invalid"}))
     with pytest.raises(LookupError):
-        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen())
+        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen(), code=CODE)
     truth.write_text(json.dumps(run))
     export = json.loads(stored.raw_export_path("RG-001").read_text())
     stored.raw_export_path("RG-001").write_text(json.dumps({**export, "complete": False, "flags": ["copy_failed"]}))
     with pytest.raises(ValueError, match="complete"):
-        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen())
+        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen(), code=CODE)
 
 
 def test_fault_raw_is_never_normalized_with_a_policy_that_is_not_frozen(stored):
     # decision 011 §4: the rules are calibrated on soak raw only, then frozen, before any fault raw is opened
     calibrating = Policy({**load_policy().raw, "status": "calibrating"}, load_policy().sha256)
     with pytest.raises(PermissionError, match="frozen"):
-        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=calibrating)
+        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=calibrating, code=CODE)
     assert not stored.incident_dir("INC-001").exists()
+
+
+def test_a_policy_that_differs_from_the_pinned_file_is_refused(stored):
+    # decision 011 §3 G0: the policy sha must match the pin, not only say "frozen"
+    edited = Policy({**load_policy().raw, "status": "frozen", "lexicon_extra": []}, "sha256:" + "e" * 64)
+    with pytest.raises(PermissionError, match="pinned"):
+        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=edited, code=CODE)
+    assert not stored.incident_dir("INC-001").exists()
+
+
+@pytest.mark.parametrize("code", [{"commit": "d" * 40, "dirty": True}, {"commit": None, "dirty": False}])
+def test_the_normalizer_must_run_from_a_clean_commit(stored, code):
+    with pytest.raises(PermissionError, match="clean"):
+        normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen(), code=code)
+    assert not stored.incident_dir("INC-001").exists()
+
+
+@pytest.mark.parametrize("change", ["dirty", "lock"])
+def test_formal_manifest_problems_stop_before_the_write_once_snapshot_and_allow_a_retry(stored, change):
+    truth = stored.run_group_truth_dir("RG-001") / "run.json"
+    run = json.loads(truth.read_text())
+    if change == "dirty":
+        truth.write_text(json.dumps({**run, "provenance": {**PROVENANCE, "project": {"commit": "c" * 40, "dirty": True}}}))
+    lock = LOCK if change == "dirty" else "sha256:" + "9" * 64
+    with pytest.raises(ValueError, match="formal"):
+        normalize_incident(stored, "INC-001", lock_sha256=lock, now="2026-10-08T13:00:00Z", policy=frozen(), code=CODE)
+    assert not stored.incident_dir("INC-001").exists() and not stored.normalize_report_path("INC-001").exists()
+    truth.write_text(json.dumps(run))
+    normalize_incident(stored, "INC-001", lock_sha256=LOCK, now="2026-10-08T13:00:00Z", policy=frozen(), code=CODE)
