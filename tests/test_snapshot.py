@@ -60,7 +60,10 @@ def test_render_v1_is_compact_relative_and_bounded(snap_dir):
     snap = open_snapshot(norm, layout)
     span = next(snap.spans())
     line = render_v1(span, snap.window["start_ns"])
-    assert line.startswith(span["id"] + " ") and "+01:00.000" in line  # 120 s after T0 = 60 s into the window
+    assert line.startswith(span["id"] + " ") and "+001:00.000" in line  # 120 s after T0 = 60 s into the window (+MMM:SS.mmm)
+    with_event = {**span, "events": [{"time_unix_nano": snap.window["start_ns"] + 60_007_000_000, "name": "message"}]}
+    rendered = render_v1(with_event, snap.window["start_ns"])
+    assert '"time":"+001:00.007"' in rendered and "unix_nano" not in rendered  # decision 011 §5: every time is relative
     assert "null" not in line and len(line.encode()) <= 1024
     huge = {**span, "attributes": {"k": "x" * 5000}}
     assert len(render_v1(huge, snap.window["start_ns"]).encode()) <= 1024
@@ -76,5 +79,37 @@ def test_service_minute_stats_and_point_deltas(snap_dir):
     assert sum(m["spans"] for m in checkout.values()) == 1 and sum(m["error_spans"] for m in checkout.values()) == 1
     deltas = point_deltas([{"start_time_unix_nano": 1, "time_unix_nano": 10, "value": 5, "first_in_window": True},
                            {"start_time_unix_nano": 1, "time_unix_nano": 20, "value": 8, "first_in_window": False},
-                           {"start_time_unix_nano": 15, "time_unix_nano": 30, "value": 2, "first_in_window": False}])
+                           {"start_time_unix_nano": 15, "time_unix_nano": 30, "value": 2, "first_in_window": False}],
+                          monotonic=True)
     assert deltas == [{"time_unix_nano": 20, "delta": 3, "reset": False}, {"time_unix_nano": 30, "delta": 2, "reset": True}]
+    # an UpDownCounter (cumulative, not monotonic) may go down: only a new start time is a reset
+    updown = [{"start_time_unix_nano": 1, "time_unix_nano": t, "value": v, "first_in_window": t == 10}
+              for t, v in ((10, 10), (20, 7), (30, 9))]
+    assert point_deltas(updown, monotonic=False) == [{"time_unix_nano": 20, "delta": -3, "reset": False},
+                                                     {"time_unix_nano": 30, "delta": 2, "reset": False}]
+    assert DERIVE_VERSION == 2
+
+
+def test_lone_surrogates_are_cleaned_in_every_field_so_readers_never_crash(tmp_path):
+    import json
+
+    from normalize_fixtures import raw_lines
+    layout = DataLayout(tmp_path / "data")
+    raw_dir = layout.raw_dir("RG-001")
+    raw_dir.mkdir(parents=True)
+    scans = {}
+    for sig, lines in raw_lines().items():
+        if sig == "traces":
+            lines = [ln.replace('"Charge"', '"GET \\ud800/x"') for ln in lines]
+        (raw_dir / f"{sig}.jsonl").write_text("\n".join(lines) + "\n")
+        scans[sig] = scan_raw_file(raw_dir / f"{sig}.jsonl", sig)
+    inputs = NormalizeInputs(raw_dir=raw_dir, raw_sha256={k: v["sha256"] for k, v in scans.items()},
+                             raw_duplicates={k: v["duplicates"] for k, v in scans.items()},
+                             window_host=(HOST_START, HOST_END), clock_offsets=[0.0, 0.0])
+    report = normalize(inputs, load_policy(), incident_dir=layout.incident_dir("INC-001"),
+                       report_path=layout.normalize_report_path("INC-001"), staging_dir=layout.root / "staging" / "n")
+    snap = open_snapshot(layout.incident_dir("INC-001") / "normalized", layout)
+    names = [sp["name"] for sp in snap.spans()]
+    assert "GET \ufffd/x" in names and report["value_fixes"]["lone_surrogates"] >= 1
+    for sp in snap.spans():
+        assert proxy_tokens(render_v1(sp, snap.window["start_ns"])) > 0

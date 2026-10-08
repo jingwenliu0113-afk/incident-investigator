@@ -153,6 +153,11 @@
 7. **校準可以重跑、只讀 soak**：`collect calibrate` 每次寫進新的 `data/external/calibration/<soak>/<UTC 時間>/`（之前的結果保留為證據）；
    輸入必須是有 soak `report.json` 的目錄（不接受 run group 的 raw）；錯誤以 exit 2 回報。
 
+8. **讀取端的小修正**：所有 record 的每個字串都清掉 lone surrogate（原本只有 attribute 與 body，render / proxy_tokens 會崩潰），
+   check_snapshot 擋下無法編成 UTF-8 的文字；`render_v1` 的時間依 §5 寫成 `+MMM:SS.mmm`，span event 的時間也改為相對時間；
+   `derive.point_deltas` 需要傳入 series 的 `monotonic`，非 monotonic 的累計 sum（UpDownCounter）下降不再當成 reset（`DERIVE_VERSION` 2）；
+   calibrate 的視窗用解析後的時間取最早 / 最晚（字串比較在寬度不同時會選錯），兩端各留 1 s。
+
 policy 檔的 sha 隨 FA-11 重新釘選（狀態仍是 `calibrating`）。
 
 ### 凍結條件（2026-10-08 約 14:15Z 寫定，在用最終程式重跑校準之前）

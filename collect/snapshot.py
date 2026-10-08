@@ -119,7 +119,15 @@ def _rel(ns: int | None, origin: int) -> str | None:
     ms = (ns - origin) // 1_000_000
     sign = "-" if ms < 0 else "+"
     ms = abs(ms)
-    return f"{sign}{ms // 60000:02d}:{ms // 1000 % 60:02d}.{ms % 1000:03d}"
+    return f"{sign}{ms // 60000:03d}:{ms // 1000 % 60:02d}.{ms % 1000:03d}"  # +MMM:SS.mmm (decision 011 §5)
+
+
+def _relativize(rec: dict, origin: int) -> dict:
+    out = dict(rec)
+    for key in list(out):
+        if key.endswith("time_unix_nano"):
+            out[key.removesuffix("_unix_nano")] = _rel(out.pop(key), origin)
+    return out
 
 
 def _prune(value):
@@ -132,10 +140,9 @@ def _prune(value):
 
 def render_v1(record: dict, window_start_ns: int) -> str:
     """One line per record: id first, times relative to the window start, no nulls, at most 1024 bytes."""
-    rec = {k: v for k, v in record.items() if k != "id"}
-    for key in list(rec):
-        if key.endswith("time_unix_nano"):
-            rec[key.removesuffix("_unix_nano")] = _rel(rec.pop(key), window_start_ns)
+    rec = _relativize({k: v for k, v in record.items() if k != "id"}, window_start_ns)
+    if isinstance(rec.get("events"), list):  # only events: attribute keys that end in time_unix_nano stay as they are
+        rec["events"] = [_relativize(e, window_start_ns) if isinstance(e, dict) else e for e in rec["events"]]
     line = f"{record.get('id', '')} " + json.dumps(_prune(rec), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     data = line.encode()
     if len(data) <= MAX_LINE_BYTES:

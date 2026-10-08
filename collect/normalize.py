@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from collect.otlp import any_value, attributes, enum, log_key, nanos, point_key, series_key, span_key
+from collect.otlp import _text, any_value, attributes, enum, log_key, nanos, point_key, series_key, span_key
 from collect.policy import Policy
 
 CANONICAL_SCHEMA = "ctel/1"
@@ -304,7 +304,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
         item = json.loads(raw)
         run.ctx = (svc, start)
         rid = run.resource_id(item["resource"])
-        record = dumps(_span_record(run, item["span"], tid, sid, parent, start, rid, item["scope"], svc))
+        record = dumps(_clean(_span_record(run, item["span"], tid, sid, parent, start, rid, item["scope"], svc), run.fixes))
         db.execute("UPDATE spans SET rid = ?, record = ? WHERE trace_id = ? AND span_id = ?", (rid, record, tid, sid))
 
     # ---------------------------------------------------------------- logs
@@ -350,7 +350,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                               "attributes": run.attrs(r.get("attributes")), "trace_id": tid, "span_id": sid,
                               "flags": int(r.get("flags") or 0), "dropped_attributes_count": int(r.get("droppedAttributesCount", 0)),
                               "resource_id": rid, "scope": run.scope(scope), "service": svc}
-                    db.execute("INSERT INTO logs VALUES (?,?,?,?)", (record["id"], t, rid, dumps(record)))
+                    db.execute("INSERT INTO logs VALUES (?,?,?,?)", (record["id"], t, rid, dumps(_clean(record, run.fixes))))
 
     # ---------------------------------------------------------------- metrics
     run.signal, memo = "metrics", {}
@@ -402,11 +402,11 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                                           "temporality": enum("temporality", body.get("aggregationTemporality")) if kind in ("sum", "histogram", "exponential_histogram") else None,
                                           "monotonic": bool(body.get("isMonotonic")) if kind == "sum" else None,
                                           "attributes": run.attrs(p.get("attributes"))}
-                                db.execute("INSERT INTO series VALUES (?,?,?,?,?)", (series_id, svc, name, rid, dumps(series)))
+                                db.execute("INSERT INTO series VALUES (?,?,?,?,?)", (series_id, svc, name, rid, dumps(_clean(series, run.fixes))))
                             point = {"id": "p-" + run.rid("point", k), "series_id": series_id, "service": svc, "metric": name,
                                      "kind": kind, "start_time_unix_nano": nanos(p.get("startTimeUnixNano")),
                                      "time_unix_nano": t, "flags": int(p.get("flags") or 0), **_point_values(kind, p)}
-                            db.execute("INSERT INTO points VALUES (?,?,?,?)", (point["id"], series_id, t, dumps(point)))
+                            db.execute("INSERT INTO points VALUES (?,?,?,?)", (point["id"], series_id, t, dumps(_clean(point, run.fixes))))
 
     for sig in ("traces", "metrics", "logs"):
         if stats[sig]["duplicates"] != inputs.raw_duplicates[sig]:
@@ -489,6 +489,17 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report
+
+
+def _clean(obj, counts):
+    """Lone surrogates out of every string of a record (attributes are cleaned on the way in, so not counted twice)."""
+    if isinstance(obj, str):
+        return _text(obj, counts)
+    if isinstance(obj, list):
+        return [_clean(v, counts) for v in obj]
+    if isinstance(obj, dict):
+        return {_text(k, counts): _clean(v, counts) for k, v in obj.items()}
+    return obj
 
 
 def _new_keys(seen: dict[str, set[str]], inventory: dict[str, list[str]] | None) -> dict[str, list[str]] | None:
@@ -577,6 +588,14 @@ def _validators() -> dict:
     return {name: Draft202012Validator({**schema, "$ref": f"#/$defs/{kind}"}) for name, kind in _KINDS.items()}
 
 
+def _encodes(text: str) -> bool:
+    try:
+        text.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
 def _visible(value):
     """Every string a reader of the record sees once the JSON is decoded: keys, values, and text inside bytes values."""
     if isinstance(value, str):
@@ -632,8 +651,12 @@ def check_snapshot(snapshot_dir: Path, policy: Policy) -> list[str]:
                 continue
             # the file-wide grep above reads escaped JSON: an escape (\\n, \\u00e9) before a token hides its boundary, and
             # base64 hides it completely, so those lines are also checked decoded
-            if (b"\\" in line or b"$bytes" in line) and any(policy.lexicon_hit(v) for v in _visible(rec)):
-                problems.append(f"{name}: line {n}: lexicon token present")
+            if b"\\" in line or b"$bytes" in line:
+                strings = list(_visible(rec))
+                if any(policy.lexicon_hit(v) for v in strings):
+                    problems.append(f"{name}: line {n}: lexicon token present")
+                if not all(v.isascii() or _encodes(v) for v in strings):
+                    problems.append(f"{name}: line {n}: text that is not valid UTF-8 (lone surrogate)")
             for err in validators[name].iter_errors(rec):
                 problems.append(f"{name}: line {n}: schema: {'/'.join(map(str, err.absolute_path)) or '<root>'}: {err.message[:120]}")
                 break

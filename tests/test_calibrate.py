@@ -74,3 +74,17 @@ def test_freeze_check_budget_and_service_coverage():
                       kept_services={"cart"}, seconds=700, max_rss_bytes=5 * 2**30)
     assert fc["F5"]["pass"] is False and "email" in fc["F5"]["detail"]
     assert fc["F6"]["pass"] is False
+
+
+def test_the_soak_window_starts_at_the_earliest_item_whatever_its_timestamp_width(tmp_path):
+    # "...:40Z" (no fraction) sorts after "...:40.250000Z" as a string: compare times, not strings
+    import json as _json
+
+    from normalize_fixtures import T0 as t0
+    from normalize_fixtures import gauge_line, pt, span, traces_line
+    lines = {"traces": [traces_line(res("payment"), [span("a" * 32, "b" * 16, t0)])],
+             "logs": [logs_line(res("payment"), [log(t0 + 250_000_000, "first log")])],
+             "metrics": [gauge_line(res("cart"), "app.cart.items", [pt(t0 + 250_000_000)])]}
+    out = calibrate(soak(tmp_path, lines=lines), tmp_path / "c")
+    sig = out["report"]["signals"]
+    assert sig["traces"]["kept"] == 1 and all(sig[s].get("out_of_window", 0) == 0 for s in sig), _json.dumps(sig)

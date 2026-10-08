@@ -11,7 +11,7 @@ import json
 import resource
 import time
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from collect.layout import DataLayout
@@ -157,10 +157,11 @@ def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> di
     out_dir.mkdir(parents=True, exist_ok=False)
     raw_dir = soak_dir / "raw"
     scans = {sig: scan_raw_file(raw_dir / f"{sig}.jsonl", sig) for sig in ("traces", "metrics", "logs")}
-    times = [t for s in scans.values() for t in (s["min_time"], s["max_time"]) if t]
-    start = min(times)
-    end_dt = datetime.fromisoformat(max(times)).astimezone(UTC)
-    end = datetime.fromtimestamp(end_dt.timestamp() + 1, UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    # parsed, not compared as strings: "...:40Z" (no fraction) sorts after "...:40.250000Z"; 1 s of padding on both sides
+    # also keeps a metric point sitting exactly at the start inside the (start, end] point rule
+    times = [datetime.fromisoformat(t).astimezone(UTC) for s in scans.values() for t in (s["min_time"], s["max_time"]) if t]
+    fmt = "%Y-%m-%dT%H:%M:%S.%fZ"
+    start, end = (min(times) - timedelta(seconds=1)).strftime(fmt), (max(times) + timedelta(seconds=1)).strftime(fmt)
     inputs = NormalizeInputs(raw_dir=raw_dir, raw_sha256={sig: s["sha256"] for sig, s in scans.items()},
                              raw_duplicates={sig: s["duplicates"] for sig, s in scans.items()},
                              window_host=(start, end), clock_offsets=[0.0, 0.0])  # soak: the window is the whole raw

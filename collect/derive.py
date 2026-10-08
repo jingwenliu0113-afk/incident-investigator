@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-DERIVE_VERSION = 1
+DERIVE_VERSION = 2  # 2: non-monotonic cumulative sums may go down (only a new start time resets)
 WARN_SEVERITY = 13  # OTLP severity_number: WARN and above
 
 
@@ -42,9 +42,10 @@ def service_minute_stats(snapshot) -> dict:
     return {"version": DERIVE_VERSION, "services": out}
 
 
-def point_deltas(points: list[dict]) -> list[dict]:
-    """Deltas of one cumulative series in time order. A drop in value or a new start time is a reset (the delta is
-    the new value). The first point in the window only anchors: its interval spans the window edge (decision 008 §7)."""
+def point_deltas(points: list[dict], monotonic: bool) -> list[dict]:
+    """Deltas of one cumulative sum series in time order (pass the series' `monotonic`). A new start time is a reset,
+    and for a monotonic series so is a drop in value (the delta is then the new value). The first point in the window
+    only anchors: its interval spans the window edge (decision 008 §7)."""
     out, prev = [], None
     for p in sorted(points, key=lambda p: p["time_unix_nano"]):
         value = p.get("value")
@@ -52,7 +53,8 @@ def point_deltas(points: list[dict]) -> list[dict]:
             prev = None
             continue
         if prev is not None and not p.get("first_in_window"):
-            reset = value < prev["value"] or p.get("start_time_unix_nano") != prev.get("start_time_unix_nano")
+            reset = (p.get("start_time_unix_nano") != prev.get("start_time_unix_nano")
+                     or (monotonic and value < prev["value"]))
             out.append({"time_unix_nano": p["time_unix_nano"], "delta": value if reset else value - prev["value"], "reset": reset})
         prev = p
     return out
