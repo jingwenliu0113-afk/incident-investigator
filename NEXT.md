@@ -2,8 +2,10 @@
 
 ## 目前位置
 
-**Core §1 完成；Core §2 / §4 的工具全部就緒。soak #4（同一個 lock，R7 已事先修訂）執行中；之後：補送 update 的診斷 run → 校準兩份 soak → 凍結 policy v1 → INC-001。**
+**Core §1 完成；Core §2 / §4 的工具全部就緒。soak #4 FAILED（R7、R8，都是量測程式的問題，raw 完整）→ decision 008 修訂 3 → 待跑 soak #5。
+補送 update 的診斷 run 與 soak #3 的最終校準正在跑；之後：soak #5 → 用 soak #3 + #5 凍結 policy v1 → INC-001。**
 - 記憶體設定已凍結（soak #2）。soak #3（raw export 的新 lock）：R1–R6、R8、R9 通過，R7 失敗 → 維持 FAILED。
+- soak #4（同一個 lock）：R7 失敗在 OpenSearch 清佇列時的 ambient 拒收、R8 失敗在一行 `{}`（空的 MetricsData）；raw 完整（accounting 平衡）。修訂 3 只放行 opensearch exporter 的關閉錯誤、把 `{}` 計為空訊息；memcg 探測 container 改名 `ii-probe-…`（policy 當 harness 排除）。soak #4 維持 FAILED。
 - R7 失敗原因（診斷 run 重現）：pipeline 都正常關閉後，collector 把 self-telemetry 推給自己已關閉的 4318 → exit 1。
   R7 修訂為「exit 0，或 exit 1 且關閉 log 證明只有這個錯誤」（decision 008 修訂），soak #4 用新標準判定。
 - decision 012：docker_stats receiver 啟動 race 讓 shipping 整個 run 沒有 container metrics → up 後補送 no-op `docker update`；
@@ -76,12 +78,11 @@
 
 ## 下一步（Core，依序）
 
-1. **soak #4 結果**（`data/external/soak/20261008T134542Z/`）：R1–R9（R7 用修訂後的標準）。通過 → 這個 lock 可以收集；decision 008「結果」補 soak #4。
-   不通過 → 調查，不動凍結的設定。
+1. **soak #5**：`./tools/with-mac-lock uv run python -m env soak`（同一個 lock，R7 / R8 用修訂 3 的標準）。通過 → 這個 lock 可以收集；decision 008「結果」補 soak #5。不通過 → 調查，不動凍結的設定。
 2. **補送 update 的診斷 run**（不是正式 run，持有 heavy lock）：`./tools/with-mac-lock uv run python tools/rescan_diag.py data/external/diagnostics/<時間>-rescan`
    （up → verify-running → 90 s → rescan → 150 s → stop / cp → down；比較補送前後每個 container 的 docker_stats 分鐘）。
    若這次沒有 container 被漏掉，結果是「無害但未證明有效」：可以再跑一次；仍無法證明時，以 run group 的覆蓋率無效條件為防線，記在 decision 012「結果」。
-3. **校準並凍結 policy v1**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #4 各一次；
+3. **校準並凍結 policy v1**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #5 各一次（soak #4 的 raw 有隨機命名的探測 container，不用）；
    F1–F6 全部通過 → `attribute_key_inventory` = 兩份 report 的 `attribute_keys` 聯集 → `status: frozen` → 重釘 sha → decision 011 記錄凍結證據 → commit。
 4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（preflight 會擋 dirty tree 與沒有通過 soak 的 lock）。
 5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
