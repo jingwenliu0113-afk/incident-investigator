@@ -27,6 +27,7 @@
    error ← error_response；connectivity ← unreachable_dependency；latency ← added_latency、lock_contention；
    resource ← cpu_saturation、gc_pressure、memory_leak；messaging ← queue_backlog；traffic ← traffic_flood。
 5. **服務**：`origin_service` 與 `affected_services` 都必須是鎖定 stack 的 compose service 名稱；`origin_service` 必須包含在 `affected_services` 裡。
+   哪些服務算 affected 的判定規則見 decision 010 §3（自己出現因 fault 造成的錯誤或延遲才算；只是沒被呼叫、流量變少的不算）。
 6. **user_symptom**：從 traffic generator（使用者側）看到的現象，`kinds` ⊆ {`errors`, `latency`, `degraded_feature`, `none`}，
    `none` 不能與其他並存；可加文字描述。
 7. **telemetry_coverage**：traces / metrics / logs 各自標 `origin`（在 origin service 上看得到故障）、`symptom_only`（只看得到下游症狀）、
