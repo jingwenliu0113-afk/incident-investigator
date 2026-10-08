@@ -59,4 +59,6 @@
   otel-collector、opensearch…），其中 grafana 在視窗內碰到上限 2,390,637 次、flagd 39,015 次、quote 29,422 次。
   `memory.current` 含可回收的 page cache，碰到上限本身不是故障；判定只看 OOM / restart / 5xx / health / telemetry（R1–R5）。
   flagd 是 fault 注入機制，它的記憶體壓力若影響 flag 生效延遲，會在 M2 收集時由 injection record 的時間量到。
-- soak #2（checkout 64 MiB + product-catalog 128 MiB）：見下一筆。
+- **soak #2（checkout 64 MiB + product-catalog 128 MiB，`data/external/soak/20261008T103855Z/`）：PASSED**（R1–R6 全部通過，數據見 004「結果」）。
+  checkout p95 19.1 MiB = 30% of 64 MiB，視窗內碰到上限 0 次，沒有重啟或 OOM；其他 20 MiB 服務也沒有 OOM / restart。
+  **checkout 64 MiB 自此凍結**；不需要升到 128 MiB。

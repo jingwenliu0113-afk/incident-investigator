@@ -92,4 +92,16 @@
   R6 因 product-catalog 失敗（持續貼近上限，且在視窗內碰到上限 22 次）。64 MiB 下沒有 OOM / restart，
   但「持續貼近上限」就是規則 4 的升級條件之一。這是**唯一一次**升級；128 MiB 下若 product-catalog 仍失敗，不再調整，改為回報使用者。
   R1 / R2 的失敗來自 checkout，不是 product-catalog，另由 decision 007 處理，不影響本升級的理由。
-- soak #2（product-catalog 128 MiB + checkout 64 MiB，判定用修訂後的 R2 與多服務 R6）：見下一筆。
+- **soak #2（product-catalog 128 MiB + checkout 64 MiB，2026-10-08，`data/external/soak/20261008T103855Z/`）：PASSED。**
+  up 10:38:55Z；視窗 10:44:32Z – 11:14:45Z（31 分鐘）；判定用修訂後的 R2（含 Docker oom / exit 137 事件）與多服務 R6；teardown `down` exit 0、`verify` 乾淨。
+  | # | 結果 | 數據 |
+  |---|---|---|
+  | R1 | pass | 141 個取樣點，所有 container RestartCount 0 |
+  | R2 | pass | memcg oom_kill 0；Docker oom / SIGKILL 事件 0 |
+  | R3 | pass | 視窗內 0 個 HTTP 5xx（2,061 個 request）；暖機期 0 |
+  | R4 | pass | 121 個取樣點都 healthy、FailingStreak 0 |
+  | R5 | pass | 31 分鐘每分鐘都有 traces / metrics / logs |
+  | R6 | pass | product-catalog p95 20.8 MiB = 16% of 128 MiB（max 21.4），視窗內碰到上限 0 次；checkout p95 19.1 MiB = 30% of 64 MiB（max 20.1），0 次 |
+  - Known ambient：`ask_agent` 失敗 126 次；OpenSearch 1,024 個 export request 失敗、18,734 筆 log 被丟、7,158 次 mapping 拒收。
+- **凍結**：product-catalog 128 MiB 自 soak #2 起凍結，正式實驗期間不得再修改（決策 5）。
+  之後的 lock 變更（decision 008 的 raw export）不動這個設定，但仍要重跑 soak（decision 008 §8）。
