@@ -66,3 +66,14 @@ def test_an_empty_set_scores_to_an_empty_table(tmp_path):
     result = score_method(DataLayout(tmp_path / "data"), "stat-anomaly", "pilot", tmp_path / "results")
     assert result["aggregate"]["n_incidents"] == 0
     assert "n = 0" in (tmp_path / "results" / "pilot" / "stat-anomaly" / "table.md").read_text()
+
+
+def test_leakage_audit_of_a_set_lands_on_the_ground_truth_side(tmp_path):
+    from eval.runner import audit_set
+
+    layout = stored(tmp_path / "data")
+    out = audit_set(layout, "pilot", tmp_path / "results")
+    path = layout.ground_truth_root / "incidents" / "INC-001" / "leakage_audit.json"
+    assert layout.is_ground_truth(path) and json.loads(path.read_text())["difficulty"] in ("easy", "medium", "hard")
+    assert out["incidents"][0]["incident_id"] == "INC-001" and out["incidents"][0]["lexicon_hits"] == 0
+    assert "difficulty" in (tmp_path / "results" / "pilot" / "leakage.md").read_text()

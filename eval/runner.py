@@ -87,3 +87,28 @@ def _table(result: dict) -> str:
     lines += ["", f"evidence existence: {sum(rates) / len(rates):.3f} over {len(rates)} incidents that cite evidence"
               if rates else "evidence existence: no incident cites evidence"]
     return "\n".join(lines) + "\n"
+
+
+def audit_set(layout: DataLayout, split: str, out_root: Path) -> dict:
+    """Leakage audit of every incident of `split` (decision 015): per-incident JSON on the ground-truth side,
+    a summary table under out_root/<split>/leakage.md (difficulty and counts only, no templates)."""
+    from eval.leakage import audit
+
+    rows = []
+    for inc, _ in incidents_in(layout, split):
+        snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
+        label = json.loads(layout.label_path(inc).read_text())
+        report = json.loads(layout.normalize_report_path(inc).read_text())
+        out = audit(snapshot, label, clock_offset_s=report["window"]["clock_offsets"][0],
+                    new_attribute_keys=report.get("new_attribute_keys"))
+        layout.label_path(inc).with_name("leakage_audit.json").write_text(json.dumps(out, indent=2) + "\n")
+        rows.append({k: out[k] for k in ("incident_id", "difficulty", "fault_only_count", "lexicon_hits")}
+                    | {"origin_named": len(out["origin_named"]), "new_keys": sum(map(len, out["new_attribute_keys"].values()))})
+    table = ["# Leakage audit (decision 015)", "", "| incident | difficulty | fault-only templates | naming the origin | lexicon hits | new keys |",
+             "|---|---|---:|---:|---:|---:|"]
+    table += [f"| {r['incident_id']} | {r['difficulty']} | {r['fault_only_count']} | {r['origin_named']} | {r['lexicon_hits']} | "
+              f"{r['new_keys']} |" for r in rows]
+    out_dir = Path(out_root) / split
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "leakage.md").write_text("\n".join(table) + "\n")
+    return {"split": split, "incidents": rows}
