@@ -52,4 +52,13 @@
 
 - **soak #4 再次發生**：這次漏掉的是 **currency**（13:45:58.180 啟動，collector 的 `Starting otelcol-contrib...` 在 13:45:58.077），
   shipping 這次有收到。兩次 soak 各漏一個、而且不同，證實是啟動 race、每次隨機。
-- （待：補送 update event 的診斷 run）
+- **補送的證據**（2026-10-08）：
+  1. receiver 原始碼（contrib v0.159.0 `internal/docker/docker.go`）：event loop 的 filter 包含 `update`，除了 `destroy` 以外的 event 都呼叫
+     `InspectAndPersistContainer`，會把 running 的 container 加進收集清單。
+  2. Docker 對 no-op 的 `docker update --restart <原本的 policy>` 確實發出 `update` event（一次性的 30 秒測試 container
+     `ii-probe-update-check`：收到 `update` event，restart policy 不變、仍在執行、0 次重啟，之後 `rm -f -v` 移除）。
+  3. 診斷 run（`data/external/diagnostics/20261008-rescan/`，`tools/rescan_diag.py`）：補送 28/28 成功，所有 container 補送前後都持續有
+     docker_stats 資料，沒有重啟；collector 的停止被判為 graceful（修訂後的 R7）。**但這次啟動時沒有發生 race**（28 個 container 補送前就都有資料），
+     所以「補送能救回被漏掉的 container」只有 1 + 2 的間接證據，沒有直接觀察到。
+- 結論：補送照決策 1 執行；決策 2 的無效條件是防線——若補送沒救回，該 run group 會被判無效，不會產生證據不完整的 incident。
+  每個 run group 的 `container_rescan` 與 `container_metric_gaps` 會持續提供直接證據。

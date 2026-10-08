@@ -249,6 +249,20 @@ def test_shutdown_verdict_rejects_any_other_exit(log, code):
     assert shutdown_verdict(log, code)["graceful"] is False
 
 
+def test_container_log_survives_bytes_that_are_not_utf8(monkeypatch):
+    # an undecodable byte in the collector log must not abort finalize_raw before `cp` (the raw would be lost)
+    import subprocess
+
+    import env.soak as soak_mod
+
+    def fake_run(cmd, **kw):
+        assert kw.get("errors") == "replace" and kw.get("text") is True
+        return subprocess.CompletedProcess(cmd, 0, stdout=b"ok \xff".decode("utf-8", "replace"))
+
+    monkeypatch.setattr(soak_mod.subprocess, "run", fake_run)
+    assert soak_mod.container_log("c", {}).startswith("ok ")
+
+
 def test_r7_accepts_exit_1_only_with_a_graceful_shutdown_verdict():
     assert evaluate_raw(raw_ok(stop_exit_code=1, graceful_stop=True), window_start=W0, window_end=W1)["R7"]["pass"]
     assert not evaluate_raw(raw_ok(stop_exit_code=1), window_start=W0, window_end=W1)["R7"]["pass"]

@@ -423,7 +423,7 @@ def shutdown_verdict(log: str, exit_code: int | None) -> dict:
 def container_log(container_id: str, env: dict[str, str]) -> str:
     """The container's stdout and stderr, in order (the collector logs to stderr)."""
     return subprocess.run(["docker", "logs", "--tail", str(RAW_LOG_TAIL), container_id], env=env, check=True,
-                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace").stdout
 
 
 def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str, str], out_dir: Path) -> dict:
