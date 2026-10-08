@@ -119,7 +119,13 @@
 7. 之後：第一張 baseline 表（Pilot）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
-## 待使用者決定（LLM 方法，第一次付費呼叫之前）
+## Blocked / 需要使用者（回來時一次處理）
+
+### A. 需要使用者決定或批准
+1. **LLM 方法的模型、預算與成本**（決定之前 dump-all / retrieval / agent 一律拒絕執行；見下面的估算）。
+2. **Pilot 的人工作業**（Gate 前）：每個有效 incident 的 label review（decision 018）與 evidence gold 標註（decision 017）。
+
+### B. LLM 方法的估算（第 A1 項用）
 
 建議值在 `eval/llm_methods.json`（`proposed`）。每個 incident 的 token 量估算（proxy token ≈ UTF-8 bytes / 4；實際 tokenizer 的數字可能高 0–30%，未實測）：
 
@@ -133,9 +139,10 @@
 - 成本 = tokens × 所選模型的單價（使用者確認目前價格）；建議先在 1–2 個 Pilot incident 上跑一次，量到實際 token 後再估全部。
 - 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
 
-## Blocked
-
+### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
 - **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
+
+### D. 歷史紀錄與環境狀態
 - （歷史）soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。
 - 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
   執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
