@@ -1,0 +1,20 @@
+# Project compose overlay, applied after the upstream compose files and before env/compose.pinned.yaml.
+# Upstream source stays untouched. Every setting here deviates from upstream 3.1.0 and needs a decision log;
+# tests/test_locked_env.py asserts that this file changes nothing else in the rendered stack, and every
+# memory limit set here is judged by the soak test's R6 (env.soak.WATCHED_SERVICES).
+# Not a fault and not for task performance: these remove OOM-kills / stalls seen with no fault injected
+# (upstream baseline instability). Frozen once the baseline soak test passes.
+
+services:
+  product-catalog:
+    deploy:
+      resources:
+        limits:
+          # decision 004: upstream 20M -> 64M -> (soak #1 R6 failed, one-time escalation) 128M. No further changes.
+          memory: 128M
+  checkout:
+    deploy:
+      resources:
+        limits:
+          # decision 007: upstream 20M OOM-killed twice with no fault injected. First version 64M (same rule as 004).
+          memory: 64M

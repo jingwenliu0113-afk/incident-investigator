@@ -8,6 +8,7 @@
                      (`up` expands to the locked args and is refused if `verify` would fail)
     compose-cmd      print that command instead of running it
     verify-running   check the running containers: locked image, locked platform manifest, running/healthy
+    soak             baseline soak test (decision 004); must run under ./tools/with-mac-lock
 
 Bringing the stack up for a formal incident collection must go through
 ./tools/with-mac-lock (see MACHINE_POLICY.md); this module never does that itself.
@@ -28,7 +29,7 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from env import compose
+from env import compose, soak
 from env.compose import ComposeError, compose_command, pinned_override_yaml, render_config, service_images
 from env.imageref import parse_image_ref
 from env.lock import (
@@ -276,6 +277,109 @@ def cmd_verify_running(
         sleep(5)
 
 
+MIN_SOAK_MINUTES = 30  # decision 004
+
+
+def cmd_soak(
+    project_dir: Path,
+    upstream_dir: Path,
+    *,
+    minutes: float,
+    warmup_minutes: float,
+    out_dir: Path,
+    interval: float = 15,
+    lock_dir: Path = soak.HEAVY_LOCK_DIR,
+    compose_exec: Callable[..., int] | None = None,
+) -> dict:
+    """Baseline soak test (decision 004): up -> healthy -> warm-up -> sampled window -> down -> verdict."""
+    soak.require_heavy_lock(project_dir, lock_dir=lock_dir)
+    compose_exec = compose_exec or cmd_compose_exec
+    lock = _load_lock(project_dir)
+    env = compose.sanitized_env(os.environ)
+    if leftover := soak.project_container_ids(lock, env):
+        # `up --force-recreate` would stop them itself (exit-137 deaths look like OOM kills to R2),
+        # and the measurement must start from a fresh stack
+        raise CliError(f"{len(leftover)} {lock['startup']['project_name']} container(s) already exist "
+                       f"({', '.join(sorted(set(leftover.values())))}); run `python -m env compose down --volumes` first")
+    out_dir.mkdir(parents=True)
+    samples: list[dict] = []
+    samples_file = (out_dir / "samples.jsonl").open("a")
+
+    def record(sample: dict) -> None:
+        samples.append(sample)
+        samples_file.write(json.dumps(sample) + "\n")
+        samples_file.flush()
+
+    watch = soak.EventWatch(out_dir / "docker-events.jsonl", project=lock["startup"]["project_name"], env=env)
+    up_at = soak._now()
+    report: dict = {"pass": False, "up_at": up_at}
+    try:
+        if (up_rc := compose_exec(project_dir, upstream_dir, ["up"])) != 0:
+            # containers started before the failure keep running (unless-stopped): `finally` still tears down
+            report["aborted"] = f"compose up failed (exit {up_rc})"
+            return report
+        platform = _engine_platform()
+        problems, _ = cmd_verify_running(project_dir, upstream_dir, wait=300, expected_platform=platform)
+        (out_dir / "initial-verify-running.json").write_text(json.dumps(problems, indent=2) + "\n")
+        report.update(platform=platform, initial_verify_running=problems)
+        sampler = soak.Sampler(lock, soak.project_container_ids(lock, env), env)
+
+        def take(kinds: tuple[str, ...]) -> None:
+            for kind in kinds:
+                try:
+                    record(getattr(sampler, kind)())
+                except (subprocess.CalledProcessError, ValueError, KeyError, StopIteration) as e:
+                    record({"kind": "error", "ts": soak._now(), "sampler": kind, "error": str(e)[:300]})
+
+        warm_end = time.monotonic() + warmup_minutes * 60
+        while time.monotonic() < warm_end:
+            take(("state", "memcg"))
+            time.sleep(interval)
+        take(("state", "memcg", "locust"))
+        window_start = samples[-1]["ts"]
+        window_end_at = time.monotonic() + minutes * 60
+        i = 1
+        while time.monotonic() < window_end_at:
+            time.sleep(interval)
+            take(("state",) + (("memcg",) if i % 2 == 0 else ()) + (("locust",) if i % 4 == 0 else ()))
+            i += 1
+        take(("state", "memcg", "locust"))
+        window_end = samples[-1]["ts"]
+        events = watch.stop()
+
+        collector_log = ""
+        try:
+            logs = cmd_compose_cmd(project_dir, upstream_dir, ["logs", "--no-log-prefix", "--since", up_at])
+            collector_log = soak._run(logs + ["otel-collector"], env)
+            (out_dir / "otel-collector.log").write_text(collector_log)
+            (out_dir / "product-catalog.log").write_text(soak._run(logs + ["product-catalog"], env))
+            (out_dir / "docker-inspect.json").write_text(soak._run(["docker", "inspect", *sampler.ids], env))
+        except (subprocess.CalledProcessError, OSError) as e:
+            report["aborted"] = f"capture failed: {str(e)[:300]}"
+        try:
+            rendered = render_config(**_compose_kwargs(lock, project_dir, upstream_dir))
+            limits = {svc: int(rendered["services"][svc]["deploy"]["resources"]["limits"]["memory"])
+                      for svc in soak.WATCHED_SERVICES}
+        except (KeyError, ComposeError, subprocess.CalledProcessError) as e:
+            limits = {svc: 0 for svc in soak.WATCHED_SERVICES}
+            report["aborted"] = report.get("aborted", "") + f" memory limit unknown: {e}"
+        report.update(soak.evaluate(samples, window_start=window_start, window_end=window_end,
+                                    limits=limits, flow_minutes=soak.debug_exporter_minutes(collector_log),
+                                    events=events))
+        report.update(docker_events=events, opensearch=soak.opensearch_rejections(collector_log),
+                      sampling_errors=[s for s in samples if s["kind"] == "error"])
+        if report.get("aborted") or report["sampling_errors"]:
+            report["pass"] = False
+    finally:
+        samples_file.close()
+        report.setdefault("docker_events", watch.stop())  # before `down`: teardown deaths are not part of the record
+        down_rc = compose_exec(project_dir, upstream_dir, ["down", "--volumes"])
+        report["teardown"] = {"down_exit_code": down_rc,
+                              "verify": verify_against_disk(lock, upstream_dir, project_dir)}
+        soak.write_report(out_dir, report)
+    return report
+
+
 def cmd_fetch_upstream(project_dir: Path, upstream_dir: Path, *, git_state: GitProbe = _git_state) -> str:
     spec = load_spec(project_dir / SPEC_PATH)
     up = spec["upstream"]
@@ -309,6 +413,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     vr = sub.add_parser("verify-running")
     vr.add_argument("--wait", type=float, default=0, help="poll up to this many seconds for all containers to be healthy")
     vr.add_argument("--platform", help="expected platform, e.g. linux/arm64 (default: the Docker engine's)")
+    sk = sub.add_parser("soak")
+    sk.add_argument("--minutes", type=float, default=MIN_SOAK_MINUTES)
+    sk.add_argument("--warmup-minutes", type=float, default=5)
+    sk.add_argument("--interval", type=float, default=15)
+    sk.add_argument("--out", type=Path)
     for name in ("compose", "compose-cmd"):
         sub.add_parser(name).add_argument("args", nargs=argparse.REMAINDER)
     ns = parser.parse_args(argv)
@@ -341,6 +450,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 1
             print(f"all locked services run the locked {platform} images, are running, never restarted, "
                   f"and pass their healthchecks; no healthcheck (checked as running only): {', '.join(unchecked) or '-'}")
+        elif ns.command == "soak":
+            if ns.minutes < MIN_SOAK_MINUTES:
+                raise CliError(f"a baseline soak window must be at least {MIN_SOAK_MINUTES} minutes (decision 004)")
+            out = ns.out or project_dir / "data/external/soak" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            report = cmd_soak(project_dir, upstream_dir, minutes=ns.minutes, warmup_minutes=ns.warmup_minutes,
+                              out_dir=out, interval=ns.interval)
+            print((out / "report.md").read_text() if (out / "report.md").exists() else json.dumps(report, indent=2))
+            return 0 if report.get("pass") and not report["teardown"]["verify"] else 1
         elif ns.command == "compose":
             return cmd_compose_exec(project_dir, upstream_dir, ns.args or ["config"])
         elif ns.command == "compose-cmd":
@@ -348,7 +465,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except subprocess.CalledProcessError as e:
         print(f"error: {e}\n{(e.stderr or e.output or '').strip()}", file=sys.stderr)
         return 2
-    except (CliError, ComposeError, RegistryError, OSError) as e:
+    except (CliError, ComposeError, RegistryError, soak.LockNotHeld, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     return 0

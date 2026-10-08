@@ -41,6 +41,21 @@ git -C env/upstream/opentelemetry-demo checkout -- .
 git -C env/upstream/opentelemetry-demo clean -fdx   # -x: also ignored files such as .DS_Store, which change bind-mount hashes
 ```
 
+## Baseline soak test（decision 004）
+
+正式 collection 前、以及任何環境變更之後，都要在 heavy lock 下跑一次：
+
+```bash
+./tools/with-mac-lock uv run python -m env soak --minutes 30 --warmup-minutes 5
+```
+
+指令會自己執行 up → `verify-running` → 暖機 → 30 分鐘取樣 → 收集證據 → `down --volumes` → `verify`。
+從 `up` 之前到 `down` 之前，另外用 `docker events` 記錄本 Project container 的 oom / die 事件（`docker-events.jsonl`）：
+container 重啟時 cgroup 會重建、`memory.events` 歸零，只看 memcg 會漏掉 OOM kill（decision 004 修訂）。
+取樣窗少於 30 分鐘、沒有持有本 Project 的 heavy lock、或已經有本 Project 的 container（要先 `compose down --volumes`），都會被拒絕。
+`compose up` 失敗時仍會 `down` 並寫出報告。
+結果寫在 `data/external/soak/<UTC 時間>/`（`report.md`、`report.json`、`samples.jsonl`、`docker-events.jsonl`、log、docker inspect）；R1–R6 全部通過才算 baseline 穩定。
+
 ## 改環境的流程
 
 1. 寫 decision log（`docs/decisions/`）。
