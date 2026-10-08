@@ -1,4 +1,4 @@
-"""`python -m collect run` argument checks that happen before anything starts (decision 009)."""
+"""`python -m collect`: argument checks before anything starts (decision 009) and clean errors (exit 2)."""
 
 import pytest
 
@@ -29,3 +29,23 @@ def test_pilot_runs_have_one_fixed_fault_duration():
     assert cli.PILOT_FAULT_MINUTES == 10  # decision 009 (amended)
     with pytest.raises(SystemExit):
         main(["run", "--flag", "paymentFailure", "--variant", "100%", "--fault-minutes", "3"])
+
+
+def test_errors_exit_2_with_a_message_not_a_traceback(tmp_path, monkeypatch, capsys):
+    import subprocess
+
+    import collect.__main__ as cli
+    import env.soak as soak_mod
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)  # an empty data tree
+    assert main(["normalize", "--incident", "INC-404"]) == 2
+    assert main(["calibrate", "--soak", str(tmp_path / "not-a-soak")]) == 2
+
+    def daemon_down(*a, **kw):
+        raise subprocess.CalledProcessError(1, ["docker", "ps"], "", "Cannot connect to the Docker daemon")
+
+    monkeypatch.setattr(soak_mod, "project_container_ids", daemon_down)
+    monkeypatch.setattr("env.cli._load_lock", lambda project_dir: {"startup": {"project_name": "ii-otel-demo"}})
+    assert main(["replay", "--incident", "INC-404"]) == 2
+    err = capsys.readouterr().err
+    assert err.count("error:") == 3 and "Traceback" not in err

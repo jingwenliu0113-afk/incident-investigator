@@ -343,3 +343,40 @@ def test_verify_running_must_be_clean_before_the_warm_up(tmp_path, flag_path):
     assert rec["status"] == "aborted_unstable" and "verify-running" in rec["reasons"][0]
     assert "gate" not in rec and not [c for c in stack.calls if isinstance(c, tuple)]  # never queried flagd
     assert flag_path.read_bytes() == original and stack.calls[-1] == ["down", "--volumes"]
+
+
+def test_unconfirmed_fault_off_invalidates_the_run(tmp_path, flag_path):
+    clock = Clock()
+    original = flag_path.read_bytes()
+    stack = Stack(clock, flag_path)
+    stack.ofrep = lambda flag, ctx: ("100%", None)  # flagd keeps serving the fault after the file is restored
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and rec["reasons"] == ["flag_unconfirmed"]
+    assert rec["flag"]["on"]["confirmed"] and not rec["flag"]["off"]["confirmed"]
+    assert flag_path.read_bytes() == original and stack.calls[-1] == ["down", "--volumes"]
+
+
+def test_a_broken_event_stream_invalidates_the_run(tmp_path, flag_path):
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    watch = Watch(stack)
+    watch.stop = lambda: None  # EventWatch.stop() is None when `docker events` died: OOM kills could be missed
+    stack.watch = lambda path: watch
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and "event_stream_missing" in rec["reasons"]
+
+
+@pytest.mark.parametrize("bad", [{"stop_exit_code": 137}, {"copied": False}, {"restarts": 1}])
+def test_incomplete_raw_invalidates_the_run(tmp_path, flag_path, bad):
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    clean = stack.finalize_raw
+
+    def finalize(out_dir):
+        raw = clean(out_dir)
+        raw["collector"].update(bad)
+        return raw
+
+    stack.finalize_raw = finalize
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and rec["reasons"] == ["raw_incomplete"] and "incident_window" not in rec

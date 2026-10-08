@@ -58,11 +58,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         from env import compose, soak
         from env.cli import _load_lock
 
-        lock, env = _load_lock(PROJECT_DIR), compose.sanitized_env(os.environ)
+        import subprocess
+
         try:
+            lock, env = _load_lock(PROJECT_DIR), compose.sanitized_env(os.environ)
             out = replay(DataLayout(PROJECT_DIR / "data/external"), ns.incident,
                          live_containers=lambda: sorted(soak.project_container_ids(lock, env).values()))
-        except (RuntimeError, OSError) as e:
+        except (RuntimeError, OSError, subprocess.CalledProcessError) as e:  # e.g. the Docker daemon is not running
             print(f"error: {e}", file=sys.stderr)
             return 2
         print(json.dumps(out, indent=2))
@@ -79,7 +81,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             report = normalize_incident(layout, ns.incident, lock_sha256=lock_sha256(_load_lock(PROJECT_DIR)),
                                         now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        except (LookupError, ValueError, PermissionError, RuntimeError) as e:
+        except (LookupError, ValueError, PermissionError, RuntimeError, OSError) as e:  # OSError: a missing record file
             print(f"error: {e}", file=sys.stderr)
             return 2
         # counts of what was removed stay in the ground-truth report; only the snapshot digest is printed
