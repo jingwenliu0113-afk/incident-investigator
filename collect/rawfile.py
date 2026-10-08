@@ -13,6 +13,8 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
+from collect.otlp import log_key, nanos, point_key, span_key
+
 # signal -> (top-level key, scope key, item key) of TracesData / MetricsData / LogsData
 _LAYOUT = {
     "traces": ("resourceSpans", "scopeSpans", "spans"),
@@ -21,19 +23,6 @@ _LAYOUT = {
 }
 _POINT_KINDS = ("gauge", "sum", "histogram", "exponentialHistogram", "summary")
 MAX_ERROR_LINES = 20
-
-
-def _nanos(value) -> int | None:
-    """OTLP JSON int64 (decimal string or number); 0 / missing -> None."""
-    try:
-        n = int(value)
-    except (TypeError, ValueError):
-        return None
-    return n or None
-
-
-def _canon(attributes) -> str:
-    return json.dumps(sorted(attributes or [], key=lambda a: a.get("key", "")), sort_keys=True, separators=(",", ":"))
 
 
 def _service(resource: dict) -> str:
@@ -48,21 +37,19 @@ def _items(signal: str, doc: dict) -> Iterator[tuple[str, int | None, tuple]]:
     top, scope_key, leaf = _LAYOUT[signal]
     for rs in doc[top] or []:
         resource = rs.get("resource") or {}
-        service, res_key = _service(resource), _canon(resource.get("attributes"))
+        service = _service(resource)
         for ss in rs.get(scope_key) or []:
             scope = ss.get("scope") or {}
             for item in ss.get(leaf) or []:
                 if signal == "traces":
-                    yield service, _nanos(item.get("startTimeUnixNano")), ("span", item.get("traceId"), item.get("spanId"))
+                    yield service, nanos(item.get("startTimeUnixNano")), span_key(item)
                 elif signal == "logs":
-                    time = _nanos(item.get("timeUnixNano")) or _nanos(item.get("observedTimeUnixNano"))
-                    yield service, time, ("log", res_key, json.dumps(item, sort_keys=True, separators=(",", ":")))
+                    yield service, nanos(item.get("timeUnixNano")) or nanos(item.get("observedTimeUnixNano")), \
+                        log_key(resource, item)
                 else:
                     for kind in _POINT_KINDS:
                         for p in (item.get(kind) or {}).get("dataPoints") or []:
-                            yield service, _nanos(p.get("timeUnixNano")), (
-                                "point", res_key, scope.get("name"), scope.get("version"), item.get("name"),
-                                _canon(p.get("attributes")), p.get("startTimeUnixNano"), p.get("timeUnixNano"))
+                            yield service, nanos(p.get("timeUnixNano")), point_key(resource, scope, item.get("name"), p)
 
 
 def _utc(nanos: int) -> datetime:

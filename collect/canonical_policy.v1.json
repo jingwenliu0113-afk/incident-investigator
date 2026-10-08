@@ -1,0 +1,276 @@
+{
+  "policy": "ctel-normalize",
+  "version": 1,
+  "status": "calibrating",
+  "canonical_schema": "ctel/1",
+  "sut_services": [
+    "accounting",
+    "ad",
+    "astronomy-db",
+    "cart",
+    "checkout",
+    "currency",
+    "email",
+    "fraud-detection",
+    "frontend",
+    "frontend-proxy",
+    "image-provider",
+    "kafka",
+    "payment",
+    "product-catalog",
+    "quote",
+    "recommendation",
+    "shipping",
+    "valkey-cart"
+  ],
+  "excluded_services": [
+    "flagd",
+    "flagd-ui",
+    "load-generator",
+    "frontend-web",
+    "otelcol-contrib",
+    "otel-collector",
+    "jaeger",
+    "prometheus",
+    "grafana",
+    "opensearch",
+    "opamp-server",
+    "telemetry-docs"
+  ],
+  "flag_file": {
+    "path": "src/flagd/demo.flagd.json",
+    "canonical_sha256": "sha256:b7fcbd0145ff31b9935c7c62fcbb318cbadf74317662d895cbf66638aceebdf5"
+  },
+  "flag_keys": [
+    "adFailure",
+    "adHighCpu",
+    "adManualGc",
+    "aiRunawayAgent",
+    "aiSlowResponse",
+    "cartFailure",
+    "emailMemoryLeak",
+    "emitRawPii",
+    "failedReadinessProbe",
+    "imageSlowLoad",
+    "intlShippingSlowdown",
+    "kafkaQueueProblems",
+    "loadGeneratorFloodHomepage",
+    "paymentFailure",
+    "paymentUnreachable",
+    "productCatalogFailure",
+    "productCatalogLockContention",
+    "recommendationCacheFailure"
+  ],
+  "receivers": {
+    "docker_stats": {
+      "scope_contains": "dockerstatsreceiver",
+      "service_from": "container.name"
+    },
+    "host_metrics": {
+      "scope_contains": "hostmetricsreceiver",
+      "drop": true
+    },
+    "postgresql": {
+      "scope_contains": "postgresqlreceiver",
+      "service": "astronomy-db"
+    },
+    "redis": {
+      "scope_contains": "redisreceiver",
+      "service": "valkey-cart"
+    },
+    "kafkametrics": {
+      "scope_contains": "kafkametricsreceiver",
+      "service": "kafka"
+    },
+    "nginx": {
+      "scope_contains": "nginxreceiver",
+      "service": "image-provider"
+    },
+    "httpcheck": {
+      "scope_contains": "httpcheckreceiver",
+      "service": "frontend-proxy"
+    }
+  },
+  "drop_metric_prefixes": [
+    "otel.sdk.",
+    "otelcol"
+  ],
+  "control_plane": {
+    "rpc_service_prefixes": [
+      "flagd."
+    ],
+    "peer_keys": [
+      "server.address",
+      "net.peer.name",
+      "peer.service",
+      "upstream.host",
+      "net.host.name"
+    ],
+    "peer_hosts": [
+      "flagd",
+      "flagd-ui",
+      "otel-collector",
+      "jaeger",
+      "prometheus",
+      "grafana",
+      "opensearch",
+      "opamp-server",
+      "load-generator",
+      "telemetry-docs"
+    ],
+    "cluster_keys": [
+      "upstream_cluster",
+      "upstream.cluster"
+    ],
+    "clusters": [
+      "flagservice",
+      "flagd-ui",
+      "loadgen",
+      "opentelemetry_collector_grpc",
+      "opentelemetry_collector_http",
+      "jaeger",
+      "grafana",
+      "opamp",
+      "telemetry-docs",
+      "profiles",
+      "chatbot"
+    ],
+    "path_keys": [
+      "url.path",
+      "http.target",
+      "url.full",
+      "http.url"
+    ],
+    "path_prefixes": [
+      "/flagservice/",
+      "/feature",
+      "/ofrep/",
+      "/loadgen",
+      "/otlp-http/",
+      "/jaeger",
+      "/grafana",
+      "/opamp",
+      "/telemetry",
+      "/profiles",
+      "/chatbot"
+    ]
+  },
+  "flag_key_patterns": [
+    "(?i)feature[._-]?flag",
+    "(?i)^openfeature",
+    "(?i)^flagd(\\.|$)"
+  ],
+  "scope_deny_patterns": [
+    "(?i)flagd",
+    "(?i)openfeature",
+    "(?i)feature[._-]?flag",
+    "(?i)problempattern"
+  ],
+  "fault_artifacts": [
+    {
+      "id": "FA-01",
+      "source": "src/ad/src/main/java/oteldemo/problempattern/GarbageCollectionTrigger.java:45",
+      "pattern": "^Triggering a manual garbage collection, next one in [0-9]+ seconds\\.$",
+      "example": "Triggering a manual garbage collection, next one in 10 seconds.",
+      "source_text": "Triggering a manual garbage collection, next one in "
+    },
+    {
+      "id": "FA-02",
+      "source": "src/ad/src/main/java/oteldemo/problempattern/GarbageCollectionTrigger.java:58",
+      "pattern": "^The artificially triggered GCs took: [0-9]+ ms$",
+      "example": "The artificially triggered GCs took: 812 ms",
+      "source_text": "The artificially triggered GCs took: "
+    },
+    {
+      "id": "FA-03",
+      "source": "src/ad/src/main/java/oteldemo/problempattern/CPULoad.java:48",
+      "pattern": "^High CPU-Load problempattern enabled$",
+      "example": "High CPU-Load problempattern enabled",
+      "source_text": "High CPU-Load problempattern enabled"
+    },
+    {
+      "id": "FA-04",
+      "source": "src/ad/src/main/java/oteldemo/AdService.java:243",
+      "pattern": "^Feature Flag adManualGc enabled, performing a manual gc now$",
+      "example": "Feature Flag adManualGc enabled, performing a manual gc now",
+      "source_text": " enabled, performing a manual gc now"
+    },
+    {
+      "id": "FA-05",
+      "source": "src/checkout/main.go:718",
+      "pattern": "^Warning: FeatureFlag 'kafkaQueueProblems' is activated, overloading queue now\\.$",
+      "example": "Warning: FeatureFlag 'kafkaQueueProblems' is activated, overloading queue now.",
+      "source_text": "Warning: FeatureFlag 'kafkaQueueProblems' is activated, overloading queue now."
+    },
+    {
+      "id": "FA-06",
+      "source": "src/checkout/main.go:725",
+      "pattern": "^Done with #[0-9]+ messages for overload simulation\\.$",
+      "example": "Done with #100 messages for overload simulation.",
+      "source_text": " messages for overload simulation."
+    },
+    {
+      "id": "FA-07",
+      "source": "src/product-catalog/main.go:480",
+      "pattern": "^lock contention scenario active: holding ACCESS EXCLUSIVE lock on catalog\\.products$",
+      "example": "lock contention scenario active: holding ACCESS EXCLUSIVE lock on catalog.products",
+      "source_text": "lock contention scenario active: holding ACCESS EXCLUSIVE lock on catalog.products"
+    },
+    {
+      "id": "FA-08",
+      "source": "src/product-catalog/main.go:470",
+      "pattern": "^failed to begin lock contention transaction$",
+      "example": "failed to begin lock contention transaction",
+      "source_text": "failed to begin lock contention transaction"
+    },
+    {
+      "id": "FA-09",
+      "source": "src/product-catalog/main.go:476",
+      "pattern": "^failed to acquire lock for lock contention scenario$",
+      "example": "failed to acquire lock for lock contention scenario",
+      "source_text": "failed to acquire lock for lock contention scenario"
+    },
+    {
+      "id": "FA-10",
+      "source": "src/shipping/src/shipping_service.rs:90",
+      "pattern": "^Delaying international shipment due to intlShippingSlowdown feature flag$",
+      "example": "Delaying international shipment due to intlShippingSlowdown feature flag",
+      "source_text": "Delaying international shipment due to intlShippingSlowdown feature flag"
+    }
+  ],
+  "lexicon_extra": [
+    "feature[ _.-]?flags?",
+    "open[ _.-]?feature",
+    "flagd",
+    "ofrep",
+    "flagservice",
+    "problem[ _.-]?pattern"
+  ],
+  "privacy": {
+    "delete_keys": [
+      "demo.payment.card_cvv"
+    ],
+    "hash_keys": {
+      "user.email": "user.hash"
+    },
+    "mask_last4_keys": [
+      "demo.payment.card_number"
+    ],
+    "delete_key_patterns": [
+      "(?i)card_pin",
+      "(?i)password",
+      "(?i)secret"
+    ]
+  },
+  "kept_by_design": {
+    "class_b": [
+      "recommendation 'get_product_list: cache hit/miss' logs and demo.recommendation.cache_hit (pre-registered Easy feature, Core \u00a76)"
+    ],
+    "class_c": [
+      "Payment request failed. Invalid token. demo.user_context.loyalty_level=gold",
+      "badhost:1234",
+      "badAddress:50051",
+      "LOCK TABLE catalog.products IN ACCESS EXCLUSIVE MODE"
+    ]
+  }
+}
