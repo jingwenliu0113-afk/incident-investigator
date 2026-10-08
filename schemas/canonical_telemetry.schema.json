@@ -1,0 +1,626 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://incident-investigator.local/schemas/canonical_telemetry.schema.json",
+  "title": "Canonical telemetry records ctel/1 (agent-readable, decision 011)",
+  "description": "One record per line of incidents/<INC>/normalized/*.jsonl; validated 100% by collect.normalize.check_snapshot.",
+  "$defs": {
+    "attributes": {
+      "type": "object"
+    },
+    "service": {
+      "enum": [
+        "accounting",
+        "ad",
+        "astronomy-db",
+        "cart",
+        "checkout",
+        "currency",
+        "email",
+        "fraud-detection",
+        "frontend",
+        "frontend-proxy",
+        "image-provider",
+        "kafka",
+        "payment",
+        "product-catalog",
+        "quote",
+        "recommendation",
+        "shipping",
+        "valkey-cart"
+      ]
+    },
+    "resource_id": {
+      "type": "string",
+      "pattern": "^r-[0-9a-f]{16}(?!\\n)$"
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version",
+        "attributes"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resource_id",
+        "attributes",
+        "dropped_attributes_count",
+        "schema_url"
+      ],
+      "properties": {
+        "resource_id": {
+          "$ref": "#/$defs/resource_id"
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        },
+        "dropped_attributes_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schema_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "trace_id",
+        "span_id",
+        "parent_span_id",
+        "trace_state",
+        "flags",
+        "name",
+        "kind",
+        "start_time_unix_nano",
+        "end_time_unix_nano",
+        "status_code",
+        "status_message",
+        "attributes",
+        "events",
+        "links",
+        "dropped_attributes_count",
+        "dropped_events_count",
+        "dropped_links_count",
+        "resource_id",
+        "scope",
+        "service"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^s-[0-9a-f]{16}(?!\\n)$"
+        },
+        "trace_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}(?!\\n)$"
+        },
+        "span_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}(?!\\n)$"
+        },
+        "parent_span_id": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{16}(?!\\n)$"
+            }
+          ]
+        },
+        "trace_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "unspecified",
+            "internal",
+            "server",
+            "client",
+            "producer",
+            "consumer"
+          ]
+        },
+        "start_time_unix_nano": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_time_unix_nano": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "status_code": {
+          "enum": [
+            "unset",
+            "ok",
+            "error"
+          ]
+        },
+        "status_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "time_unix_nano",
+              "name",
+              "attributes",
+              "dropped_attributes_count"
+            ],
+            "properties": {
+              "time_unix_nano": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "name": {
+                "type": "string"
+              },
+              "attributes": {
+                "$ref": "#/$defs/attributes"
+              },
+              "dropped_attributes_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "links": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "trace_id",
+              "span_id",
+              "trace_state",
+              "flags",
+              "attributes",
+              "dropped_attributes_count"
+            ],
+            "properties": {
+              "trace_id": {
+                "type": "string"
+              },
+              "span_id": {
+                "type": "string"
+              },
+              "trace_state": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "flags": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "attributes": {
+                "$ref": "#/$defs/attributes"
+              },
+              "dropped_attributes_count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "dropped_attributes_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_events_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_links_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resource_id": {
+          "$ref": "#/$defs/resource_id"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "service": {
+          "$ref": "#/$defs/service"
+        }
+      }
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "time_unix_nano",
+        "observed_time_unix_nano",
+        "severity_number",
+        "severity_text",
+        "body",
+        "event_name",
+        "attributes",
+        "trace_id",
+        "span_id",
+        "flags",
+        "dropped_attributes_count",
+        "resource_id",
+        "scope",
+        "service"
+      ],
+      "anyOf": [
+        {
+          "properties": {
+            "time_unix_nano": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "properties": {
+            "observed_time_unix_nano": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^l-[0-9a-f]{16}(?!\\n)$"
+        },
+        "time_unix_nano": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "observed_time_unix_nano": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "severity_number": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 24
+        },
+        "severity_text": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "body": {},
+        "event_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        },
+        "trace_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "span_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dropped_attributes_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resource_id": {
+          "$ref": "#/$defs/resource_id"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "service": {
+          "$ref": "#/$defs/service"
+        }
+      }
+    },
+    "metric_series": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "resource_id",
+        "scope",
+        "service",
+        "metric",
+        "kind",
+        "unit",
+        "description",
+        "temporality",
+        "monotonic",
+        "attributes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^m-[0-9a-f]{16}(?!\\n)$"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/resource_id"
+        },
+        "scope": {
+          "$ref": "#/$defs/scope"
+        },
+        "service": {
+          "$ref": "#/$defs/service"
+        },
+        "metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "gauge",
+            "sum",
+            "histogram",
+            "exponential_histogram",
+            "summary"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "temporality": {
+          "enum": [
+            "cumulative",
+            "delta",
+            null
+          ]
+        },
+        "monotonic": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "attributes": {
+          "$ref": "#/$defs/attributes"
+        }
+      }
+    },
+    "metric_point": {
+      "type": "object",
+      "required": [
+        "id",
+        "series_id",
+        "service",
+        "metric",
+        "kind",
+        "start_time_unix_nano",
+        "time_unix_nano",
+        "flags",
+        "first_in_window"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^p-[0-9a-f]{16}(?!\\n)$"
+        },
+        "series_id": {
+          "type": "string",
+          "pattern": "^m-[0-9a-f]{16}(?!\\n)$"
+        },
+        "service": {
+          "$ref": "#/$defs/service"
+        },
+        "metric": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "gauge",
+            "sum",
+            "histogram",
+            "exponential_histogram",
+            "summary"
+          ]
+        },
+        "start_time_unix_nano": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "time_unix_nano": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "first_in_window": {
+          "type": "boolean"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "gauge",
+                  "sum"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "value"
+            ],
+            "properties": {
+              "value": {
+                "oneOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "$double"
+                    ],
+                    "properties": {
+                      "$double": {
+                        "enum": [
+                          "NaN",
+                          "Infinity",
+                          "-Infinity"
+                        ]
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "histogram"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "count",
+              "sum",
+              "min",
+              "max",
+              "bucket_counts",
+              "explicit_bounds"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "exponential_histogram"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "count",
+              "sum",
+              "min",
+              "max",
+              "scale",
+              "zero_count",
+              "zero_threshold",
+              "positive",
+              "negative"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "summary"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "count",
+              "sum",
+              "quantile_values"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

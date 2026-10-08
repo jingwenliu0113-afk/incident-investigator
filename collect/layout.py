@@ -80,6 +80,11 @@ class DataLayout:
         return (len(rest) >= 2 and rest[0].isascii() and INCIDENT_ID.fullmatch(rest[0].upper()) is not None
                 and rest[1].casefold() == "normalized")
 
+    def normalize_report_path(self, incident_id: str) -> Path:
+        """What normalize removed and why (decision 011): ground-truth side, it reveals where the fault was."""
+        return (self.ground_truth_root / "incidents" / _checked(incident_id, INCIDENT_ID, "incident id")
+                / "normalize_report.json")
+
     def label_path(self, incident_id: str) -> Path:
         return (self.ground_truth_root / "incidents" / _checked(incident_id, INCIDENT_ID, "incident id")
                 / "label.json")
