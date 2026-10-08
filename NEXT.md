@@ -22,7 +22,10 @@
 - **evidence relevance（decision 017）**：pool = 各方法引用的聯集；弱標籤 temporal（fault 窗 + 60 s）/ service / origin；人工 gold 每個方法每個 incident 盲抽 5 筆、只能由人標、不可改；
   `python -m eval gold-todo --set pilot` → 填表 → `python -m eval gold-add --incident … --file … --annotator human:<name>`；score 表分層列出 existence、弱標籤、gold precision。
 - 評分必須先有 leakage audit；詞彙命中不是 0 的 incident 不進任何評分、表上列出；主要指標依 Easy / Medium / Hard 分層（decision 015）。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：534 passed（`-m "not network and not docker_daemon"`）。
+- **label review（decision 018）**：`python -m collect review-sheet --incident <INC>`（ground truth 側工作表：a priori、要檢查的項目、各服務 normal / fault / recovery 摘要、container 事件）→
+  使用者填表 → `python -m collect review --incident <INC> --file … --reviewer human:<name>`；寫出另一份 `label.reviewed.json`（a priori 不變、origin 不可改、每個差異要有理由）；
+  評分 / leakage / relevance 優先用 review 過的 label，`fault_exercised = false` 的 incident 不進評分。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：545 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -101,7 +104,7 @@
    productCatalogFailure on、paymentUnreachable on、cartFailure 100%、intlShippingSlowdown 10sec、productCatalogLockContention on、
    adHighCpu on、adManualGc on、emailMemoryLeak 1000x、recommendationCacheFailure on。
    review 時要檢查的 a priori 不確定項目見 decision 016 §5（例如 cartFailure 的 EmptyCart 耗時、intlShippingSlowdown 是否真的被觸發）。
-9. **Gate 前請使用者做的人工作業**：label review（`catalog+review`）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
+9. **Gate 前請使用者做的人工作業**：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
 10. 之後：第一張 baseline 表（Pilot）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 

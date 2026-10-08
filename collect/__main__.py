@@ -64,6 +64,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                                        "origin / affected / symptom from its set's pre-registered plan (decision 016)")
     lab.add_argument("--incident", required=True)
     lab.add_argument("--labeler", required=True, help="who labels, e.g. human:<name> or agent:claude-code")
+    rsh = sub.add_parser("review-sheet", help="decision 018: the label review worksheet of one incident (ground-truth side)")
+    rsh.add_argument("--incident", required=True)
+    rev = sub.add_parser("review", help="decision 018: write the catalog+review label from a filled worksheet (a person only)")
+    rev.add_argument("--incident", required=True)
+    rev.add_argument("--file", type=Path, required=True, help="the filled label_review_todo.json")
+    rev.add_argument("--reviewer", required=True, help="human:<name>")
     ns = parser.parse_args(argv)
 
     if ns.command == "replay":
@@ -96,6 +102,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         print(json.dumps({**out, "next": "re-pin POLICY_SHA256 in collect/policy.py to this sha256, run the tests, "
                                          "record the freeze in decision 011, commit"}, indent=2))
+        return 0
+    if ns.command in ("review-sheet", "review"):
+        from datetime import UTC, datetime
+
+        from collect.review import apply_review, review_sheet
+
+        layout = DataLayout(PROJECT_DIR / "data/external")
+        try:
+            if ns.command == "review-sheet":
+                review_sheet(layout, ns.incident)
+                path = layout.label_path(ns.incident).with_name("label_review_todo.json")
+                print(json.dumps({"incident_id": ns.incident, "worksheet": str(path)}))
+            else:
+                record = apply_review(layout, ns.incident, json.loads(ns.file.read_text()), reviewer=ns.reviewer,
+                                      now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+                print(json.dumps({"incident_id": ns.incident, "reviewed": True, "differences": len(record["differences"])}))
+        except (LookupError, ValueError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
         return 0
     if ns.command == "label":
         from datetime import UTC, datetime

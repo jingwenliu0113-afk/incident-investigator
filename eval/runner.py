@@ -90,11 +90,12 @@ def _evidence_aggregate(rows: list[dict]) -> dict:
 
 
 def score_method(layout: DataLayout, method: str, split: str, out_root: Path) -> dict:
+    from collect.review import effective_label
     from eval.relevance import gold_score, weak_score
 
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows, excluded = [], []
+    rows, excluded, reviewed = [], [], 0
     for inc, rg in incidents_in(layout, split):
         audit_path = layout.label_path(inc).with_name("leakage_audit.json")
         if not audit_path.exists():
@@ -103,8 +104,12 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
         if audit["lexicon_hits"]:  # decision 015: normalize leaked a lexicon term; the incident enters no score
             excluded.append({"incident_id": inc, "reason": f"lexicon_hits={audit['lexicon_hits']} (decision 015)"})
             continue
+        label, why = effective_label(layout, inc)
+        if why:
+            excluded.append({"incident_id": inc, "reason": why})
+            continue
+        reviewed += label["labeling"]["method"] == "catalog+review"
         pred = json.loads((out_dir / f"{inc}.json").read_text())
-        label = json.loads(layout.label_path(inc).read_text())
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
         rows.append(score_incident(pred, label) | {
             "run_group_id": rg,
@@ -120,7 +125,8 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
         if group:
             by_difficulty[d] = {"n_incidents": len(group),
                                 "metrics": {m: sum(r[m] for r in group) / len(group) for m in MAIN_METRICS}}
-    result = {"method": method, "split": split, "incidents": rows, "excluded": excluded, "aggregate": agg,
+    result = {"method": method, "split": split, "labels": {"reviewed": reviewed, "a_priori": len(rows) - reviewed},
+              "incidents": rows, "excluded": excluded, "aggregate": agg,
               "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows)}
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
@@ -133,6 +139,8 @@ def _table(result: dict) -> str:
              "",
              f"n = {agg['n_incidents']} incidents in {agg['n_run_groups']} run groups; 95% interval: run-group cluster bootstrap "
              f"({agg.get('bootstrap', {}).get('resamples', 0)} resamples, seed {agg.get('bootstrap', {}).get('seed', '-')}).",
+             f"Labels: {result['labels']['reviewed']} reviewed (catalog+review), {result['labels']['a_priori']} a priori (catalog) "
+             "(decision 018).",
              "",
              "| metric | mean | 95% interval |",
              "|---|---:|---|"]
@@ -161,6 +169,7 @@ def _table(result: dict) -> str:
 def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:
     """Blind gold worksheets (decision 017 §3): per incident of `split`, the pooled citations of every method's predictions
     still to judge, written to the ground-truth side as evidence_gold_todo.json (record text and label, no method)."""
+    from collect.review import effective_label
     from collect.snapshot import _rel
     from eval.relevance import _ns, gold_sample, key, resolved_unique
 
@@ -174,7 +183,7 @@ def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:
                                              for k, _ in resolved_unique(pred["evidence"], snapshot)]
         gold = _gold(layout, inc)
         todo = gold_sample(inc, cited, annotated={key(e) for e in (gold or {}).get("items", [])})
-        label = json.loads(layout.label_path(inc).read_text())
+        label = effective_label(layout, inc)[0]
         start, offset = snapshot.window["start_ns"], _clock_offset(layout, inc)
         sheet = {"incident_id": inc,
                  "how_to": "set relevant to true or false for each item (decision 017 §3), leave null to judge later, "
@@ -218,12 +227,13 @@ def gold_add(layout: DataLayout, incident_id: str, sheet_path: Path, *, annotato
 def audit_set(layout: DataLayout, split: str, out_root: Path) -> dict:
     """Leakage audit of every incident of `split` (decision 015): per-incident JSON on the ground-truth side,
     a summary table under out_root/<split>/leakage.md (difficulty and counts only, no templates)."""
+    from collect.review import effective_label
     from eval.leakage import audit
 
     rows = []
     for inc, _ in incidents_in(layout, split):
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        label = json.loads(layout.label_path(inc).read_text())
+        label = effective_label(layout, inc)[0]
         report = json.loads(layout.normalize_report_path(inc).read_text())
         out = audit(snapshot, label, clock_offset_s=report["window"]["clock_offsets"][0],
                     new_attribute_keys=report.get("new_attribute_keys"))

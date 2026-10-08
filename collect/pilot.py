@@ -68,3 +68,26 @@ def planned(split: str, flag: str, variant: str) -> dict | None:
     if split not in PLANS:
         raise LookupError(f"no fault plan for the {split!r} set yet (it needs its own protocol decision)")
     return next((e for e in PLANS[split] if e["flag"] == flag and e["variant"] == variant), None)
+
+# decision 016 §5: what the review must look at for each fault, beyond the general checks (decision 018 §5)
+REVIEW_CHECKS: dict[str, list[str]] = {
+    "cartFailure": ["how long a failed EmptyCart takes; if checkout or the edge slow down or time out, update affected and "
+                    "symptom (decision 016 §2, §3)"],
+    "intlShippingSlowdown": ["at least one order to a non-US address reached shipping in the fault period (else "
+                             "fault_exercised = false)"],
+    "productCatalogLockContention": ["whether astronomy-db was OOM-killed or restarted (counts as its error, decision 016 §2)",
+                                     "gaps in astronomy-db metrics"],
+    "adHighCpu": ["whether ad or the edge show any latency at all"],
+    "adManualGc": ["size of the ads latency; whether ad was OOM-killed",
+                   "stack-trace class names or a GC cause that names the fault (leakage: record it for policy v2)"],
+    "emailMemoryLeak": ["number and time of OOM restarts; whether checkout really shows failed confirmation sends"],
+    "recommendationCacheFailure": ["number of OOM restarts of recommendation"],
+}
+GENERAL_CHECKS = [
+    "fault_exercised: did any request reach the faulty code path in the fault period? (decision 016 §5)",
+    "affected_services: services whose own spans / logs / metrics show fault-caused errors or latency; OOM or restart "
+    "counts as an error; less traffic does not (decisions 010 rule 3, 016 §2)",
+    "user_symptom: at frontend-proxy, requests of the traffic generator fail (errors) or slow down (latency) (decision 016 §3)",
+    "telemetry_coverage per signal: origin (the origin shows the fault), symptom_only (only downstream), none (decision 006 §7)",
+    "every field that differs from the a priori label needs a reason in review.reasons (decision 018 §3)",
+]
