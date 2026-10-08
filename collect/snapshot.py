@@ -14,7 +14,7 @@ from pathlib import Path
 from collect.layout import DataLayout
 from collect.normalize import DATA_FILES
 
-RENDER_VERSION = 1
+RENDER_VERSION = 2  # 2: a fixed top-level order (times, identity, message first) before the 1024-byte cut
 MAX_LINE_BYTES = 1024
 
 
@@ -138,12 +138,21 @@ def _prune(value):
     return value
 
 
-def render_v1(record: dict, window_start_ns: int) -> str:
-    """One line per record: id first, times relative to the window start, no nulls, at most 1024 bytes."""
+# what a reader needs first survives the 1024-byte cut; anything not listed follows in key order (decision 011 revision)
+RENDER_FIRST = ("start_time", "end_time", "time", "observed_time", "service", "name", "kind", "status_code", "status_message",
+                "severity_number", "severity_text", "event_name", "trace_id", "span_id", "parent_span_id", "series_id",
+                "metric", "value", "body")
+
+
+def render(record: dict, window_start_ns: int) -> str:
+    """One line per record: id first, then times relative to the window start, identity and message, then the rest; no
+    nulls; at most 1024 bytes (only the tail is cut)."""
     rec = _relativize({k: v for k, v in record.items() if k != "id"}, window_start_ns)
     if isinstance(rec.get("events"), list):  # only events: attribute keys that end in time_unix_nano stay as they are
         rec["events"] = [_relativize(e, window_start_ns) if isinstance(e, dict) else e for e in rec["events"]]
-    line = f"{record.get('id', '')} " + json.dumps(_prune(rec), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    pruned = _prune(rec)
+    ordered = {k: pruned[k] for k in RENDER_FIRST if k in pruned} | {k: pruned[k] for k in sorted(pruned) if k not in RENDER_FIRST}
+    line = f"{record.get('id', '')} " + json.dumps(ordered, separators=(",", ":"), ensure_ascii=False)
     data = line.encode()
     if len(data) <= MAX_LINE_BYTES:
         return line

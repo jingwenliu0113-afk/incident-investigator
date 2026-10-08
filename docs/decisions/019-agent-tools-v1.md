@@ -14,7 +14,7 @@
 ## 決策
 
 1. **索引**：只從 `open_snapshot()`（驗過 sha）的 record 建立 sqlite 索引，放在 `data/external/cache/<content_sha256>/index.sqlite`；
-   開啟時比對 content_sha256，不符就重建。每筆存 render v1 的那一行（Agent 看到的就是這一行）。
+   開啟時比對 content_sha256，不符就重建。每筆存 renderer（decision 011 §5，v2 見該文件修訂）的那一行（Agent 看到的就是這一行）。
 2. **時間參數**一律是「相對時間窗起點的秒數」（與 render v1 的 `+MMM:SS.mmm` 同一個基準），區間 `[t0, t1)`。
 3. **文字比對** = 子字串比對（ASCII 不分大小寫；`%`、`_` 是一般字元），比對對象是該 record 的 render v1 那一行（看得到什麼就能搜什麼）；沒有排序上的「相關度」。
    實測（soak #5 的 38 分鐘 snapshot，約 19 萬個 span）：建索引約 9 秒、326 MiB；一次查詢 0.1–0.3 秒。

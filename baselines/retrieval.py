@@ -15,9 +15,9 @@ from agent.harness import finish, submit_round
 from agent.prompt import SYSTEM, task_prompt
 from agent.tools import MAX_SECONDS, MAX_TEXT
 from baselines.overview import overview
-from collect.snapshot import proxy_tokens, render_v1
+from collect.snapshot import proxy_tokens, render
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2  # 2: render v2
 
 PROPOSE_SPEC = {
     "name": "propose_queries",
@@ -54,7 +54,7 @@ def _index(snapshot, cache_root: Path) -> Path:
             for r in records:
                 t = r["start_time_unix_nano"] if kind == "s" else (
                     r["time_unix_nano"] if r.get("time_unix_nano") is not None else r.get("observed_time_unix_nano"))
-                db.execute("INSERT INTO docs VALUES (?,?,?,?)", (r["id"], r["service"], t, render_v1(r, start)))
+                db.execute("INSERT INTO docs VALUES (?,?,?,?)", (r["id"], r["service"], t, render(r, start)))
         db.executemany("INSERT INTO meta VALUES (?,?)", [("content_sha256", snapshot.meta["content_sha256"]),
                                                           ("index_version", str(INDEX_VERSION))])
     tmp.replace(path)

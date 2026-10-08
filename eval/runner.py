@@ -292,16 +292,16 @@ def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:
 
 
 def _render(snapshot, e: dict, limit: int = 20) -> list[str]:
-    """The cited record as the snapshot renders it (render v1): a trace as its spans, a series with its points in range."""
-    from collect.snapshot import render_v1
+    """The cited record as the snapshot renders it (decision 011 §5 renderer): a trace as its spans, a series with its points in range."""
+    from collect.snapshot import render
 
     start = snapshot.window["start_ns"]
     if e["id"].startswith("t-"):
-        return [render_v1(s, start) for s in snapshot.spans() if s["trace_id"] == e["id"][2:]][:limit]
-    lines = [render_v1(snapshot.resolve(e["id"], e["t0"], e["t1"]), start)]
+        return [render(s, start) for s in snapshot.spans() if s["trace_id"] == e["id"][2:]][:limit]
+    lines = [render(snapshot.resolve(e["id"], e["t0"], e["t1"]), start)]
     if e["id"].startswith("m-"):
         lo, hi = e["t0"] if e["t0"] is not None else -1, e["t1"] if e["t1"] is not None else 2**63
-        lines += [render_v1(p, start) for p in snapshot.points()
+        lines += [render(p, start) for p in snapshot.points()
                   if p["series_id"] == e["id"] and lo <= p["time_unix_nano"] <= hi][:limit]
     return lines
 

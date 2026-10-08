@@ -9,7 +9,7 @@ from collect.layout import DataLayout
 from collect.normalize import NormalizeInputs, normalize
 from collect.policy import load_policy
 from collect.rawfile import scan_raw_file
-from collect.snapshot import SnapshotError, open_snapshot, proxy_tokens, render_v1
+from collect.snapshot import SnapshotError, open_snapshot, proxy_tokens, render
 from normalize_fixtures import HOST_END, HOST_START, S, T0, write_raw
 
 
@@ -59,14 +59,14 @@ def test_render_v1_is_compact_relative_and_bounded(snap_dir):
     layout, norm = snap_dir
     snap = open_snapshot(norm, layout)
     span = next(snap.spans())
-    line = render_v1(span, snap.window["start_ns"])
+    line = render(span, snap.window["start_ns"])
     assert line.startswith(span["id"] + " ") and "+001:00.000" in line  # 120 s after T0 = 60 s into the window (+MMM:SS.mmm)
     with_event = {**span, "events": [{"time_unix_nano": snap.window["start_ns"] + 60_007_000_000, "name": "message"}]}
-    rendered = render_v1(with_event, snap.window["start_ns"])
+    rendered = render(with_event, snap.window["start_ns"])
     assert '"time":"+001:00.007"' in rendered and "unix_nano" not in rendered  # decision 011 §5: every time is relative
     assert "null" not in line and len(line.encode()) <= 1024
     huge = {**span, "attributes": {"k": "x" * 5000}}
-    assert len(render_v1(huge, snap.window["start_ns"]).encode()) <= 1024
+    assert len(render(huge, snap.window["start_ns"]).encode()) <= 1024
     assert proxy_tokens("abcd") == 1 and proxy_tokens("abcde") == 2 and proxy_tokens("") == 0
 
 
@@ -91,7 +91,6 @@ def test_service_minute_stats_and_point_deltas(snap_dir):
 
 
 def test_lone_surrogates_are_cleaned_in_every_field_so_readers_never_crash(tmp_path):
-    import json
 
     from normalize_fixtures import raw_lines
     layout = DataLayout(tmp_path / "data")
@@ -112,7 +111,7 @@ def test_lone_surrogates_are_cleaned_in_every_field_so_readers_never_crash(tmp_p
     names = [sp["name"] for sp in snap.spans()]
     assert "GET \ufffd/x" in names and report["value_fixes"]["lone_surrogates"] >= 1
     for sp in snap.spans():
-        assert proxy_tokens(render_v1(sp, snap.window["start_ns"])) > 0
+        assert proxy_tokens(render(sp, snap.window["start_ns"])) > 0
 
 
 def test_evidence_existence_counts_cited_ids_that_resolve_in_the_snapshot(snap_dir):
@@ -179,3 +178,23 @@ def test_container_cpu_is_the_rate_of_the_cumulative_usage_not_the_utilization_g
     stats = container_minute_stats(_Containers(series, points))["services"]["ad"]
     assert stats[0] == {"cpu": 0.5, "memory": 60 * 2**20}  # memory: the last value of the minute
     assert stats[1]["cpu"] == pytest.approx(41 / 30) and stats[1]["memory"] is None
+
+
+def test_render_keeps_times_identity_and_message_ahead_of_long_attributes(snap_dir):
+    # clock audit: with sorted keys a 1024-byte cut removed "time" from 46% of log lines (Envoy access logs)
+    from collect.snapshot import RENDER_VERSION, render
+
+    layout, norm = snap_dir
+    snap = open_snapshot(norm, layout)
+    start = snap.window["start_ns"]
+    assert RENDER_VERSION == 2
+    log = {"id": "l-" + "a" * 16, "service": "frontend-proxy", "time_unix_nano": start + 22_848_000_000,
+           "observed_time_unix_nano": start + 22_900_000_000, "severity_number": 9, "body": "GET /api/cart 200 " + "y" * 300,
+           "attributes": {"k" + str(i): "x" * 100 for i in range(20)}, "trace_id": "1" * 32, "span_id": "2" * 16}
+    line = render(log, start)
+    assert len(line.encode()) <= 1024 and line.startswith(log["id"] + ' {"time":"+000:22.848","observed_time":"+000:22.900"')
+    assert '"service":"frontend-proxy"' in line and '"trace_id":"' + "1" * 32 in line and "GET /api/cart 200" in line
+    assert line.index('"body"') < line.index('"attributes"')  # the message survives; the tail of the attributes is cut
+    span = {**next(snap.spans()), "attributes": {"k": "x" * 5000}}
+    line = render(span, start)
+    assert '"start_time"' in line and '"end_time"' in line and '"status_code"' in line and len(line.encode()) <= 1024

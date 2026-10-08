@@ -12,9 +12,9 @@ import sqlite3
 from pathlib import Path
 
 from collect.derive import container_minute_stats, service_minute_stats
-from collect.snapshot import proxy_tokens, render_v1
+from collect.snapshot import proxy_tokens, render
 
-INDEX_VERSION = 2  # 2: LIKE on the line itself, no lower-case copy
+INDEX_VERSION = 3  # 2: LIKE on the line itself, no lower-case copy; 3: render v2
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 20
 MAX_SECONDS = 10**7  # time arguments are seconds since the window start; larger values are a unit mistake
@@ -83,19 +83,19 @@ def build_index(snapshot, cache_root: Path) -> Path:
     with sqlite3.connect(tmp) as db:
         db.executescript(_SCHEMA)
         for s in snapshot.spans():
-            line = render_v1(s, start)
+            line = render(s, start)
             end = s.get("end_time_unix_nano")
             db.execute("INSERT INTO spans VALUES (?,?,?,?,?,?,?)",
                        (s["id"], s["trace_id"], s["service"], s.get("status_code"), s["start_time_unix_nano"],
                         None if end is None else (end - s["start_time_unix_nano"]) / 1e6, line))
         for r in snapshot.logs():
-            line = render_v1(r, start)
+            line = render(r, start)
             t = r["time_unix_nano"] if r.get("time_unix_nano") is not None else r.get("observed_time_unix_nano")
             db.execute("INSERT INTO logs VALUES (?,?,?,?,?)", (r["id"], r["service"], t, r.get("severity_number") or 0, line))
         for m in snapshot.series():
-            db.execute("INSERT INTO series VALUES (?,?,?)", (m["id"], m.get("service"), render_v1(m, start)))
+            db.execute("INSERT INTO series VALUES (?,?,?)", (m["id"], m.get("service"), render(m, start)))
         for p in snapshot.points():
-            db.execute("INSERT INTO points VALUES (?,?,?,?)", (p["id"], p["series_id"], p["time_unix_nano"], render_v1(p, start)))
+            db.execute("INSERT INTO points VALUES (?,?,?,?)", (p["id"], p["series_id"], p["time_unix_nano"], render(p, start)))
         spans, containers = service_minute_stats(snapshot)["services"], container_minute_stats(snapshot)["services"]
         for svc in set(spans) | set(containers):
             s, c = spans.get(svc, {}), containers.get(svc, {})

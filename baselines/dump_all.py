@@ -15,7 +15,7 @@ from collections import defaultdict
 from agent.harness import finish, submit_round
 from agent.prompt import SYSTEM, task_prompt
 from baselines.overview import overview
-from collect.snapshot import _rel, proxy_tokens, render_v1
+from collect.snapshot import _rel, proxy_tokens, render
 from eval.leakage import WARN, template
 
 MINUTE = 60 * 10**9
@@ -62,9 +62,9 @@ def pack(snapshot, incident_id: str, *, budget: int) -> tuple[str, dict]:
     err = ["## Error-level records (grouped by message template: count, first and last time, then the first and last record)"]
     for (kind, svc, tmpl), g in sorted(groups.items(), key=lambda kv: (kv[1]["first"][0], kv[0])):
         err.append(f"{g['count']} x {svc} {kind} first={_rel(g['first'][0], start)} last={_rel(g['last'][0], start)}: {tmpl}")
-        err.append(render_v1(g["first"][1], start))
+        err.append(render(g["first"][1], start))
         if g["last"][1]["id"] != g["first"][1]["id"]:
-            err.append(render_v1(g["last"][1], start))
+            err.append(render(g["last"][1], start))
     sections.append(err)
     order = {key: sorted(heap, key=lambda x: -x[0]) for key, heap in cells.items()}  # ascending rank
     minutes = sorted({m for m, _ in order})
@@ -76,7 +76,7 @@ def pack(snapshot, incident_id: str, *, budget: int) -> tuple[str, dict]:
             for kind in ("span", "log"):
                 cell = order.get((m, kind), [])
                 if i < len(cell):
-                    sample.append(render_v1(cell[i][2], start))
+                    sample.append(render(cell[i][2], start))
                     added = True
         if not added:
             break

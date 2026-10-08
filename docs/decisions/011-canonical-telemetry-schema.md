@@ -201,3 +201,13 @@ policy 只有在**每一份**沒有 fault 的 soak raw（soak #3，以及之後�
   `status: frozen`；`attribute_key_inventory` 為兩份 report 的 `attribute_keys` 聯集（`signal/service` 鍵），`frozen_from` 記錄來源。
 - 從現在起：policy v1 的任何改動都是 v2（§4：寫 decision log、所有 incident 重跑 normalize、兩版都報告；看到 test 結果後永遠不改）。
 
+
+## 修訂：renderer v2（2026-10-09，任何方法執行之前；snapshot 內容與 policy v1 不變）
+
+- **發現**（時鐘稽核，soak #3 的無 fault 校準 snapshot）：render v1 先依 key 排序再截到 1024 bytes，`attributes` 與 `body` 排在時間之前，
+  67,377 筆 log 中有 30,741 筆（46%，幾乎都是 frontend-proxy 的 Envoy access log）的 `time` / `observed_time` 被截掉，179,719 個 span 中有 4,062 個失去 `start_time`。
+  方法看得到這些 record，卻看不到它們的時間。
+- **修訂**（`collect.snapshot.render`，`RENDER_VERSION = 2`）：頂層欄位改為固定順序：id → 相對時間（start_time、end_time、time、observed_time）→
+  service、name、kind、status、severity、event_name、trace / span id、series / metric / value → body → 其餘依 key 排序；其餘規則不變（相對時間、省略 null、≤ 1024 bytes）。
+  截斷只會切掉尾端（多半是 attributes）。同一個 snapshot 上重算：沒有時間的 log 0 筆、沒有 start_time 的 span 0 個。
+- Agent 工具與 retrieval 的索引版本隨之提高（快取自動重建）。這是讀取端的修改，不影響 snapshot 的 sha、policy 或任何 label。
