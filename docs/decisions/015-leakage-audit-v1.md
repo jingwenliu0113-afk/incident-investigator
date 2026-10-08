@@ -42,3 +42,12 @@ normalize（decision 011）已經在發布前擋下詞彙與 flag metadata；稽
 
 - 每個 Pilot incident 在 label 之後跑一次稽核；詞彙命中不是 0 的 incident 不進任何評分。
 - 報告依難度分層列出各方法的分數（SPEC §6「必要時分 Easy / Medium / Hard」）。
+
+## 修訂 1（2026-10-09，任何 Pilot incident 之前；只用無 fault 的資料）
+
+- **發現**：在無 fault 的校準 snapshot（soak #3）上試跑，假設一個 10 分鐘的 fault 窗，得到 472 個「fault 專屬樣板」（應該接近 0）。
+  原因是樣板只遮數字，商品 id（例如 `0PUK6V6EV0`）被切成 `<n>PUK<n>V<n>EV<n>`，recommendation 的 log 每種商品組合都變成一個新樣板。
+  error 等級的 fault 專屬樣板在兩個 soak 上都是 0，所以難度判定沒有受影響；但稽核清單（最多列 50 個）會被這種雜訊佔滿。
+- **修訂**：樣板中**含數字的整個字**（字元 `A-Z a-z 0-9 _ . -`）遮成 `<n>`（原本只遮數字本身）；UUID 與 16 位以上 hex 的規則不變。
+  修訂後同一個無 fault snapshot 只剩 2 個 fault 專屬樣板（都不是 error 等級）。
+- 只用無 fault 資料、在 Pilot 之前，不占「Pilot 稽核後修訂一次」的額度。

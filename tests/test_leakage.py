@@ -35,6 +35,10 @@ def test_templates_mask_ids_and_numbers_but_keep_words():
     assert template("order 3f2a9c1e-77aa-4b1c-9d2e-0123456789ab failed after 1250 ms") == "order <uuid> failed after <n> ms"
     assert template("trace 4bf92f3577b34da6a3ce929d0e0e4736 x") == "trace <hex> x"
     assert template("Payment request failed. Invalid token.") == "Payment request failed. Invalid token."
+    # decision 015 revision 1: a whole word with a digit is one value (product ids, addresses), not letters around numbers
+    assert template("Receive ListRecommendations for product ids:['0PUK6V6EV0', 'L9ECAV7KIM']") == \
+        "Receive ListRecommendations for product ids:['<n>', '<n>']"
+    assert template("GET /api/products/OLJCESPC7Z x=5, dial 10.0.0.5:50051 v1.2") == "GET /api/products/<n> x=<n>, dial <n>:<n> <n>"
 
 
 def test_an_error_only_the_origin_emits_during_the_fault_is_easy():

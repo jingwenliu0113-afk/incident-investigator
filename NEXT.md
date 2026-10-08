@@ -28,7 +28,8 @@
 - **統計 baseline v2（decision 014 修訂 1）**：在無 fault 的校準 snapshot 上試跑發現 v1 把 18 個服務全判 affected：
   docker_stats 的 `container.cpu.utilization` 在這個 stack 是累積比例（量測 bug）→ CPU 改用 `container.cpu.usage.total` 的增量（derive v4）；
   門檻改為每個特徵在無 fault 資料上的最大 z（error 3、warn 3、cpu 3.6、memory 34、p95 45）。只用無 fault 資料，不占「Pilot 上修訂一次」的額度。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：553 passed（`-m "not network and not docker_daemon"`）。
+- **leakage 樣板修訂（decision 015 修訂 1）**：含數字的整個字遮成 `<n>`（商品 id 不再產生大量假的 fault 專屬樣板；無 fault 資料上 472 → 2）。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：554 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 

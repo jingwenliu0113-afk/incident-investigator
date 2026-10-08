@@ -17,7 +17,7 @@ WARN = 13  # OTLP severity_number: WARN and above count as error-level text
 MAX_LISTED = 50
 _UUID = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 _HEX = re.compile(r"\b[0-9a-fA-F]{16,}\b")
-_NUM = re.compile(r"\d+(?:\.\d+)?")
+_NUM = re.compile(r"[A-Za-z0-9_.-]*[0-9][A-Za-z0-9_.-]*")  # revision 1: the whole word that holds a digit
 
 
 def template(text: str) -> str:
