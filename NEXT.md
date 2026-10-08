@@ -119,6 +119,20 @@
 7. 之後：第一張 baseline 表（Pilot）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
+## 待使用者決定（LLM 方法，第一次付費呼叫之前）
+
+建議值在 `eval/llm_methods.json`（`proposed`）。每個 incident 的 token 量估算（proxy token ≈ UTF-8 bytes / 4；實際 tokenizer 的數字可能高 0–30%，未實測）：
+
+| 方法 | 呼叫數 / incident | input tokens / incident | output tokens / incident |
+|---|---|---|---|
+| dump-all（B = 120k） | 1（+ 最多 2 次更正） | 約 12–16 萬 | 約 1–2 千 |
+| retrieval（q = 8、k = 25） | 2 | 約 9 萬（概覽約 1.8 萬 × 2 + 檢索結果約 5 萬） | 約 2–3 千 |
+| agent（40 次工具、工具輸出 ≤ 120k、30 回合） | ≤ 31 | 典型約 40–60 萬，最壞約 180 萬（每回合重送整段對話；prompt caching 可大幅降低） | 約 1–3 萬 |
+
+- Pilot（10 個 incident）× 3 個方法：input 約 0.6–2 千萬 tokens（agent 佔大部分）。held-out 的數量在其協定決定。
+- 成本 = tokens × 所選模型的單價（使用者確認目前價格）；建議先在 1–2 個 Pilot incident 上跑一次，量到實際 token 後再估全部。
+- 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
+
 ## Blocked
 
 - **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
