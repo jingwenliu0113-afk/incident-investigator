@@ -37,6 +37,9 @@
     "opamp-server",
     "telemetry-docs"
   ],
+  "harness_container_prefixes": [
+    "ii-probe-"
+  ],
   "flag_file": {
     "path": "src/flagd/demo.flagd.json",
     "canonical_sha256": "sha256:b7fcbd0145ff31b9935c7c62fcbb318cbadf74317662d895cbf66638aceebdf5"

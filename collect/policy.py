@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 POLICY_PATH = Path(__file__).resolve().parent / "canonical_policy.v1.json"
-POLICY_SHA256 = "sha256:c2ced86338a0d8bd4328af3fc97b1769118e369ae34c2626e5d18e5ec7560ef9"
+POLICY_SHA256 = "sha256:0abfec2e99b1b97c5f52dc8b3cd5fb76c450d42423af94d5d1b227c8055535bf"
 
 # Separators a deleted token takes with it, so "Fail Feature Flag Enabled" becomes "Fail Enabled".
 _SEP = r" _.\-:/=,;"

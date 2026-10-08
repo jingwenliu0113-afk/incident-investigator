@@ -102,6 +102,7 @@
           "sha256",
           "lines",
           "empty_lines",
+          "empty_messages",
           "parse_errors",
           "parse_error_lines",
           "last_line_truncated",
@@ -145,6 +146,11 @@
           "empty_lines": {
             "type": "integer",
             "minimum": 0
+          },
+          "empty_messages": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "lines that are an empty export message ({}): valid, no data (decision 008 revision 3)"
           },
           "parse_errors": {
             "type": "integer",

@@ -197,6 +197,24 @@ Error: failed to shutdown service after error: failed to shutdown meter provider
 5. collector 最後一次 self-telemetry（關閉時推送失敗，見修訂）不影響計算：final 是視窗結束後的第一次正常 export。
 6. soak 報告也附上視窗的 accounting，但不加入判定（R1–R9 已固定）。
 
+## 修訂 3（2026-10-08 約 14:40Z：soak #4 判定為 FAILED 之後、soak #5 開始之前）
+
+soak #4（`data/external/soak/20261008T134542Z/`，同一個 lock，依修訂 1 的 R7 判定）：R1–R6、R9 通過；**R7、R8 失敗**。兩者都是量測程式的問題，raw 本身完整：
+accounting（修訂 2）在視窗內三種 signal 的 accepted 都等於 sent、沒有任何旗標；解析錯誤 0、重複 0。
+
+1. **R7**：關閉期間唯一的 error 是 OpenSearch exporter 清空佇列時，最後一批又因 mapping 衝突被拒（`Exporting failed. Dropping data.`，
+   `otelcol.component.id = opensearch`）。修訂 1 要求「關閉期間沒有任何 error」，沒有考慮到 decision 005 的 OpenSearch 拒收在關閉時也會發生；
+   OpenSearch 每分鐘約 36 次拒收，關閉時清佇列幾乎每次都會遇到。這條規則同時用在 run group 的 raw 完整性（`collector_unclean_stop`），
+   照原樣會讓幾乎每個 run group 無效。**修訂**：關閉期間 `otelcol.component.kind = exporter` 且 `otelcol.component.id = opensearch` 的 error
+   記為 `ambient_errors`、不影響判定；其他任何 error（包括 file/raw_* exporter、receiver、processor）仍然判為不 graceful。
+2. **R8**：metrics 檔的第 2 行是 `{}`，也就是空的 MetricsData 的 proto3 JSON（沒有 resource、沒有資料），scanner 把它算成 signal 錯誤。
+   **修訂**：`{}` 計為 `empty_messages`（raw export 的檔案紀錄新增這個欄位），不算 signal 錯誤；其他缺少該 signal 頂層欄位的行仍是 signal 錯誤。
+3. 另外發現：docker_stats 收到一次 soak 自己的 memcg 探測 container（`docker run --rm` 沒有命名，Docker 隨機命名為 `cool_tharp`）。
+   之後所有 helper container 都命名為 `ii-probe-…`，policy 把這個前綴當成 harness（X1，不算未知服務；decision 011）。
+
+**soak #4 維持 FAILED**；修訂後的標準只用在之後的 soak。同一個 lock 重跑完整的 **soak #5**。
+這是 R7 / R8 第二次在看到失敗後修訂：兩次都是 harness 對「與 raw 無關的已知現象」判斷錯誤，raw 本身的檢查（解析、signal、每分鐘覆蓋、accounting）沒有放寬。
+
 ## 結果
 
 ### soak #3（新 lock，判定 FAILED：R7；見上方修訂）
@@ -217,3 +235,11 @@ up 12:04:19Z；視窗 12:10:02Z – 12:40:09Z（31 分鐘）；drain 3 分鐘；
 - loss accounting（修訂 2）在 soak 視窗 12:10:02–12:40:09 上：traces accepted = sent = 207,973、metrics 234,419、logs 65,363；
   refused / failed / send_failed / memory_limiter dropped 都是 0；沒有任何旗標；視窗內沒有 SDK 錯誤（kafka 啟動時的 160 筆在視窗之前）。
 - normalize policy v1 的校準（decision 011 §4）在這份 raw 上跑完整個 soak 視窗：整個 `calibrate` 指令 151.5 s（其中 normalize 90.7 s）、最大 RSS 約 0.91 GB。
+
+### soak #4（同一個 lock，判定 FAILED：R7、R8；見修訂 3）
+
+up 13:45:42Z；視窗 13:51:36Z – 14:21:50Z（31 分鐘）；stop 0.4 s；teardown `down` exit 0、`verify` 乾淨。R1–R6、R9 通過（0 個 5xx / 1,822 request）。
+raw：traces 228,643 spans / 225.5 MB、metrics 292,419 points / 98.0 MB、logs 74,560 records / 78.2 MB；解析錯誤 0、重複 0；metrics 有 1 行 `{}`。
+accounting（視窗）：traces 177,806、metrics 234,385、logs 57,579，accepted = sent，refused / failed / dropped 都是 0，沒有旗標，沒有 SDK 錯誤。
+docker_stats 漏掉 currency 整個 run（decision 012）。
+

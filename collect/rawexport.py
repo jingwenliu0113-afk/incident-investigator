@@ -5,7 +5,7 @@ from __future__ import annotations
 from collect.records import _schema_problems
 
 SIGNALS = ("traces", "metrics", "logs")
-_FILE_KEYS = ("signal", "format", "bytes", "sha256", "lines", "empty_lines", "parse_errors", "parse_error_lines",
+_FILE_KEYS = ("signal", "format", "bytes", "sha256", "lines", "empty_lines", "empty_messages", "parse_errors", "parse_error_lines",
               "last_line_truncated", "wrong_signal_lines", "items", "duplicates", "min_time", "max_time",
               "by_service", "minutes")
 

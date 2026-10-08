@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import time
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -33,6 +34,7 @@ RAW_EXTRAS_TARGET = "/etc/otelcol-config-extras.yml"
 RAW_DIR_IN_COLLECTOR = "/raw"
 RAW_SIGNALS = ("traces", "metrics", "logs")
 RAW_STOP_TIMEOUT = 120  # seconds of graceful shutdown before SIGKILL
+PROBE_PREFIX = "ii-probe-"  # name of every helper container the harness runs (normalize drops them as harness)
 RAW_LOG_TAIL = 1000  # lines of the stopped collector's log kept as the R7 evidence
 
 # The upstream config pushes the collector's own metrics and logs to its own OTLP receiver (service.telemetry ->
@@ -341,7 +343,8 @@ class Sampler:
                   "echo \"$id current=$(cat $d/memory.current) max=$(cat $d/memory.max) "
                   "oom_kill=$(awk '/^oom_kill /{print $2}' $d/memory.events) "
                   "max_events=$(awk '/^max /{print $2}' $d/memory.events)\"; done")
-        out = self.run(["docker", "run", "--rm", "--network", "none", "--cgroupns=host",
+        out = self.run(["docker", "run", "--rm", "--name", f"{PROBE_PREFIX}memcg-{uuid.uuid4().hex[:12]}",
+                        "--network", "none", "--cgroupns=host",
                         "--entrypoint", "/bin/sh", self.helper_image, "-c", script], self.env)
         return {"kind": "memcg", "ts": _now(), "cgroups": parse_memcg_dump(out, self.ids)}
 
@@ -362,12 +365,28 @@ def collector_state(container_id: str, env: dict[str, str], run: Run = _run) -> 
     return {"restarts": int(out[0]), "exit_code": int(out[1]), "status": out[2]}
 
 
+# decision 005: OpenSearch rejects logs on mapping conflicts all run long; its exporter drains its queue at shutdown and
+# those batches fail the same way. Another pipeline: the raw files are not involved (decision 008 revision 3).
+AMBIENT_SHUTDOWN_EXPORTERS = frozenset({"opensearch"})
+
+
+def _fields(line: str) -> dict:
+    try:
+        fields = json.loads(line.split("\t")[-1])
+    except ValueError:
+        return {}
+    return fields if isinstance(fields, dict) else {}
+
+
 def shutdown_verdict(log: str, exit_code: int | None) -> dict:
     """Did the collector stop gracefully (R7, decision 008 revision)? Exit 0; or exit 1 whose log shows the service
     shut down ("Shutdown complete.") with no error-level line on the way, and whose exit error is only the
     self-telemetry flush to its own, already stopped, OTLP receiver."""
+    ambient: list[str] = []
+
     def verdict(graceful: bool, reason: str, errors: list[str] | None = None, exit_error: str | None = None) -> dict:
-        return {"graceful": graceful, "reason": reason, "shutdown_errors": errors or [], "exit_error": exit_error}
+        return {"graceful": graceful, "reason": reason, "shutdown_errors": errors or [], "ambient_errors": ambient,
+                "exit_error": exit_error}
 
     if exit_code == 0:
         return verdict(True, "exit 0")
@@ -380,7 +399,15 @@ def shutdown_verdict(log: str, exit_code: int | None) -> dict:
     done = next((i for i in range(starts[-1], len(lines)) if "\tShutdown complete." in lines[i]), None)
     if done is None:
         return verdict(False, "exit 1 and the shutdown did not complete")
-    errors = [line[:300] for line in lines[starts[-1]:done] if line.split("\t")[1:2] == ["error"]]
+    errors = []
+    for line in lines[starts[-1]:done]:
+        if line.split("\t")[1:2] != ["error"]:
+            continue
+        fields = _fields(line)
+        if fields.get("otelcol.component.kind") == "exporter" and fields.get("otelcol.component.id") in AMBIENT_SHUTDOWN_EXPORTERS:
+            ambient.append(line[:300])
+        else:
+            errors.append(line[:300])
     if errors:
         return verdict(False, "exit 1 with errors while shutting down", errors)
     tail = "\n".join(line for line in lines[done + 1:] if line.strip())

@@ -27,6 +27,8 @@ LIMIT = 64 * MiB
 W0, W1 = "2026-10-08T10:05:00Z", "2026-10-08T10:08:00Z"  # 3-minute window keeps fixtures small
 # `docker logs` of a collector stopped with `stop -t 120` (2026-10-08 diagnostic run, decision 008 revision)
 SHUTDOWN_LOG = (Path(__file__).parent / "fixtures" / "otelcol-shutdown-0.159.0.txt").read_text()
+# soak #4: the OpenSearch exporter's last queued batch is rejected while shutting down (decision 005 ambient)
+SHUTDOWN_LOG_OPENSEARCH = (Path(__file__).parent / "fixtures" / "otelcol-shutdown-opensearch-0.159.0.txt").read_text()
 
 
 def state(ts, *, restarts=0, health="healthy", streak=0, extra=None):
@@ -216,6 +218,17 @@ def test_shutdown_verdict_accepts_exit_0_and_the_known_self_telemetry_flush_fail
     assert "meter provider" in v["exit_error"] and v["shutdown_errors"] == []
 
 
+def test_shutdown_verdict_tolerates_only_the_ambient_opensearch_export_failure():
+    # decision 008 revision 3: OpenSearch rejects logs all run long (decision 005); its queue drains at shutdown and fails
+    # the same way. It is another pipeline: the raw files are not involved. Any other error still fails R7.
+    v = shutdown_verdict(SHUTDOWN_LOG_OPENSEARCH, 1)
+    assert v["graceful"] is True and len(v["ambient_errors"]) == 1 and v["shutdown_errors"] == []
+    raw = SHUTDOWN_LOG_OPENSEARCH.replace('"otelcol.component.id": "opensearch"', '"otelcol.component.id": "file/raw_logs"', 1)
+    assert shutdown_verdict(raw, 1)["graceful"] is False
+    receiver = SHUTDOWN_LOG_OPENSEARCH.replace('"otelcol.component.kind": "exporter"', '"otelcol.component.kind": "receiver"', 1)
+    assert shutdown_verdict(receiver, 1)["graceful"] is False
+
+
 def _with_error(log, clause):
     return log.replace("connection refused\n", "connection refused; " + clause + "\n")
 
@@ -377,6 +390,18 @@ def test_event_watch_runs_docker_events_for_the_project_and_parses_what_it_wrote
 
     FakeProc.exited_early = True  # e.g. the daemon went away: the stream has a hole, R2 cannot be judged
     assert EventWatch(tmp_path / "e2.jsonl", project="p", env={}, popen=FakeProc).stop() is None
+
+
+def test_the_memcg_probe_container_has_a_recognisable_name():
+    # soak #4: docker_stats caught one unnamed probe ("cool_tharp"); a fixed prefix lets normalize drop it as harness
+    from env.soak import PROBE_PREFIX, Sampler
+
+    calls = []
+    lock = {"images": [{"ref": "quay.io/prometheus/prometheus:v3.13.1", "index_digest": "sha256:" + "a" * 64,
+                        "services": ["prometheus"]}]}
+    Sampler(lock, {"id1": "cart"}, {}, run=lambda cmd, env=None: calls.append(cmd) or "").memcg()
+    name = calls[0][calls[0].index("--name") + 1]
+    assert PROBE_PREFIX == "ii-probe-" and name.startswith(PROBE_PREFIX + "memcg-")
 
 
 def test_parse_memcg_dump_skips_a_container_whose_cgroup_is_gone():

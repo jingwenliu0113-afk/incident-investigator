@@ -192,6 +192,9 @@ class _Run:
                 break
         else:
             svc = raw_attrs.get("service.name")
+        if any(str(svc).startswith(prefix) for prefix in self.policy.raw.get("harness_container_prefixes", ())):
+            self.drop("X1", "harness-probe", ns)  # the harness's own helper container (env.soak.PROBE_PREFIX)
+            return None
         if svc not in self.sut:
             if svc not in self.policy.raw["excluded_services"]:
                 self.unknown_services[str(svc)] += 1

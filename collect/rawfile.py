@@ -65,7 +65,7 @@ def scan_raw_file(path: Path, signal: str) -> dict:
         raise ValueError(f"unknown signal {signal!r} (expected one of {sorted(_LAYOUT)})")
     top = _LAYOUT[signal][0]
     sha, size = hashlib.sha256(), 0
-    lines = empty = wrong = items = duplicates = 0
+    lines = empty = empty_messages = wrong = items = duplicates = 0
     errors: list[int] = []
     last_unparsed_without_newline = False
     seen: set[bytes] = set()
@@ -84,6 +84,9 @@ def scan_raw_file(path: Path, signal: str) -> dict:
                 continue
             try:
                 doc = json.loads(body)
+                if doc == {}:  # proto3 JSON of an empty TracesData / MetricsData / LogsData: valid, carries nothing
+                    empty_messages += 1
+                    continue
                 if not isinstance(doc, dict) or top not in doc:
                     wrong += 1
                     continue
@@ -112,6 +115,7 @@ def scan_raw_file(path: Path, signal: str) -> dict:
         "sha256": "sha256:" + sha.hexdigest(),
         "lines": lines,
         "empty_lines": empty,
+        "empty_messages": empty_messages,
         "parse_errors": len(errors),
         "parse_error_lines": errors[:MAX_ERROR_LINES],
         "last_line_truncated": last_unparsed_without_newline,

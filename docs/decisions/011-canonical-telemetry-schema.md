@@ -158,11 +158,15 @@
    `derive.point_deltas` 需要傳入 series 的 `monotonic`，非 monotonic 的累計 sum（UpDownCounter）下降不再當成 reset（`DERIVE_VERSION` 2）；
    calibrate 的視窗用解析後的時間取最早 / 最晚（字串比較在寬度不同時會選錯），兩端各留 1 s。
 
-policy 檔的 sha 隨 FA-11 重新釘選（狀態仍是 `calibrating`）。
+9. **harness 的 helper container**：`harness_container_prefixes: ["ii-probe-"]`。soak / run group 的 memcg 探測 container 改用這個前綴命名
+   （soak #4 有一次被 docker_stats 收到，當時名稱是 Docker 隨機給的 `cool_tharp`）；normalize 以 X1 丟掉、記為 `harness-probe`，不算未知服務。
+   soak #4 的 raw 裡那筆仍是隨機名稱，會被算成未知服務，所以凍結證據改用 soak #3 與 soak #5。
+
+policy 檔的 sha 隨 FA-11、`harness_container_prefixes` 重新釘選（狀態仍是 `calibrating`）。
 
 ### 凍結條件（2026-10-08 約 14:15Z 寫定，在用最終程式重跑校準之前）
 
-policy 只有在**每一份**沒有 fault 的 soak raw（soak #3，以及 soak #4 的 raw 若可用）上同時滿足下列條件，才可以把 `status` 改為 `frozen`
+policy 只有在**每一份**沒有 fault 的 soak raw（soak #3，以及之後用新探測命名跑的 soak #5）上同時滿足下列條件，才可以把 `status` 改為 `frozen`
 （`collect.calibrate.freeze_check`，`collect calibrate` 的 exit code 只有全部通過才是 0）：
 
 | # | 條件 |

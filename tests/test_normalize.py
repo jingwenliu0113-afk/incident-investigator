@@ -343,3 +343,13 @@ def test_the_report_has_a_pinned_shape(setup):
     on_disk = json.loads(layout.normalize_report_path("INC-001").read_text())
     assert list(Draft202012Validator(schema).iter_errors(on_disk)) == []
     assert list(Draft202012Validator(schema).iter_errors({**report, "removed": {"X5": {"traces": -1}}}))
+
+
+def test_harness_probe_containers_are_dropped_as_harness_not_unknown(tmp_path):
+    # the soak / run-group memcg probe is our own container; docker_stats may catch it (soak #4)
+    scope = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver"
+    probe = gauge_line(res(None, **{"container.name": "ii-probe-memcg-0123456789ab"}), "container.cpu.utilization",
+                       [{"timeUnixNano": str(T0 + 120 * S), "asInt": "1"}], scope=scope)
+    _, report = run_with(tmp_path, {"metrics": [probe]})
+    assert report["unknown_services"] == {}
+    assert report["removed_detail"]["X1"]["metrics"]["by_service"]["harness-probe"] == 1

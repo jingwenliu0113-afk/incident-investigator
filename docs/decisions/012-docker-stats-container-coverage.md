@@ -50,4 +50,6 @@
 
 ## 結果
 
-- （待：soak #4 的 docker_stats 覆蓋率；補送 update event 的診斷 run）
+- **soak #4 再次發生**：這次漏掉的是 **currency**（13:45:58.180 啟動，collector 的 `Starting otelcol-contrib...` 在 13:45:58.077），
+  shipping 這次有收到。兩次 soak 各漏一個、而且不同，證實是啟動 race、每次隨機。
+- （待：補送 update event 的診斷 run）

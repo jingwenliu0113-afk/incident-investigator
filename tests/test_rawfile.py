@@ -109,6 +109,13 @@ def test_broken_lines_are_reported_with_their_numbers(tmp_path):
     assert s["items"] == 1
 
 
+def test_an_empty_export_message_is_not_a_wrong_signal(tmp_path):
+    # soak #4: the file exporter wrote "{}", the proto3 JSON of an empty MetricsData (no resource, no data)
+    p = write(tmp_path, "m.jsonl", ["{}", metrics_line("cart", [point(T0)]), json.dumps({"resourceSpans": []})])
+    s = scan_raw_file(p, "metrics")
+    assert s["empty_messages"] == 1 and s["wrong_signal_lines"] == 1 and s["items"] == 1  # a traces line still is wrong
+
+
 def test_empty_file_and_unknown_signal(tmp_path):
     s = scan_raw_file(write(tmp_path, "e.jsonl", [], trailing_newline=False), "logs")
     assert s["lines"] == 0 and s["items"] == 0 and s["min_time"] is None and s["minutes"] == []
