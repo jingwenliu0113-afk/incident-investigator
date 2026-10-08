@@ -126,6 +126,9 @@
 ### A. 需要使用者決定或批准
 1. **LLM 方法的模型、預算與成本**（決定之前 dump-all / retrieval / agent 一律拒絕執行；見下面的估算）。
 2. **Pilot 的人工作業**（Gate 前）：每個有效 incident 的 label review（decision 018）與 evidence gold 標註（decision 017）。
+3. **Held-out 協定（decision 023，Proposed）要使用者決定的事項**：每個 fault 的 incident 數 K（建議 6 → N = 60，約 45 小時 lock）；
+   held-out 的 LLM 設定與費用；gold 標註量（全標最多 20N 筆，或修訂 017 改抽樣，建議抽樣）；Gate 三個條件的操作定義；
+   Pilot 驗證失敗的 fault 是移除（預設）還是補收；需要新 policy / env lock 時的處理（預設排除受影響的 incident）；方法 bug 修正後重跑的費用。
 
 ### B. LLM 方法的估算（第 A1 項用）
 
