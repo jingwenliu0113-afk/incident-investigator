@@ -16,7 +16,8 @@
   calibrate 可重跑與凍結條件 F1–F6（decision 011）、取樣失敗只看 normal period、verify-running、crash 也留 run record、收尾遮蔽訊號（009 修訂 2）。
 - normalize policy v1 **已凍結**（`sha256:95bc4b07…`）；normalize 會檢查 status、釘選 sha、乾淨 checkout。
 - Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（待凍結）、5 工具就緒、6 工具就緒。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：456 passed（`-m "not network and not docker_daemon"`）。
+- 評分與 baseline（decision 013–015）：prediction 格式與分層評分、時間框架（只給「前 10 分鐘正常」）、統計 baseline v1、leakage audit v1；`python -m eval run|score|leakage`、`python -m collect label|freeze`。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：499 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -88,8 +89,13 @@
 6. **INC-001 的 a priori label**：`uv run python -m collect label --incident INC-001 --origin payment --affected payment,checkout,frontend,frontend-proxy
    --symptom errors --description "orders fail: failed to charge card" --labeler agent:claude-code`（decision 010）。
    `catalog+review`（對照 snapshot、填 `telemetry_coverage`）依 decision 006 / 010 要由**人**做：到 Gate 時請使用者 review。
-7. 之後：Pilot fault 清單（M3/M5）、Core §6 leakage audit（含 normalize report 的 `new_attribute_keys`）、baseline 前要決定的時間框架與預算；
-   LLM baseline / Agent 第一次呼叫付費 API 前依 MACHINE_POLICY 報告成本並等批准。
+7. **leakage audit + 第一個 baseline**：`uv run python -m eval leakage --set pilot`（decision 015）；
+   `uv run python -m eval run --method stat-anomaly --set pilot` → `uv run python -m eval score --method stat-anomaly --set pilot`
+   （decision 013 / 014；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
+8. **Pilot 清單（decision 016，待寫）**：背景研究中（其餘 12 個 Core flag 的傳播、Locust 是否打到、OOM 風險、未處理的 fault 專屬字串）。
+   寫定清單與每個 fault 的 a priori label（origin / affected / symptom）後，依序收集約 9 個（每個約 45 分鐘，heavy lock），每個走 4–7 步。
+9. 之後：第一張 baseline 表（Pilot）、evidence relevance（§9）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
+   token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
 ## Blocked
 
