@@ -67,6 +67,7 @@ class Clock(Protocol):
 
 class Stack(Protocol):
     def preflight(self) -> list[str]: ...
+    def provenance(self) -> dict: ...  # project / lock / machine / compose command / traffic settings (decision 002)
     def compose(self, args: list[str]) -> int: ...
     def watch(self, path: Path): ...  # .seen() / .stop() like env.soak.EventWatch
     def verify_running(self, wait: float) -> list[str]: ...
@@ -109,6 +110,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
                  "injected_sha256": _sha(injected_bytes, work_dir / ".flag.json")},
         "harness_flag_queries": [],
         "clock_offset_seconds": [],
+        "provenance": stack.provenance(),
     }
     samples: list[dict] = []
     samples_file = (work_dir / "samples.jsonl").open("a")

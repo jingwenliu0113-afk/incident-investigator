@@ -10,6 +10,7 @@ import json
 import random
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from collect.labels import FLAG_FAULT_TYPES
 from collect.layout import DataLayout
@@ -42,7 +43,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     run.add_argument("--flag", required=True)
     run.add_argument("--variant", required=True)
     run.add_argument("--seed", type=int, help="default: a fresh random seed (recorded)")
+    norm = sub.add_parser("normalize", help="raw -> canonical snapshot of one incident (policy must be frozen)")
+    norm.add_argument("--incident", required=True)
+    cal = sub.add_parser("calibrate", help="dry normalize + inventory on a soak's raw (no fault), before freezing")
+    cal.add_argument("--soak", type=Path, required=True)
     ns = parser.parse_args(argv)
+
+    if ns.command == "normalize":
+        from datetime import UTC, datetime
+
+        from collect.incident import normalize_incident
+        from env.cli import _load_lock
+        from env.lock import lock_sha256
+
+        layout = DataLayout(PROJECT_DIR / "data/external")
+        try:
+            report = normalize_incident(layout, ns.incident, lock_sha256=lock_sha256(_load_lock(PROJECT_DIR)),
+                                        now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        except (LookupError, ValueError, PermissionError, RuntimeError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        # counts of what was removed stay in the ground-truth report; only the snapshot digest is printed
+        print(json.dumps({"incident_id": ns.incident, "content_sha256": report["content_sha256"]}, indent=2))
+        return 0
+    if ns.command == "calibrate":
+        from collect.calibrate import calibrate
+
+        out = PROJECT_DIR / "data/external/calibration" / ns.soak.name
+        result = calibrate(ns.soak, out)
+        print(json.dumps({"out": str(out), "check_problems": result["check_problems"], "seconds": result["seconds"],
+                          "max_rss_bytes": result["max_rss_bytes"], "unknown_services": result["report"]["unknown_services"],
+                          "unknown_fields": result["inventory"]["unknown_fields"]}, indent=2))
+        return 0 if not result["check_problems"] else 1
 
     try:
         _check_args(ns)

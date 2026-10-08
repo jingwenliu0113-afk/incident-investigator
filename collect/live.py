@@ -84,6 +84,23 @@ class LiveStack:
             problems.append(f"docker unreachable: {str(e)[:200]}")
         return problems
 
+    def provenance(self) -> dict:
+        """Facts the incident manifest needs (decision 002), taken before `up`."""
+        from collect.provenance import machine_info, project_git_state
+        from collect.traffic import traffic_settings
+        from env.cli import _compose_kwargs, cmd_compose_cmd
+        from env.compose import render_config
+        from env.lock import LOCK_PATH
+
+        up = self.lock["upstream"]
+        rendered = render_config(**_compose_kwargs(self.lock, self.project_dir, self.upstream_dir))
+        return {"project": project_git_state(self.project_dir),
+                "env_lock": {"path": str(LOCK_PATH), "sha256": self.lock_sha256, "upstream_tag": up["tag"],
+                             "upstream_commit": up["commit"]},
+                "machine": machine_info("mac"),
+                "compose_command": cmd_compose_cmd(self.project_dir, self.upstream_dir, ["up"]),
+                "traffic_settings": traffic_settings(rendered)}
+
     def compose(self, args: list[str]) -> int:
         return cmd_compose_exec(self.project_dir, self.upstream_dir, args)
 

@@ -56,6 +56,9 @@ class Stack:
     def preflight(self):
         return []
 
+    def provenance(self):
+        return {"project": {"commit": "a" * 40, "dirty": False}, "env_lock": {"sha256": "sha256:" + "1" * 64}}
+
     def compose(self, args):
         self.calls.append(args)
         return 0
@@ -155,6 +158,7 @@ def test_valid_run_follows_the_protocol_and_restores_the_flag_file(tmp_path, fla
     assert rec["normal_period"]["clean"] is True
     assert abs(rec["clock_offset_seconds"][0] - 0.25) < 1e-6
     assert rec["incident_window"] == {"start": s["normal_start"], "end": s["end"]}
+    assert rec["provenance"]["project"]["commit"] == "a" * 40  # recorded before `up` for the incident manifest
 
 
 def test_unstable_stack_is_aborted_before_any_fault(tmp_path, flag_path):
