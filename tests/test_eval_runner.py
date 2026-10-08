@@ -274,3 +274,15 @@ def test_compare_two_scored_methods_on_the_same_set(tmp_path, monkeypatch):
     assert "right - wrong" in (out / "pilot" / "compare-right-vs-wrong.md").read_text()
     with pytest.raises(LookupError, match="score"):
         compare_methods("pilot", "right", "missing", out)
+
+
+def test_a_difficulty_stratum_with_ten_run_groups_gets_intervals():
+    # decision 023 §7: strata with >= 10 run groups report bootstrap intervals, smaller ones only means
+    from eval.runner import STRATUM_MIN_RUN_GROUPS, difficulty_strata
+
+    assert STRATUM_MIN_RUN_GROUPS == 10
+    rows = [{"incident_id": f"INC-{i:03d}", "run_group_id": f"RG-{i:03d}", "difficulty": "easy" if i <= 10 else "hard",
+             "fault_type": 1.0, "origin_top1": float(i % 2), "affected_f1": 0.5, "symptom_exact": 1.0} for i in range(1, 14)]
+    out = difficulty_strata(rows)
+    assert out["easy"]["n_incidents"] == 10 and out["easy"]["ci95"]["origin_top1"][0] < 0.5 < out["easy"]["ci95"]["origin_top1"][1]
+    assert out["hard"]["n_incidents"] == 3 and out["hard"]["ci95"] is None and out["hard"]["metrics"]["fault_type"] == 1.0

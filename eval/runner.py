@@ -82,6 +82,27 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> l
     return written
 
 
+STRATUM_MIN_RUN_GROUPS = 10  # decision 023 §7: smaller strata report means only
+
+
+def difficulty_strata(rows: list[dict]) -> dict:
+    """Main metrics per difficulty (decision 015): means, plus run-group bootstrap intervals for strata with at least
+    STRATUM_MIN_RUN_GROUPS run groups."""
+    out = {}
+    for d in DIFFICULTIES:
+        group = [r for r in rows if r["difficulty"] == d]
+        if not group:
+            continue
+        entry = {"n_incidents": len(group), "metrics": {m: sum(r[m] for r in group) / len(group) for m in MAIN_METRICS},
+                 "ci95": None}
+        if len({r["run_group_id"] for r in group}) >= STRATUM_MIN_RUN_GROUPS:
+            agg = aggregate([{"incident_id": r["incident_id"], "run_group_id": r["run_group_id"],
+                              **{m: r[m] for m in MAIN_METRICS}} for r in group])
+            entry["ci95"] = {m: agg["metrics"][m]["ci95"] for m in MAIN_METRICS}
+        out[d] = entry
+    return out
+
+
 def _clock_offset(layout: DataLayout, inc: str) -> float:
     """Data clock minus host clock of the incident's run (the label is on the host clock)."""
     return json.loads(layout.normalize_report_path(inc).read_text())["window"]["clock_offsets"][0]
@@ -161,12 +182,7 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
                if not k.startswith("evidence_") and k not in ("difficulty", "fault", "failure", "label_reviewed", "saw_method_outputs")}
               for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
-    by_difficulty = {}
-    for d in DIFFICULTIES:
-        group = [r for r in rows if r["difficulty"] == d]
-        if group:
-            by_difficulty[d] = {"n_incidents": len(group),
-                                "metrics": {m: sum(r[m] for r in group) / len(group) for m in MAIN_METRICS}}
+    by_difficulty = difficulty_strata(rows)
     failed = [r for r in rows if r["failure"] is not None]
     failures = {"n_failures": len(failed), "by_category": {c: sum(r["failure"] == c for r in failed) for c in CATEGORIES},
                 "by_difficulty": {d: {c: sum(r["failure"] == c for r in failed if r["difficulty"] == d) for c in CATEGORIES}
@@ -197,10 +213,12 @@ def _table(result: dict) -> str:
     for name, m in agg["metrics"].items():
         mark = " (main)" if name in MAIN_METRICS else ""
         lines.append(f"| {name}{mark} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
-    lines += ["", "## Main metrics by difficulty (decision 015; means, no interval)", "",
+    lines += ["", f"## Main metrics by difficulty (decision 015; intervals only with >= {STRATUM_MIN_RUN_GROUPS} run groups)", "",
               "| difficulty | n | " + " | ".join(MAIN_METRICS) + " |", "|---|---:|" + "---:|" * len(MAIN_METRICS)]
     for d, g in result["by_difficulty"].items():
-        lines.append(f"| {d} | {g['n_incidents']} | " + " | ".join(f"{g['metrics'][m]:.3f}" for m in MAIN_METRICS) + " |")
+        cells = [f"{g['metrics'][m]:.3f}" + ("" if g["ci95"] is None else f" [{g['ci95'][m][0]:.3f}, {g['ci95'][m][1]:.3f}]")
+                 for m in MAIN_METRICS]
+        lines.append(f"| {d} | {g['n_incidents']} | " + " | ".join(cells) + " |")
     if result["excluded"]:
         lines += ["", "Excluded from every score: " + ", ".join(f"{e['incident_id']} ({e['reason']})" for e in result["excluded"])]
     f = result["failures"]
