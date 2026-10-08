@@ -67,7 +67,6 @@ def test_label_cli_writes_the_catalog_label_and_reports_problems_with_exit_2(sto
     monkeypatch.setattr(cli, "PROJECT_DIR", layout.root.parent.parent)  # data/external lives under it
     layout_root = layout.root
     monkeypatch.setattr(cli, "DataLayout", lambda root: DataLayout(layout_root))
-    args = ["label", "--incident", "INC-001", "--origin", "payment", "--affected", "payment,checkout,frontend,frontend-proxy",
-            "--symptom", "errors", "--description", "orders fail", "--labeler", "agent:claude-code"]
+    args = ["label", "--incident", "INC-001", "--labeler", "agent:claude-code"]  # the answer comes from the plan (016)
     assert cli.main(args) == 0 and json.loads(layout.label_path("INC-001").read_text())["origin_service"] == "payment"
     assert cli.main(args) == 2 and "never overwritten" in capsys.readouterr().err

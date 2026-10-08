@@ -28,6 +28,8 @@
    - traffic generator（load-generator）是使用者側，它看到的現象記在 `user_symptom`，不列入 `affected_services`。
    - 理由：「流量變少」的服務數量會隨呼叫鏈長度膨脹，而且在 metrics 上不易和正常的流量變異區分；以「自己出現錯誤或延遲」為準，判定可重現，也和 SPEC §8 分層評分的用意一致。
 
+> 規則 3 的補充（origin 以外的服務只算錯誤或延遲、OOM / 重啟算錯誤）見 decision 016 §2。
+
 ## 放棄的替代方案
 
 - **第一個 incident 用比較難的 fault（例如 lock contention、低比例失敗）**：Day 1 的目的是驗證 pipeline，不是測難度；難度在 Pilot 與 leakage audit 再處理。

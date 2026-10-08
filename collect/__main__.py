@@ -14,6 +14,7 @@ from pathlib import Path
 
 from collect.labels import FLAG_FAULT_TYPES
 from collect.layout import DataLayout
+from collect.pilot import planned
 from collect.records import load_flag_catalog
 from collect.rungroup import Plan, next_id, run_group, store_run_group
 from env.lock import PROJECT_DIR
@@ -36,6 +37,9 @@ def _check_args(ns: argparse.Namespace) -> None:
     catalog = load_flag_catalog(FLAG_FILE)
     if ns.variant not in catalog[ns.flag]["variants"] or ns.variant == catalog[ns.flag]["default"]:
         raise UsageError(f"flag {ns.flag!r} has no variant {ns.variant!r} that injects a fault")
+    if planned(ns.split, ns.flag, ns.variant) is None:
+        raise UsageError(f"{ns.flag} {ns.variant} is not on the {ns.split} plan (decision 016): "
+                         "a set collects only its pre-registered faults")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -56,14 +60,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     frz.add_argument("--calibration", type=Path, action="append", required=True, help="a calibration.json (repeat)")
     rep = sub.add_parser("replay", help="Day 1 #6: analyse an incident from its snapshot alone (live system deleted)")
     rep.add_argument("--incident", required=True)
-    lab = sub.add_parser("label", help="write an incident's a priori (catalog) label; fault facts come from injection.json")
+    lab = sub.add_parser("label", help="write an incident's a priori (catalog) label: fault facts from injection.json, "
+                                       "origin / affected / symptom from its set's pre-registered plan (decision 016)")
     lab.add_argument("--incident", required=True)
-    lab.add_argument("--origin", required=True)
-    lab.add_argument("--affected", required=True, help="comma-separated SUT services (decision 010 rule 3)")
-    lab.add_argument("--symptom", required=True, help="comma-separated: errors, latency, degraded_feature, none")
-    lab.add_argument("--description", required=True)
     lab.add_argument("--labeler", required=True, help="who labels, e.g. human:<name> or agent:claude-code")
-    lab.add_argument("--notes")
     ns = parser.parse_args(argv)
 
     if ns.command == "replay":
@@ -100,13 +100,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if ns.command == "label":
         from datetime import UTC, datetime
 
-        from collect.labeling import catalog_label
+        from collect.labeling import catalog_label_from_plan
 
         try:
-            label = catalog_label(DataLayout(PROJECT_DIR / "data/external"), ns.incident, origin=ns.origin,
-                                  affected=ns.affected.split(","), symptom_kinds=ns.symptom.split(","),
-                                  symptom_description=ns.description, labeler=ns.labeler, notes=ns.notes,
-                                  now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            label = catalog_label_from_plan(DataLayout(PROJECT_DIR / "data/external"), ns.incident, labeler=ns.labeler,
+                                            now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
         except (LookupError, ValueError, OSError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 2

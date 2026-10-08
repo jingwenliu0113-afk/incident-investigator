@@ -75,6 +75,8 @@
 
 ## 尚未決定（不在 Day 1 #2 範圍）
 
+> 第一項已在 decision 016 決定（origin 判定規則與 Pilot 的 a priori label）。
+
 - 每個 flag 的 a priori origin / affected / symptom（例如 `paymentUnreachable` 的 origin 是設定錯誤的 checkout 還是收不到流量的 payment；
   `kafkaQueueProblems`、`loadGeneratorFloodHomepage` 的 origin）：在 Pilot fault 清單（M3 / M5）決定，並寫 decision log。
 - 各層的評分規則（例如 affected services 用 set F1 還是 recall）：在評測協定固定時決定，必須在看到任何結果之前。

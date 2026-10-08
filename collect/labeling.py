@@ -1,7 +1,8 @@
 """The a priori (catalog) label of one incident, from its injection record (decisions 006, 010). Ground-truth side only.
 
-The answer facts (flag, variant, fault time, seed) come from injection.json, never from a person; the person supplies
-origin, affected services and the user symptom from the fault design (decision 010 rule 3). check_label() must pass
+The answer facts (flag, variant, fault time, seed) come from injection.json, never from a person; origin, affected
+services and the user symptom come from the fault design (decision 010 rule 3), pre-registered per set in
+collect.pilot (decision 016). check_label() must pass
 before anything is written, and a label is never overwritten.
 """
 
@@ -12,6 +13,7 @@ import json
 from collect.incident import find_run
 from collect.labels import FAULT_TYPES, FLAG_FAULT_TYPES, check_label
 from collect.layout import DataLayout
+from collect.pilot import planned
 from collect.policy import load_policy
 from collect.traffic import TRAFFIC_PROFILES
 
@@ -54,3 +56,15 @@ def catalog_label(layout: DataLayout, incident_id: str, *, origin: str, affected
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(label, indent=2) + "\n")
     return label
+
+
+def catalog_label_from_plan(layout: DataLayout, incident_id: str, *, labeler: str, now: str) -> dict:
+    """The catalog label registered for this incident's fault in its set's plan (decision 016), never typed afresh."""
+    injection = json.loads(layout.injection_path(find_run(layout, incident_id)["run_group_id"]).read_text())
+    split, fault = injection["split"], injection["fault"]
+    entry = planned(split, fault["flag"], fault["variant"])
+    if entry is None:
+        raise LookupError(f"{fault['flag']} {fault['variant']} is not in the {split} plan (decision 016)")
+    return catalog_label(layout, incident_id, origin=entry["origin"], affected=entry["affected"],
+                         symptom_kinds=entry["symptom_kinds"], symptom_description=entry["description"],
+                         labeler=labeler, now=now, notes=entry["notes"])

@@ -17,7 +17,9 @@
 - normalize policy v1 **已凍結**（`sha256:95bc4b07…`）；normalize 會檢查 status、釘選 sha、乾淨 checkout。
 - Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（待凍結）、5 工具就緒、6 工具就緒。
 - 評分與 baseline（decision 013–015）：prediction 格式與分層評分、時間框架（只給「前 10 分鐘正常」）、統計 baseline v1、leakage audit v1；`python -m eval run|score|leakage`、`python -m collect label|freeze`。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：499 passed（`-m "not network and not docker_daemon"`）。
+- **Pilot 清單已預先登錄（decision 016）**：10 個 fault 與各自的 a priori label（`collect/pilot.py`）；origin 規則（flag 改變誰的程式 / 設定）、
+  規則 3 補充（非 origin 只算錯誤或延遲，OOM / 重啟算錯誤）、user_symptom 在 edge 判定、fault 沒被觸發就重收。`collect run --set pilot` 只收清單上的 fault，`collect label` 只從清單取答案。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：524 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -86,14 +88,16 @@
    RG-001（15:21Z）aborted_unstable：暖機中 grafana exit 1 重啟、payment healthcheck 連續失敗（payment 140/140 MiB）→ 依規則重收（decision 009「收集結果」）。
    run group 無效（例如 `container_metrics_missing`）→ 記錄原因、換新 seed 重收（decision 009 §4）。
 5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
-6. **INC-001 的 a priori label**：`uv run python -m collect label --incident INC-001 --origin payment --affected payment,checkout,frontend,frontend-proxy
-   --symptom errors --description "orders fail: failed to charge card" --labeler agent:claude-code`（decision 010）。
+6. **a priori label**：`uv run python -m collect label --incident INC-001 --labeler agent:claude-code`（答案只從 decision 016 的清單取）。
    `catalog+review`（對照 snapshot、填 `telemetry_coverage`）依 decision 006 / 010 要由**人**做：到 Gate 時請使用者 review。
 7. **leakage audit + 第一個 baseline**：`uv run python -m eval leakage --set pilot`（decision 015）；
    `uv run python -m eval run --method stat-anomaly --set pilot` → `uv run python -m eval score --method stat-anomaly --set pilot`
    （decision 013 / 014；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
-8. **Pilot 清單（decision 016，待寫）**：背景研究中（其餘 12 個 Core flag 的傳播、Locust 是否打到、OOM 風險、未處理的 fault 專屬字串）。
-   寫定清單與每個 fault 的 a priori label（origin / affected / symptom）後，依序收集約 9 個（每個約 45 分鐘，heavy lock），每個走 4–7 步。
+8. **其餘 9 個 Pilot fault**（decision 016 §4 的順序，每個約 45 分鐘、heavy lock，每個走 4–7 步）：
+   `./tools/with-mac-lock uv run python -m collect run --set pilot --flag <flag> --variant <variant>`，依序為
+   productCatalogFailure on、paymentUnreachable on、cartFailure 100%、intlShippingSlowdown 10sec、productCatalogLockContention on、
+   adHighCpu on、adManualGc on、emailMemoryLeak 1000x、recommendationCacheFailure on。
+   review 時要檢查的 a priori 不確定項目見 decision 016 §5（例如 cartFailure 的 EmptyCart 耗時、intlShippingSlowdown 是否真的被觸發）。
 9. 之後：第一張 baseline 表（Pilot）、evidence relevance（§9）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
@@ -107,7 +111,6 @@
 - 遠端 RTX 5070 Ti：Core 不需要，沒有使用。
 - Docker Desktop：依 `MACHINE_POLICY.md`，在 Core 階段是本 Project 專用。
   機器上不屬於本 Project 的 Docker 資源都保持原狀：`pgvector/pgvector:pg17` image、`rtu-maintenance-platform-db-1`（停止中）container、它的 volume `rtu-maintenance-platform_rtu_db_data` 與 network `rtu-maintenance-platform_default`。
-- Mac heavy lock：soak #1 期間持有，已由 wrapper 釋放；目前沒有人持有。
 - 本機已下載 28 個鎖定的 image（約 11.7 GB），保留給之後的收集使用。
 - Docker Desktop VM 的 kernel log（`~/Library/Containers/com.docker.docker/Data/log/vm/init.log*`）約 2.5 分鐘輪替一次，只保留約 25 分鐘；
   OOM 證據要在 run 期間抓（soak 工具的 `docker-events.jsonl`）。
