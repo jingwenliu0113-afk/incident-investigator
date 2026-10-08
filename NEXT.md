@@ -78,8 +78,7 @@
 
 ## 下一步（Core，依序）
 
-1. **soak #5**（執行中，2026-10-08 14:37Z 起，持有 heavy lock）：R1–R9（R7 / R8 用修訂 3 的標準）。通過 → 這個 lock 可以收集；decision 008「結果」補 soak #5。
-   不通過 → 調查，不動凍結的設定。
+1. ✅ **soak #5 PASSED**（`data/external/soak/20261008T143533Z/`）：這個 lock 可以收集（decision 008「結果」）。
 2. **校準（tree 必須乾淨）**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #5 各一次
    （同一個 commit；soak #4 的 raw 有隨機命名的探測 container，不用；14:29Z 那次 soak #3 校準沒有記錄 commit，不能用來凍結）。
 3. **凍結**：`uv run python -m collect freeze --calibration <soak #3 的 calibration.json> --calibration <soak #5 的>` →

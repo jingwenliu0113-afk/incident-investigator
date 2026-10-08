@@ -245,3 +245,13 @@ raw：traces 228,643 spans / 225.5 MB、metrics 292,419 points / 98.0 MB、logs 
 accounting（視窗）：traces 177,806、metrics 234,385、logs 57,579，accepted = sent，refused / failed / dropped 都是 0，沒有旗標，沒有 SDK 錯誤。
 docker_stats 漏掉 currency 整個 run（decision 012）。
 
+### soak #5（同一個 lock，**PASSED**；依修訂 3 的標準）
+
+程式版本 `fd09f41`；up 14:35:33Z；視窗 14:41:11Z – 15:11:20Z（31 分鐘）；teardown `down` exit 0、`verify` 乾淨。lock `sha256:055cc7a0…`。
+- R1–R9 全部通過：0 個 5xx / 1,948 request；R6 checkout p95 14.7 MiB（23%）、product-catalog p95 18.4 MiB（14%），視窗內沒有碰到 `memory.max`
+  （比 soak #2–#4 的約 49 / 52 MiB 低很多；判定不受影響，原因未查，記錄於此）。
+- R7：stop exit 1，判為 graceful（只有 self-telemetry 推送失敗；這次關閉期間沒有 OpenSearch 錯誤）。R8：metrics 有 2 行 `{}`（空訊息），沒有解析錯誤或 signal 錯誤。
+- raw：traces 256,413 spans / 252.6 MB、metrics 286,765 points / 95.7 MB、logs 82,818 records / 86.8 MB；重複 0。
+- accounting（視窗）：traces 203,809、metrics 230,992、logs 65,543，accepted = sent，沒有旗標，沒有 SDK 錯誤。
+- **結論：這個 lock 通過 soak，可以收集**（decision 009 §2）。soak #3、#4 的失敗都是量測程式的問題，紀錄保留。
+

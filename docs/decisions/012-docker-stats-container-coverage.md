@@ -52,6 +52,8 @@
 
 - **soak #4 再次發生**：這次漏掉的是 **currency**（13:45:58.180 啟動，collector 的 `Starting otelcol-contrib...` 在 13:45:58.077），
   shipping 這次有收到。兩次 soak 各漏一個、而且不同，證實是啟動 race、每次隨機。
+- **soak #5**：所有 18 個 SUT container 都有資料，漏掉的是 flagd-ui（不是 SUT）。到目前為止 3 次 soak 每次都漏一個（shipping、currency、flagd-ui），
+  診斷 run 一次沒有漏：沒有補送時，一次 run 有 SUT container 被漏掉的機率不低。
 - **補送的證據**（2026-10-08）：
   1. receiver 原始碼（contrib v0.159.0 `internal/docker/docker.go`）：event loop 的 filter 包含 `update`，除了 `destroy` 以外的 event 都呼叫
      `InspectAndPersistContainer`，會把 running 的 container 加進收集清單。
