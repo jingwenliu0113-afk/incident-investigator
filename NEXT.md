@@ -93,7 +93,8 @@
 
 ## Blocked
 
-- 目前沒有 blocker。soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。
+- **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
+- （歷史）soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。
 - 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
   執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
   （理由：跑 decision 004 的 soak test；當時 daemon 是停止狀態，沒有其他 workload 在跑），接著先 `compose down --volumes` 清掉本 Project 被 restart policy 拉起的 container。
