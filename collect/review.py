@@ -74,18 +74,24 @@ def _summary(snapshot, on: int, off: int) -> dict:
     return out
 
 
-def review_sheet(layout: DataLayout, incident_id: str) -> dict:
+def review_sheet(layout: DataLayout, incident_id: str, *, overwrite: bool = False) -> dict:
+    paths = _paths(layout, incident_id)
+    if paths["label"].exists():
+        raise FileExistsError(f"{incident_id} is already reviewed (decision 018): no new worksheet")
+    if paths["todo"].exists() and not overwrite:
+        raise FileExistsError(f"{paths['todo']} exists: a worksheet that may be half filled is never overwritten "
+                              "(pass overwrite to start again)")
     label = json.loads(layout.label_path(incident_id).read_text())
     rg = find_run(layout, incident_id)["run_group_id"]
     injection = json.loads(layout.injection_path(rg).read_text())
     run = json.loads((layout.run_group_truth_dir(rg) / "run.json").read_text())
     offset = json.loads(layout.normalize_report_path(incident_id).read_text())["window"]["clock_offsets"][0]
     snapshot = open_snapshot(layout.incident_dir(incident_id) / "normalized", layout)
-    shift = int(offset * 10**9)  # label and run record: host clock; snapshot: data clock
-    on, off = _ns(label["fault_start"]), _ns(label["fault_end"])
+    shift = int(offset * 10**9)  # label and schedule: host clock; snapshot and docker events (the daemon runs in the VM): data clock
+    on, off = _ns(label["fault_start"]) + shift, _ns(label["fault_end"]) + shift
     events = {p: [] for p in PERIODS}
     for e in run.get("events", []):
-        if _ns(e["ts"]) >= _ns(injection["schedule"]["normal_start"]):  # warm-up events are not part of the incident
+        if _ns(e["ts"]) >= _ns(injection["schedule"]["normal_start"]) + shift:  # warm-up events are not part of the incident
             events[_period(_ns(e["ts"]), on, off)].append(e)
     sheet = {
         "incident_id": incident_id,
@@ -96,30 +102,36 @@ def review_sheet(layout: DataLayout, incident_id: str) -> dict:
         "a_priori": {k: label[k] for k in ("injected_fault", "origin_service", "affected_services", "user_symptom",
                                            "fault_start", "fault_end")} | {"notes": label["labeling"].get("notes")},
         "clock_offset_s": offset,
-        "services": _summary(snapshot, on + shift, off + shift),
+        "services": _summary(snapshot, on, off),
         "events": events,
         "review": {"affected_services": list(label["affected_services"]), "user_symptom": copy.deepcopy(label["user_symptom"]),
                    "telemetry_coverage": {"traces": None, "metrics": None, "logs": None},
                    "fault_exercised": None, "saw_method_outputs": None,
                    "notes": label["labeling"].get("notes"), "reasons": {}},
     }
-    _paths(layout, incident_id)["todo"].write_text(json.dumps(sheet, indent=2) + "\n")
+    paths["todo"].write_text(json.dumps(sheet, indent=2) + "\n")
     return sheet
 
 
 def _differences(a_priori: dict, review: dict) -> list[dict]:
+    """Every reviewable field that differs from the a priori label (decision 018 §2, §3)."""
     out = []
     if sorted(review["affected_services"]) != sorted(a_priori["affected_services"]):
         out.append({"field": "affected_services", "a_priori": a_priori["affected_services"],
                     "reviewed": review["affected_services"]})
-    if sorted(review["user_symptom"]["kinds"]) != sorted(a_priori["user_symptom"]["kinds"]):
-        out.append({"field": "user_symptom", "a_priori": a_priori["user_symptom"], "reviewed": review["user_symptom"]})
+    before, after = a_priori["user_symptom"], review["user_symptom"]
+    if (sorted(after.get("kinds") or []), after.get("description") or "") != (sorted(before["kinds"]), before.get("description") or ""):
+        out.append({"field": "user_symptom", "a_priori": before, "reviewed": after})
+    if (review.get("notes") or "") != (a_priori["labeling"].get("notes") or ""):
+        out.append({"field": "notes", "a_priori": a_priori["labeling"].get("notes"), "reviewed": review.get("notes")})
     return out
 
 
 def apply_review(layout: DataLayout, incident_id: str, sheet: dict, *, reviewer: str, now: str) -> dict:
     if not reviewer.startswith("human:"):
         raise ValueError(f"a label review is made by a person (human:<name>), not {reviewer!r} (decision 018 §4)")
+    if sheet.get("incident_id") != incident_id:
+        raise ValueError(f"the worksheet belongs to {sheet.get('incident_id')}, not {incident_id}")
     paths = _paths(layout, incident_id)
     if paths["label"].exists() or paths["record"].exists():
         raise FileExistsError(f"{incident_id} is already reviewed: a review is written once (decision 018)")

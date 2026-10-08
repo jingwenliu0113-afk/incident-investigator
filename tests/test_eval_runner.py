@@ -130,7 +130,8 @@ def test_eval_cli_checks_its_arguments_and_gold_add_refuses_an_agent(tmp_path, m
         cli.main(["leakage"])  # needs --set
     assert cli.main(["gold-todo", "--set", "pilot"]) == 0  # an empty set: nothing to judge
     sheet = tmp_path / "s.json"
-    sheet.write_text(json.dumps({"items": [{"id": "s-" + "a" * 16, "t0": None, "t1": None, "relevant": True}]}))
+    sheet.write_text(json.dumps({"incident_id": "INC-001",
+                                 "items": [{"id": "s-" + "a" * 16, "t0": None, "t1": None, "relevant": True}]}))
     assert cli.main(["gold-add", "--incident", "INC-001", "--file", str(sheet), "--annotator", "agent:claude-code"]) == 2
     assert "human" in capsys.readouterr().err
 
@@ -199,3 +200,57 @@ def test_llm_methods_refuse_to_run_until_the_model_and_budgets_are_approved(tmp_
     approved.write_text(_json.dumps({**config, "status": "approved", "model": "some-model"}))
     with pytest.raises(ValueError, match="adapter"):
         load_llm_config(approved, need_client=True)
+
+
+def test_gold_worksheets_belong_to_one_incident_and_unmerged_judgments_are_never_wiped(tmp_path, monkeypatch):
+    from baselines.statistical import predict
+    from collect.snapshot import open_snapshot
+    from eval.runner import gold_add, gold_todo_set
+
+    layout = stored(tmp_path / "data")
+    snap = open_snapshot(layout.incident_dir("INC-001") / "normalized", layout)
+    spans = [s["id"] for s in snap.spans()][:2]
+    monkeypatch.setitem(METHODS, "cites", lambda s, i: {**predict(s, i), "evidence": [{"id": x} for x in spans]})
+    out = tmp_path / "results"
+    run_method(layout, "cites", "pilot", out)
+    gold_todo_set(layout, "pilot", out)
+    path = layout.label_path("INC-001").with_name("evidence_gold_todo.json")
+    sheet = json.loads(path.read_text())
+    sheet["items"][0]["relevant"] = True
+    path.write_text(json.dumps(sheet))
+    with pytest.raises(ValueError, match="not merged"):
+        gold_todo_set(layout, "pilot", out)  # the filled sheet was not added yet
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({**sheet, "incident_id": "INC-002"}))
+    with pytest.raises(ValueError, match="INC-002"):
+        gold_add(layout, "INC-001", other, annotator="human:jw", now="2026-10-09T10:00:00Z")
+    gold_add(layout, "INC-001", path, annotator="human:jw", now="2026-10-09T10:00:00Z")
+    assert gold_todo_set(layout, "pilot", out)["incidents"][0]["to_judge"] == 1  # merged: a fresh sheet is fine
+
+
+def test_the_table_marks_reviews_made_after_seeing_outputs_and_lists_differences_and_failures(tmp_path, monkeypatch):
+    from baselines.statistical import predict
+
+    layout = stored(tmp_path / "data")
+    truth = layout.label_path("INC-001").parent
+    reviewed = {**json.loads(layout.label_path("INC-001").read_text()),
+                "telemetry_coverage": {"traces": "origin", "metrics": "none", "logs": "origin"},
+                "labeling": {"method": "catalog+review", "labeled_at": "2026-10-09T09:00:00Z", "labeler": "human:jw"}}
+    (truth / "label.reviewed.json").write_text(json.dumps(reviewed))
+    (truth / "label_review.json").write_text(json.dumps({
+        "review_version": 1, "incident_id": "INC-001", "reviewer": "human:jw", "reviewed_at": "2026-10-09T09:00:00Z",
+        "fault_exercised": True, "saw_method_outputs": True,
+        "differences": [{"field": "affected_services", "a_priori": ["payment", "checkout"], "reviewed": ["payment"],
+                         "reason": "checkout shows no errors"}]}))
+    monkeypatch.setitem(METHODS, "wrong", lambda s, i: ({**predict(s, i), "origin_candidates": ["cart"]},
+                                                        {"stop_reason": "submitted", "exposure": []}))
+    out = tmp_path / "results"
+    run_method(layout, "wrong", "pilot", out)
+    audit_set(layout, "pilot", out)
+    result = score_method(layout, "wrong", "pilot", out)
+    row = result["incidents"][0]
+    assert row["saw_method_outputs"] is True and result["review_differences"]["INC-001"][0]["field"] == "affected_services"
+    assert result["failures"]["share"]["not_seen"] == 1.0
+    table = (out / "pilot" / "wrong" / "table.md").read_text()
+    for text in ("reviewed after seeing method outputs: INC-001", "INC-001: affected_services", "| INC-001 |", "not_seen"):
+        assert text in table, text

@@ -26,6 +26,8 @@
 5. **工作表內容**：a priori label、decision 016 §5 對該 fault 要檢查的項目、snapshot 每個服務在 normal / fault / recovery 的摘要
    （每分鐘 span 數、error 比例、server span p95 的中位數與最大值、每分鐘 WARN 以上 log 數、CPU 平均、記憶體最大值），以及 run record 中各時段的 container die / oom 事件。
    摘要只是方便查看；判斷以 snapshot 本身為準。
+   container 事件的時間來自 Docker VM 裡的 daemon，是資料時鐘：與 label 的時間比較前先加上該 run 量到的時鐘差。
+   工作表只產生一次（半填的表不會被覆蓋，要重來須明確指定）；工作表必須屬於被套用的那個 incident。
 6. **`fault_exercised = false`**：該 incident 不進任何評分（報告表列出排除原因），依 decision 016 §5 以新的 run group 重收一次。
 7. **評分、leakage audit、evidence relevance 用的 label**：有 `label.reviewed.json` 就用它，否則用 `label.json`；報告表列出各用了幾份。
    Pilot 可以在 review 之前先跑（驗證 pipeline）；held-out 的協定要規定所有 label 在任何方法執行前 review 完成（在 held-out 協定的 decision 寫定）。

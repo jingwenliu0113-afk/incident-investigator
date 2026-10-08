@@ -124,7 +124,7 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
 
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows, excluded, reviewed = [], [], 0
+    rows, excluded, reviewed, differences = [], [], 0, {}
     for inc, rg in incidents_in(layout, split):
         audit_path = layout.label_path(inc).with_name("leakage_audit.json")
         if not audit_path.exists():
@@ -143,7 +143,12 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
         tpath = out_dir / f"{inc}.transcript.json"
         transcript = json.loads(tpath.read_text()) if tpath.exists() else None
         scores = score_incident(pred, label)
+        review_path = layout.label_path(inc).with_name("label_review.json")
+        review = json.loads(review_path.read_text()) if review_path.exists() else None
+        if review and review.get("differences"):
+            differences[inc] = review["differences"]
         rows.append(scores | {
+            "saw_method_outputs": None if review is None else review.get("saw_method_outputs"),
             "run_group_id": rg,
             "difficulty": audit["difficulty"],
             "failure": classify(pred, label, scores, transcript, snapshot, clock_offset_s=_clock_offset(layout, inc)),
@@ -151,7 +156,8 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
             "evidence_existence": existence(pred["evidence"], snapshot)["rate"],
             "evidence_weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=_clock_offset(layout, inc)),
             "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc))})
-    scored = [{k: v for k, v in r.items() if not k.startswith("evidence_") and k not in ("difficulty", "failure", "label_reviewed")}
+    scored = [{k: v for k, v in r.items()
+               if not k.startswith("evidence_") and k not in ("difficulty", "failure", "label_reviewed", "saw_method_outputs")}
               for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
     by_difficulty = {}
@@ -164,10 +170,13 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
     failures = {"n_failures": len(failed), "by_category": {c: sum(r["failure"] == c for r in failed) for c in CATEGORIES},
                 "by_difficulty": {d: {c: sum(r["failure"] == c for r in failed if r["difficulty"] == d) for c in CATEGORIES}
                                   for d in DIFFICULTIES if any(r["difficulty"] == d for r in failed)},
-                "classified_without_review": sum(not r["label_reviewed"] for r in failed)}
+                "classified_without_review": sum(not r["label_reviewed"] for r in failed),
+                "list": [{"incident_id": r["incident_id"], "difficulty": r["difficulty"], "category": r["failure"]} for r in failed]}
+    failures["share"] = {c: (n / len(failed) if failed else None) for c, n in failures["by_category"].items()}
     result = {"method": method, "split": split, "labels": {"reviewed": reviewed, "a_priori": len(rows) - reviewed},
               "incidents": rows, "excluded": excluded, "aggregate": agg,
-              "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows), "failures": failures}
+              "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows), "failures": failures,
+              "review_differences": differences}
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
     return result
@@ -196,8 +205,21 @@ def _table(result: dict) -> str:
     f = result["failures"]
     lines += ["", f"## Failures (decision 022): {f['n_failures']} incidents with origin or fault type wrong"
               f" ({f['classified_without_review']} classified without a reviewed label)", "",
-              "| category | count |", "|---|---:|"]
-    lines += [f"| {c} | {n} |" for c, n in f["by_category"].items()]
+              "| category | count | share | easy | medium | hard |", "|---|---:|---:|---:|---:|---:|"]
+    for c, n in f["by_category"].items():
+        share = "-" if f["share"][c] is None else f"{f['share'][c]:.2f}"
+        per = [str(f["by_difficulty"].get(d, {}).get(c, 0)) for d in DIFFICULTIES]
+        lines.append(f"| {c} | {n} | {share} | " + " | ".join(per) + " |")
+    if f["list"]:
+        lines += ["", "| incident | difficulty | category |", "|---|---|---|"]
+        lines += [f"| {e['incident_id']} | {e['difficulty']} | {e['category']} |" for e in f["list"]]
+    saw = [r["incident_id"] for r in result["incidents"] if r.get("saw_method_outputs")]
+    if saw:
+        lines += ["", "Labels reviewed after seeing method outputs: " + ", ".join(saw) + " (decision 018 §4)."]
+    if result["review_differences"]:
+        lines += ["", "## A priori vs reviewed labels (decision 018)", ""]
+        lines += [f"- {inc}: {d['field']}: {d['a_priori']} -> {d['reviewed']} ({d['reason']})"
+                  for inc, ds in result["review_differences"].items() for d in ds]
     lines += ["", "## Evidence (decisions 013 §4, 017; each layer on its own)", "",
               "| layer | n incidents | mean | 95% interval |", "|---|---:|---:|---|"]
     names = {"existence": "existence", "temporal": "weak: temporal", "service": "weak: affected service",
@@ -237,7 +259,15 @@ def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:
                              "affected_services": label["affected_services"],
                              "fault": [_rel(_ns(label["fault_start"], offset), start), _rel(_ns(label["fault_end"], offset), start)]},
                  "items": [{**e, "record": _render(snapshot, e), "relevant": None} for e in todo]}
-        layout.label_path(inc).with_name("evidence_gold_todo.json").write_text(json.dumps(sheet, indent=2) + "\n")
+        todo_path = layout.label_path(inc).with_name("evidence_gold_todo.json")
+        if todo_path.exists():  # judgments typed into the old sheet but not added yet are never wiped
+            done = {key(e) for e in (gold or {}).get("items", [])}
+            pending = [e for e in json.loads(todo_path.read_text()).get("items", [])
+                       if e.get("relevant") is not None and key(e) not in done]
+            if pending:
+                raise ValueError(f"{todo_path} has {len(pending)} judgments not merged yet: run "
+                                 f"`python -m eval gold-add --incident {inc} ...` first")
+        todo_path.write_text(json.dumps(sheet, indent=2) + "\n")
         rows.append({"incident_id": inc, "to_judge": len(todo)})
     return {"split": split, "incidents": rows}
 
@@ -261,7 +291,10 @@ def gold_add(layout: DataLayout, incident_id: str, sheet_path: Path, *, annotato
     """Merge the judged items of a filled worksheet into evidence_gold.json (append-only, decision 017 §3)."""
     from eval.relevance import merge_gold
 
-    items = json.loads(Path(sheet_path).read_text())["items"]
+    sheet = json.loads(Path(sheet_path).read_text())
+    if sheet.get("incident_id") != incident_id:
+        raise ValueError(f"the worksheet belongs to {sheet.get('incident_id')}, not {incident_id}")
+    items = sheet["items"]
     judged = [e for e in items if e.get("relevant") is not None]
     before = _gold(layout, incident_id)
     doc = merge_gold(before, incident_id, judged, annotator=annotator, now=now)

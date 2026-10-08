@@ -125,3 +125,44 @@ def test_the_review_commands_write_the_sheet_and_refuse_an_agent_reviewer(incide
     assert "person" in capsys.readouterr().err
     assert cli.main(["review", "--incident", "INC-001", "--file", str(sheet), "--reviewer", "human:jw"]) == 0
     assert (root / "ground_truth" / "incidents" / "INC-001" / "label.reviewed.json").exists()
+
+
+def test_a_sheet_is_applied_only_to_its_own_incident_and_never_overwritten(incident):
+    review_sheet(incident, "INC-001")
+    with pytest.raises(FileExistsError, match="worksheet"):
+        review_sheet(incident, "INC-001")  # a half-filled sheet is never wiped
+    review_sheet(incident, "INC-001", overwrite=True)
+    with pytest.raises(ValueError, match="INC-002"):
+        apply_review(incident, "INC-001", {**filled(incident), "incident_id": "INC-002"}, reviewer="human:jw", now=NOW)
+    apply_review(incident, "INC-001", filled(incident), reviewer="human:jw", now=NOW)
+    with pytest.raises(FileExistsError, match="reviewed"):
+        review_sheet(incident, "INC-001", overwrite=True)
+
+
+def test_every_reviewable_field_that_changes_needs_a_reason(incident):
+    review_sheet(incident, "INC-001")
+    sheet = filled(incident)
+    sheet["review"]["user_symptom"] = {**sheet["review"]["user_symptom"], "description": "orders fail at checkout"}
+    sheet["review"]["notes"] = "checked the traces"
+    with pytest.raises(ValueError, match="user_symptom"):
+        apply_review(incident, "INC-001", sheet, reviewer="human:jw", now=NOW)
+    sheet["review"]["reasons"] = {"user_symptom": "the description names where it fails"}
+    with pytest.raises(ValueError, match="notes"):
+        apply_review(incident, "INC-001", sheet, reviewer="human:jw", now=NOW)
+    sheet["review"]["reasons"]["notes"] = "review note"
+    record = apply_review(incident, "INC-001", sheet, reviewer="human:jw", now=NOW)
+    assert [d["field"] for d in record["differences"]] == ["user_symptom", "notes"]
+
+
+def test_container_events_are_on_the_data_clock(incident):
+    # docker events come from the daemon in the Docker VM: the data clock, not the host clock of the label
+    report = incident.normalize_report_path("INC-001")
+    r = json.loads(report.read_text())
+    r["window"]["clock_offsets"] = [120.0, 120.0]
+    report.write_text(json.dumps(r))
+    run = incident.run_group_truth_dir("RG-001") / "run.json"
+    rec = json.loads(run.read_text())
+    rec["events"] = [{"ts": "2026-10-08T11:51:00Z", "service": "payment", "action": "die", "exit_code": 1}]
+    run.write_text(json.dumps(rec))
+    sheet = review_sheet(incident, "INC-001")
+    assert sheet["events"]["normal"] and not sheet["events"]["fault"]  # the fault starts at 11:52 on the data clock

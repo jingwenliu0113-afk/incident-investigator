@@ -107,6 +107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     pro.add_argument("--labeler", required=True, help="who writes the a priori label, e.g. agent:claude-code")
     rsh = sub.add_parser("review-sheet", help="decision 018: the label review worksheet of one incident (ground-truth side)")
     rsh.add_argument("--incident", required=True)
+    rsh.add_argument("--overwrite", action="store_true", help="replace an existing (possibly half filled) worksheet")
     rev = sub.add_parser("review", help="decision 018: write the catalog+review label from a filled worksheet (a person only)")
     rev.add_argument("--incident", required=True)
     rev.add_argument("--file", type=Path, required=True, help="the filled label_review_todo.json")
@@ -182,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         layout = DataLayout(PROJECT_DIR / "data/external")
         try:
             if ns.command == "review-sheet":
-                review_sheet(layout, ns.incident)
+                review_sheet(layout, ns.incident, overwrite=ns.overwrite)
                 path = layout.label_path(ns.incident).with_name("label_review_todo.json")
                 print(json.dumps({"incident_id": ns.incident, "worksheet": str(path)}))
             else:
