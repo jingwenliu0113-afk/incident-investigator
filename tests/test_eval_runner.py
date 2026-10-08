@@ -8,7 +8,7 @@ from collect.layout import DataLayout
 from collect.normalize import NormalizeInputs, normalize
 from collect.policy import load_policy
 from collect.rawfile import scan_raw_file
-from eval.runner import METHODS, incidents_in, run_method, score_method
+from eval.runner import METHODS, audit_set, incidents_in, run_method, score_method
 from normalize_fixtures import HOST_END, HOST_START, write_raw
 from test_records import injection
 
@@ -46,6 +46,7 @@ def test_a_method_reads_only_the_snapshot_and_its_predictions_are_checked_and_sc
     layout = stored(tmp_path / "data")
     out = tmp_path / "results"
     paths = run_method(layout, "stat-anomaly", "pilot", out)
+    audit_set(layout, "pilot", out)
     pred = json.loads(paths[0].read_text())
     assert pred["incident_id"] == "INC-001" and pred["method"]["name"] == "stat-anomaly"
     result = score_method(layout, "stat-anomaly", "pilot", out)
@@ -94,6 +95,7 @@ def test_evidence_relevance_weak_labels_a_blind_gold_worksheet_and_gold_precisio
     monkeypatch.setitem(METHODS, "cites", cites)
     out = tmp_path / "results"
     run_method(layout, "cites", "pilot", out)
+    audit_set(layout, "pilot", out)
     todo = gold_todo_set(layout, "pilot", out)
     path = layout.label_path("INC-001").with_name("evidence_gold_todo.json")
     assert todo["incidents"] == [{"incident_id": "INC-001", "to_judge": 3}] and layout.is_ground_truth(path)
@@ -131,3 +133,26 @@ def test_eval_cli_checks_its_arguments_and_gold_add_refuses_an_agent(tmp_path, m
     sheet.write_text(json.dumps({"items": [{"id": "s-" + "a" * 16, "t0": None, "t1": None, "relevant": True}]}))
     assert cli.main(["gold-add", "--incident", "INC-001", "--file", str(sheet), "--annotator", "agent:claude-code"]) == 2
     assert "human" in capsys.readouterr().err
+
+
+def test_scoring_needs_the_leakage_audit_drops_lexicon_hits_and_reports_by_difficulty(tmp_path):
+    # decision 015: an incident whose snapshot hits the lexicon enters no score; reports are layered by difficulty
+    layout = stored(tmp_path / "data")
+    out = tmp_path / "results"
+    run_method(layout, "stat-anomaly", "pilot", out)
+    with pytest.raises(LookupError, match="leakage"):
+        score_method(layout, "stat-anomaly", "pilot", out)
+    audit_set(layout, "pilot", out)
+    difficulty = json.loads(layout.label_path("INC-001").with_name("leakage_audit.json").read_text())["difficulty"]
+    result = score_method(layout, "stat-anomaly", "pilot", out)
+    assert result["incidents"][0]["difficulty"] == difficulty and result["excluded"] == []
+    assert result["by_difficulty"][difficulty]["n_incidents"] == 1
+    assert set(result["by_difficulty"][difficulty]["metrics"]) == {"fault_type", "origin_top1", "affected_f1", "symptom_exact"}
+    assert "by difficulty" in (out / "pilot" / "stat-anomaly" / "table.md").read_text()
+
+    path = layout.label_path("INC-001").with_name("leakage_audit.json")
+    path.write_text(json.dumps({**json.loads(path.read_text()), "lexicon_hits": 2}))
+    result = score_method(layout, "stat-anomaly", "pilot", out)
+    assert result["aggregate"]["n_incidents"] == 0 and result["incidents"] == []
+    assert result["excluded"] == [{"incident_id": "INC-001", "reason": "lexicon_hits=2 (decision 015)"}]
+    assert "INC-001" in (out / "pilot" / "stat-anomaly" / "table.md").read_text()

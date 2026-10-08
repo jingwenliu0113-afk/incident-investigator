@@ -21,7 +21,8 @@
   規則 3 補充（非 origin 只算錯誤或延遲，OOM / 重啟算錯誤）、user_symptom 在 edge 判定、fault 沒被觸發就重收。`collect run --set pilot` 只收清單上的 fault，`collect label` 只從清單取答案。
 - **evidence relevance（decision 017）**：pool = 各方法引用的聯集；弱標籤 temporal（fault 窗 + 60 s）/ service / origin；人工 gold 每個方法每個 incident 盲抽 5 筆、只能由人標、不可改；
   `python -m eval gold-todo --set pilot` → 填表 → `python -m eval gold-add --incident … --file … --annotator human:<name>`；score 表分層列出 existence、弱標籤、gold precision。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：533 passed（`-m "not network and not docker_daemon"`）。
+- 評分必須先有 leakage audit；詞彙命中不是 0 的 incident 不進任何評分、表上列出；主要指標依 Easy / Medium / Hard 分層（decision 015）。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：534 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 

@@ -24,6 +24,7 @@ def _stat(snapshot, incident_id):
 
 METHODS = {"stat-anomaly": _stat}
 MAIN_METRICS = ("fault_type", "origin_top1", "affected_f1", "symptom_exact")  # decision 013: one per layer
+DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 
 
 def incidents_in(layout: DataLayout, split: str) -> list[tuple[str, str]]:
@@ -93,19 +94,34 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
 
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
-    rows = []
+    rows, excluded = [], []
     for inc, rg in incidents_in(layout, split):
+        audit_path = layout.label_path(inc).with_name("leakage_audit.json")
+        if not audit_path.exists():
+            raise LookupError(f"{inc} has no leakage audit: run `python -m eval leakage --set {split}` first (decision 015)")
+        audit = json.loads(audit_path.read_text())
+        if audit["lexicon_hits"]:  # decision 015: normalize leaked a lexicon term; the incident enters no score
+            excluded.append({"incident_id": inc, "reason": f"lexicon_hits={audit['lexicon_hits']} (decision 015)"})
+            continue
         pred = json.loads((out_dir / f"{inc}.json").read_text())
         label = json.loads(layout.label_path(inc).read_text())
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
         rows.append(score_incident(pred, label) | {
             "run_group_id": rg,
+            "difficulty": audit["difficulty"],
             "evidence_existence": existence(pred["evidence"], snapshot)["rate"],
             "evidence_weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=_clock_offset(layout, inc)),
             "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc))})
-    scored = [{k: v for k, v in r.items() if not k.startswith("evidence_")} for r in rows]
+    scored = [{k: v for k, v in r.items() if not k.startswith("evidence_") and k != "difficulty"} for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
-    result = {"method": method, "split": split, "incidents": rows, "aggregate": agg, "evidence": _evidence_aggregate(rows)}
+    by_difficulty = {}
+    for d in DIFFICULTIES:
+        group = [r for r in rows if r["difficulty"] == d]
+        if group:
+            by_difficulty[d] = {"n_incidents": len(group),
+                                "metrics": {m: sum(r[m] for r in group) / len(group) for m in MAIN_METRICS}}
+    result = {"method": method, "split": split, "incidents": rows, "excluded": excluded, "aggregate": agg,
+              "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows)}
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
     return result
@@ -123,6 +139,12 @@ def _table(result: dict) -> str:
     for name, m in agg["metrics"].items():
         mark = " (main)" if name in MAIN_METRICS else ""
         lines.append(f"| {name}{mark} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
+    lines += ["", "## Main metrics by difficulty (decision 015; means, no interval)", "",
+              "| difficulty | n | " + " | ".join(MAIN_METRICS) + " |", "|---|---:|" + "---:|" * len(MAIN_METRICS)]
+    for d, g in result["by_difficulty"].items():
+        lines.append(f"| {d} | {g['n_incidents']} | " + " | ".join(f"{g['metrics'][m]:.3f}" for m in MAIN_METRICS) + " |")
+    if result["excluded"]:
+        lines += ["", "Excluded from every score: " + ", ".join(f"{e['incident_id']} ({e['reason']})" for e in result["excluded"])]
     lines += ["", "## Evidence (decisions 013 §4, 017; each layer on its own)", "",
               "| layer | n incidents | mean | 95% interval |", "|---|---:|---:|---|"]
     names = {"existence": "existence", "temporal": "weak: temporal", "service": "weak: affected service",
