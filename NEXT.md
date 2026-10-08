@@ -78,15 +78,18 @@
 
 ## 下一步（Core，依序）
 
-1. **soak #5**：`./tools/with-mac-lock uv run python -m env soak`（同一個 lock，R7 / R8 用修訂 3 的標準）。通過 → 這個 lock 可以收集；decision 008「結果」補 soak #5。不通過 → 調查，不動凍結的設定。
-2. **補送 update 的診斷 run**（不是正式 run，持有 heavy lock）：`./tools/with-mac-lock uv run python tools/rescan_diag.py data/external/diagnostics/<時間>-rescan`
-   （up → verify-running → 90 s → rescan → 150 s → stop / cp → down；比較補送前後每個 container 的 docker_stats 分鐘）。
-   若這次沒有 container 被漏掉，結果是「無害但未證明有效」：可以再跑一次；仍無法證明時，以 run group 的覆蓋率無效條件為防線，記在 decision 012「結果」。
-3. **校準並凍結 policy v1**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #5 各一次（soak #4 的 raw 有隨機命名的探測 container，不用）；
-   F1–F6 全部通過 → `attribute_key_inventory` = 兩份 report 的 `attribute_keys` 聯集 → `status: frozen` → 重釘 sha → decision 011 記錄凍結證據 → commit。
-4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（preflight 會擋 dirty tree 與沒有通過 soak 的 lock）。
+1. **soak #5**（執行中，2026-10-08 14:37Z 起，持有 heavy lock）：R1–R9（R7 / R8 用修訂 3 的標準）。通過 → 這個 lock 可以收集；decision 008「結果」補 soak #5。
+   不通過 → 調查，不動凍結的設定。
+2. **校準（tree 必須乾淨）**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #5 各一次
+   （同一個 commit；soak #4 的 raw 有隨機命名的探測 container，不用；14:29Z 那次 soak #3 校準沒有記錄 commit，不能用來凍結）。
+3. **凍結**：`uv run python -m collect freeze --calibration <soak #3 的 calibration.json> --calibration <soak #5 的>` →
+   重釘 `collect/policy.py` 的 `POLICY_SHA256` → 測試 → decision 011 記錄凍結證據（soak、calibration sha、policy sha、commit）→ commit。
+4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（preflight 擋 dirty tree 與沒通過 soak 的 lock）。
+   run group 無效（例如 `container_metrics_missing`）→ 記錄原因、換新 seed 重收（decision 009 §4）。
 5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
-6. **INC-001 的 label**：decision 010 的 a priori label → 對照 snapshot review（`catalog+review`、`telemetry_coverage`），`check_label` 的服務詞彙用 18 個 SUT 服務。
+6. **INC-001 的 a priori label**：`uv run python -m collect label --incident INC-001 --origin payment --affected payment,checkout,frontend,frontend-proxy
+   --symptom errors --description "orders fail: failed to charge card" --labeler agent:claude-code`（decision 010）。
+   `catalog+review`（對照 snapshot、填 `telemetry_coverage`）依 decision 006 / 010 要由**人**做：到 Gate 時請使用者 review。
 7. 之後：Pilot fault 清單（M3/M5）、Core §6 leakage audit（含 normalize report 的 `new_attribute_keys`）、baseline 前要決定的時間框架與預算；
    LLM baseline / Agent 第一次呼叫付費 API 前依 MACHINE_POLICY 報告成本並等批准。
 
