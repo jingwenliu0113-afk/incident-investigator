@@ -49,6 +49,7 @@ user_symptom、fault_start / fault_end、traffic_profile、seed、telemetry_cove
 - 分層、不合成一個數字：**fault_type、origin_top1、affected_f1、symptom_exact**（主要），加上 family、top-3、RR、precision / recall（decision 013）。
 - 區間：run-group cluster bootstrap（10,000 次、seed 0）；兩個方法比較用同一組重抽的 paired 差異（decision 023）。
 - Evidence：existence（引用的 id 是否存在）與 relevance（弱標籤 temporal / service，加上人工盲標的 gold subset）分開報（decision 017）。
+- 每個方法的表也列出可見資料範圍、預算、usage（tokens、工具呼叫、retrieval、latency、cost）與實際看過多少資料；只報告、不計分（decision 024）。
 
 ## 失敗分類（decision 022）
 
@@ -98,4 +99,4 @@ uv run python -m eval score --method stat-anomaly --set pilot
 ## Repo
 
 `env/`（版本鎖定、soak）、`collect/`（收集、normalize、label、review）、`eval/`（評分、leakage、relevance、失敗分類、比較）、
-`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`docs/decisions/`（001–023）、`tests/`。
+`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`docs/decisions/`（001–024）、`tests/`。

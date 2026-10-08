@@ -88,3 +88,30 @@ def test_dump_all_exposure_claims_only_the_overview_rows_that_were_packed():
     _, cut = dump_all(Snap(), "INC-001", model, method=METHOD, budget=60)
     assert "stats:*" not in cut["exposure"]
     assert all(e.startswith("stats:") and e.count(":") == 2 for e in cut["exposure"])
+
+
+def _model_facing_text(calls: list[dict]) -> str:
+    """Everything a model was sent: system, tool names / descriptions / schemas, and every text and tool result."""
+    parts = []
+    for c in calls:
+        parts.append(str(c.get("system", "")))
+        parts += [str(t) for t in c["tools"]]
+        for m in c["messages"]:
+            for b in m["content"]:
+                parts.append(str(b.get("text", b.get("content", ""))))
+    return "\n".join(parts)
+
+
+def test_every_text_the_llm_baselines_send_passes_the_lexicon_and_says_nothing_about_the_collection(tmp_path):
+    # decision 015 §6: any prompt or tool description passes the lexicon check and does not describe the collection
+    from collect.policy import load_policy
+
+    dumped = Scripted([tool("submit_diagnosis", ANSWER)])
+    dump_all(Snap(), "INC-001", dumped, method=METHOD, budget=100_000)
+    asked = Scripted([tool("propose_queries", {"queries": [{"text": "failed"}, {"text": "q", "t1": 1e12}]})],
+                     [{"type": "text", "text": "no"}], [tool("submit_diagnosis", ANSWER, "t2")])
+    retrieval(Snap(), "INC-001", asked, method=METHOD, cache_root=tmp_path / "cache", q=8, k=5)
+    for model in (dumped, asked):
+        text = _model_facing_text(model.calls)
+        assert load_policy().lexicon_hit(text) == 0
+        assert not re.search(r"flag|inject|chaos|run group|seed|fault window", text, re.IGNORECASE)

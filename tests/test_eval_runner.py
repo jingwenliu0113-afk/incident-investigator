@@ -286,3 +286,58 @@ def test_a_difficulty_stratum_with_ten_run_groups_gets_intervals():
     out = difficulty_strata(rows)
     assert out["easy"]["n_incidents"] == 10 and out["easy"]["ci95"]["origin_top1"][0] < 0.5 < out["easy"]["ci95"]["origin_top1"][1]
     assert out["hard"]["n_incidents"] == 3 and out["hard"]["ci95"] is None and out["hard"]["metrics"]["fault_type"] == 1.0
+
+
+def test_each_run_keeps_its_budgets_and_the_table_reports_usage_and_what_was_seen(tmp_path, monkeypatch):
+    # SPEC §7, decision 024: budgets saved with the results; usage and measured exposure reported, never scored
+    import math
+
+    from baselines.statistical import predict
+    from collect.snapshot import open_snapshot
+    from eval.runner import SCOPES, exposure_of, method_budgets
+
+    layout = stored(tmp_path / "data")
+    out = tmp_path / "results"
+    run_method(layout, "stat-anomaly", "pilot", out)
+    assert json.loads((out / "pilot" / "stat-anomaly" / "run_config.json").read_text()) == {
+        "method": "stat-anomaly", "split": "pilot", "model": None, "budgets": {}, "scope": SCOPES["stat-anomaly"]}
+    budgets = {"dump_all_proxy_tokens": 1, "retrieval_queries": 2, "retrieval_k": 3, "agent_max_tool_calls": 4,
+               "agent_max_proxy_tokens": 5, "agent_max_turns": 6}
+    assert method_budgets("dump-all", {"budgets": budgets}) == {"proxy_tokens": 1}
+    assert method_budgets("retrieval", {"budgets": budgets}) == {"queries": 2, "k": 3}
+    assert method_budgets("agent", {"budgets": budgets}) == {"tool_calls": 4, "proxy_tokens": 5, "turns": 6}
+    assert set(SCOPES) == set(METHODS)
+
+    def looked(snapshot, incident_id):
+        pred = predict(snapshot, incident_id)
+        pred["usage"] = {**pred["usage"], "tokens_in": 1000, "tokens_out": 10, "proxy_tokens": 500, "tool_calls": 3,
+                         "cost_usd": 0.5}
+        span = next(snapshot.spans())["id"]
+        return pred, {"stop_reason": "turn_limit", "exposure": [span, "t-" + "a" * 32, "stats:payment:0-1", span]}
+
+    monkeypatch.setitem(METHODS, "looked", looked)
+    run_method(layout, "looked", "pilot", out)
+    audit_set(layout, "pilot", out)
+    result = score_method(layout, "looked", "pilot", out)
+    assert "usage" not in result["aggregate"]["metrics"] and "exposure" not in result["aggregate"]["metrics"]
+    usage = result["usage"]
+    assert usage["fields"]["tokens_in"] == {"n": 1, "mean": 1000, "median": 1000, "max": 1000}
+    assert usage["fields"]["retrievals"]["mean"] == 0 and usage["cost_total"] == 0.5
+    assert usage["stop_reasons"] == {"turn_limit": 1}
+    snap = open_snapshot(layout.incident_dir("INC-001") / "normalized", layout)
+    counts = {f["path"]: f["records"] for f in snap.meta["files"]}
+    minutes = math.ceil((snap.window["end_ns"] - snap.window["start_ns"]) / 60e9)
+    seen = result["incidents"][0]["exposure"]
+    assert seen["records_seen"] == 1  # one span, counted once; a trace id is not a record
+    assert seen["records_share"] == 1 / (counts["spans.jsonl"] + counts["logs.jsonl"] + counts["metric_points.jsonl"])
+    assert seen["overview_share"] == 2 / (len(snap.services) * minutes)
+    assert exposure_of(["stats:*"], snap)["overview_share"] == 1.0
+    assert usage["exposure"]["records_seen"]["max"] == 1
+    table = (out / "pilot" / "looked" / "table.md").read_text()
+    assert "## Budgets, usage and visible data" in table and "turn_limit 1" in table and "| tokens_in | 1 |" in table
+    stat = (out / "pilot" / "stat-anomaly" / "table.md")
+    score_method(layout, "stat-anomaly", "pilot", out)
+    assert SCOPES["stat-anomaly"] in stat.read_text() and "Budgets: none" in stat.read_text()
+    (out / "pilot" / "looked" / "run_config.json").unlink()  # an older result: never filled in from today's settings
+    score_method(layout, "looked", "pilot", out)
+    assert "not recorded" in (out / "pilot" / "looked" / "table.md").read_text()

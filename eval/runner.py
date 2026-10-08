@@ -8,7 +8,9 @@ of the set exist.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+from statistics import median
 
 from collect.layout import DataLayout
 from collect.snapshot import open_snapshot
@@ -46,6 +48,28 @@ def _llm(kind: str):
 
 LLM_METHODS = ("dump-all", "retrieval", "agent")
 METHODS = {"stat-anomaly": _stat, **{m: _llm(m) for m in LLM_METHODS}}
+SCOPES = {  # SPEC §7 "visible data" of each method (decision 024)
+    "stat-anomaly": "every span, log and container metric of the snapshot, but only as per-service, per-minute aggregates "
+                    "(decision 014)",
+    "dump-all": "the per-minute overview, then error-level groups and a time-stratified sample, packed within the "
+                "proxy-token budget (decision 021 §2)",
+    "retrieval": "the per-minute overview, then the spans and logs found by at most q queries of k results each "
+                 "(decision 021 §3)",
+    "agent": "any record of the snapshot through 7 read-only tools, within the tool-call, proxy-token and turn budgets "
+             "(decision 019)",
+}
+USAGE_FIELDS = ("tokens_in", "tokens_out", "proxy_tokens", "tool_calls", "retrievals", "latency_s", "cost_usd")
+
+
+def method_budgets(method: str, config: dict | None) -> dict:
+    """The SPEC §7 budgets of one run (decision 024): none for the statistical baseline, the approved values otherwise."""
+    if method not in LLM_METHODS:
+        return {}
+    b = config["budgets"]
+    return {"dump-all": {"proxy_tokens": b["dump_all_proxy_tokens"]},
+            "retrieval": {"queries": b["retrieval_queries"], "k": b["retrieval_k"]},
+            "agent": {"tool_calls": b["agent_max_tool_calls"], "proxy_tokens": b["agent_max_proxy_tokens"],
+                      "turns": b["agent_max_turns"]}}[method]
 MAIN_METRICS = ("fault_type", "origin_top1", "affected_f1", "symptom_exact")  # decision 013: one per layer
 DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 
@@ -63,10 +87,13 @@ def incidents_in(layout: DataLayout, split: str) -> list[tuple[str, str]]:
 
 def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> list[Path]:
     """Predictions of `method` for every incident of `split`, written to out_root/<split>/<method>/<INC>.json."""
-    if method in LLM_METHODS:
-        load_llm_config()  # refuses before any snapshot is opened
+    config = load_llm_config() if method in LLM_METHODS else None  # refuses before any snapshot is opened
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
+    # decision 024: the budgets of this run stay with its results, written before any prediction
+    run_config = {"method": method, "split": split, "model": config["model"] if config else None,
+                  "budgets": method_budgets(method, config), "scope": SCOPES.get(method)}
+    (out_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
     written = []
     for inc, _ in incidents_in(layout, split):
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
@@ -128,6 +155,48 @@ EVIDENCE_LAYERS = {  # decision 017 §4: each reported on its own, never combine
 }
 
 
+_STATS = re.compile(r"^stats:(.+):(-?\d+)-(-?\d+)$")
+
+
+def exposure_of(exposure: list[str], snapshot) -> dict:
+    """What a method was shown (decision 024 §3): distinct spans, logs and metric points, their share of the snapshot's,
+    and the share of the per-minute overview (service x minute cells; "stats:*" is the whole overview)."""
+    counts = {f["path"]: f["records"] for f in snapshot.meta["files"]}
+    total = counts["spans.jsonl"] + counts["logs.jsonl"] + counts["metric_points.jsonl"]
+    records = {i for i in exposure if i[:2] in ("s-", "l-", "p-")}
+    minutes = -(-(snapshot.window["end_ns"] - snapshot.window["start_ns"]) // 60_000_000_000)
+    services = set(snapshot.services)
+    if "stats:*" in exposure:
+        cells = len(services) * minutes
+    else:
+        seen = set()
+        for e in exposure:
+            if (m := _STATS.match(e)) and m.group(1) in services:
+                seen.update((m.group(1), t) for t in range(max(int(m.group(2)), 0), min(int(m.group(3)), minutes - 1) + 1))
+        cells = len(seen)
+    return {"records_seen": len(records), "records_share": len(records) / total if total else None,
+            "overview_share": cells / (len(services) * minutes) if services and minutes else None}
+
+
+def _spread(values: list) -> dict:
+    v = [x for x in values if x is not None]
+    if not v:
+        return {"n": 0, "mean": None, "median": None, "max": None}
+    return {"n": len(v), "mean": sum(v) / len(v), "median": median(v), "max": max(v)}
+
+
+def _usage_aggregate(rows: list[dict]) -> dict:
+    """decision 024 §2: usage over the scored incidents, stop reasons and measured exposure (reported, never scored)."""
+    costs = [r["usage"].get("cost_usd") for r in rows]
+    reasons = [r["stop_reason"] for r in rows if r["stop_reason"] is not None]
+    seen = [r["exposure"] for r in rows if r["exposure"] is not None]
+    return {"fields": {f: _spread([r["usage"].get(f) for r in rows]) for f in USAGE_FIELDS},
+            "cost_total": sum(costs) if costs and None not in costs else None,
+            "stop_reasons": {k: reasons.count(k) for k in sorted(set(reasons))},
+            "exposure": {k: _spread([e[k] for e in seen]) for k in ("records_seen", "records_share", "overview_share")}
+            if seen else None}
+
+
 def _evidence_aggregate(rows: list[dict]) -> dict:
     out = {}
     for name, get in EVIDENCE_LAYERS.items():
@@ -136,6 +205,9 @@ def _evidence_aggregate(rows: list[dict]) -> dict:
         m = aggregate(have)["metrics"][name] if have else {"mean": None, "ci95": None}
         out[name] = {"n": len(have), **m}
     return out
+
+
+REPORTED_ONLY = ("difficulty", "fault", "failure", "label_reviewed", "saw_method_outputs", "usage", "stop_reason", "exposure")
 
 
 def score_method(layout: DataLayout, method: str, split: str, out_root: Path) -> dict:
@@ -177,9 +249,12 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
             "label_reviewed": label["labeling"]["method"] == "catalog+review",
             "evidence_existence": existence(pred["evidence"], snapshot)["rate"],
             "evidence_weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=_clock_offset(layout, inc)),
-            "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc))})
+            "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc)),
+            "usage": pred.get("usage") or {},
+            "stop_reason": None if transcript is None else transcript.get("stop_reason"),
+            "exposure": None if transcript is None else exposure_of(transcript.get("exposure", []), snapshot)})
     scored = [{k: v for k, v in r.items()
-               if not k.startswith("evidence_") and k not in ("difficulty", "fault", "failure", "label_reviewed", "saw_method_outputs")}
+               if not k.startswith("evidence_") and k not in REPORTED_ONLY}
               for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
     by_difficulty = difficulty_strata(rows)
@@ -190,10 +265,13 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
                 "classified_without_review": sum(not r["label_reviewed"] for r in failed),
                 "list": [{"incident_id": r["incident_id"], "difficulty": r["difficulty"], "category": r["failure"]} for r in failed]}
     failures["share"] = {c: (n / len(failed) if failed else None) for c, n in failures["by_category"].items()}
+    config_path = out_dir / "run_config.json"
     result = {"method": method, "split": split, "labels": {"reviewed": reviewed, "a_priori": len(rows) - reviewed},
               "incidents": rows, "excluded": excluded, "aggregate": agg,
               "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows), "failures": failures,
-              "review_differences": differences}
+              "review_differences": differences,
+              "run_config": json.loads(config_path.read_text()) if config_path.exists() else None,
+              "usage": _usage_aggregate(rows)}
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
     return result
@@ -249,7 +327,36 @@ def _table(result: dict) -> str:
             lines.append(f"| {names[key]} | 0 | - | - |")
         else:
             lines.append(f"| {names[key]} | {m['n']} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines + _usage_lines(result)) + "\n"
+
+
+def _fmt(x) -> str:
+    return "-" if x is None else f"{x:,.0f}" if abs(x) >= 1000 else f"{x:.3f}"
+
+
+def _usage_lines(result: dict) -> list[str]:
+    config, usage = result["run_config"], result["usage"]
+    lines = ["", "## Budgets, usage and visible data (SPEC §7, decision 024; reported, never scored)", ""]
+    if config is None:
+        lines.append("Run configuration: not recorded (a result from before decision 024).")
+    else:
+        budgets = ", ".join(f"{k} {v}" for k, v in config["budgets"].items()) or "none"
+        lines += [f"Visible data: {config['scope'] or 'not described'}.", f"Model: {config['model'] or '-'}. Budgets: {budgets}."]
+    lines += ["", f"Usage over the {result['aggregate']['n_incidents']} scored incidents:", "",
+              "| quantity | n | mean | median | max |", "|---|---:|---:|---:|---:|"]
+    for name, s in usage["fields"].items():
+        lines.append(f"| {name} | {s['n']} | {_fmt(s['mean'])} | {_fmt(s['median'])} | {_fmt(s['max'])} |")
+    cost = "-" if usage["cost_total"] is None else f"{usage['cost_total']:.2f}"
+    lines += ["", f"Total cost (USD): {cost}."]
+    if usage["stop_reasons"]:
+        lines.append("Stop reasons: " + ", ".join(f"{k} {n}" for k, n in usage["stop_reasons"].items()) + ".")
+    if usage["exposure"] is None:
+        lines.append("Exposure: no exposure log (the method's visible data is described above).")
+    else:
+        lines += ["", "| shown to the method, per incident | n | mean | median | max |", "|---|---:|---:|---:|---:|"]
+        for name, s in usage["exposure"].items():
+            lines.append(f"| {name} | {s['n']} | {_fmt(s['mean'])} | {_fmt(s['median'])} | {_fmt(s['max'])} |")
+    return lines
 
 
 def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:

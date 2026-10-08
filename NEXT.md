@@ -1,8 +1,8 @@
 # NEXT
 
-## 目前位置（2026-10-08 18:12Z，台北 10-09 02:12）
+## 目前位置（2026-10-08 18:45Z，台北 10-09 02:45）
 
-**Core 的工具鏈都已完成並測試（602 passed），還沒有任何資料結果。**
+**Core 的工具鏈都已完成並測試（604 passed），還沒有任何正式資料結果。**
 - **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
 - **LLM 方法**：dump-all、retrieval、agent 的程式已就緒，等使用者批准模型、預算與成本。
 - **已完成的 Core 範圍**：
@@ -22,6 +22,7 @@
   | dump-all 與 retrieval | 021 |
   | 失敗分類 | 022 |
   | held-out 協定（Proposed） | 023 |
+  | 預算、用量與可見資料的報告 | 024 |
   | paired 比較 | 023 §7 |
   | 端到端測試 | — |
   | README | — |
@@ -37,7 +38,17 @@
   - review 工作表與 Agent 7 個工具在真實資料上正常（建索引 1.3 s、每次查詢 < 0.05 s）。
   - stat-anomaly **不作答**：時間窗只有 6 分鐘，參考段固定前 10 分鐘 → 沒有可評的分鐘（設計如此，不是 bug）。
     因此冒煙測試的 normal 改為 10 分鐘、並加上 review 工作表一步（開發工具，非實驗設計；正式收集協定不變）。
-- **背景進行中**：冒煙測試 #2（normal 10 分鐘），讓 stat-anomaly 第一次在真實 fault 資料上產生預測、走過 evidence / 失敗分類。
+- **非正式冒煙測試 #2**（2026-10-08 18:35Z，normal 10、fault 2、recovery 2 分鐘，commit `f00a983`）：整條 pipeline 走通，含 review 工作表；run group valid。
+  stat-anomaly 第一次在真實 fault 資料上作答：fault_type、origin_top1 對；affected precision 1.0 / recall 0.5（漏 frontend、frontend-proxy）；
+  symptom 錯（edge 的 error ratio 約 0.3%，低於門檻）；evidence 4 筆都存在、弱標籤 temporal / service / origin 全 1.0。
+  **這是非正式資料，不依它調整任何門檻或規則**（統計 baseline 只能在 Pilot 上修訂一次，decision 014）。
+- **離線檢查（冒煙測試 #1 的真實資料，不需 lock、沒有付費 API）**：dump-all 打包 119.7k proxy tokens（0.5 s），fault 的 error 群組都在；
+  retrieval 的 BM25 查詢「error」第一筆就是 payment 的 fault span；用照腳本行動的假模型跑 Agent 執行框架 → 評分 → evidence → 失敗分類，
+  答對與答錯（`not_seen`）兩條路徑都正確；錯誤的 fault_family 被正確拒收 3 次後記為放棄作答。
+  觀察（不需改）：frontend-proxy 的 Envoy access log 本文含絕對時間戳，不會洩漏 fault 時間（normal 長度有 jitter、seed 只在 ground truth）。
+- **decision 024（SPEC §7 報告）**：每次 `eval run` 把預算、model、可見資料範圍寫進 `run_config.json`；評分表新增「Budgets, usage and visible data」
+  （usage 各欄的 n / mean / median / max、總成本、停止原因、實際看過的 record 與概覽比例）。只報告、不計分。
+  另加測試：dump-all / retrieval 送給模型的所有文字都通過詞彙檢查、不描述收集協定（decision 015 §6）。測試 604 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成
@@ -153,8 +164,9 @@
       `uv run python -m eval score --method stat-anomaly --set pilot`（v2；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
    - 目前：RG-001（2026-10-08 15:21Z，paymentFailure）aborted_unstable（暖機中 grafana exit 1 重啟、payment healthcheck 連續失敗，payment 140/140 MiB）→ 下一個仍是 paymentFailure 100%。
    - 每次 run 之間 lock 會釋放（wrapper 一次只包一個 run），其他 Project 可以在空檔取得。
-   - 非正式的整條 pipeline 檢查：`./tools/with-mac-lock uv run python -m collect smoke --root <scratch>`（normal / fault / recovery 各 2 分鐘，
-     資料只寫在 scratch，永不進任何集合；跑完自動 normalize → replay → label → leakage → 統計 baseline）。
+   - 非正式的整條 pipeline 檢查：`./tools/with-mac-lock uv run python -m collect smoke --root <scratch>`（normal 10、fault / recovery 各 2 分鐘，
+     資料只寫在 scratch，永不進任何集合；跑完自動 normalize → replay → label → review 工作表 → leakage → 統計 baseline）。
+     **冒煙測試進行中整個 working tree 都要保持乾淨**（normalize 檢查 `git status --porcelain`，不只 `collect/`、`env/`）。
    - **run 進行中不改 `collect/`、`env/`**（run 會在中途延遲 import 這些模組；改了會讓一個 run 混用兩個版本），也要保持 working tree 乾淨
      （preflight 與 normalize 都拒絕 dirty tree）；可以改 `eval/`、`agent/`、`baselines/`、文件。
 5. **Gate 前請使用者做的人工作業**：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
@@ -171,6 +183,8 @@
 3. **Held-out 協定（decision 023，Proposed）要使用者決定的事項**：每個 fault 的 incident 數 K（建議 6 → N = 60，約 45 小時 lock）；
    held-out 的 LLM 設定與費用；gold 標註量（全標最多 20N 筆，或修訂 017 改抽樣，建議抽樣）；Gate 三個條件的操作定義；
    Pilot 驗證失敗的 fault 是移除（預設）還是補收；需要新 policy / env lock 時的處理（預設排除受影響的 incident）；方法 bug 修正後重跑的費用。
+4. **`/usr/bin/git` 失效（Xcode 更新後 xcrun 架構錯誤，見 C）**：請開一次 Xcode 完成安裝，或用 `sudo xcode-select -s /Library/Developer/CommandLineTools`（需 sudo，我不會執行）。在修好之前，正式收集也要在 `PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH` 下執行，否則 preflight 與 normalize 的 git 檢查會失敗。
+5. **告訴我 Mac 已回到正常電力模式**：之後（heavy lock 空出時）從 `collect next --set pilot`（paymentFailure 100%）開始正式 Pilot 收集，10 個 fault 約 8 小時 lock 時間（每個約 45 分鐘，無效的要重收）。
 
 ### B. LLM 方法的估算（第 A1 項用）
 
@@ -190,10 +204,10 @@
 - 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
 
 ### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
-- **2026-10-09 17:05Z：`/usr/bin/git` 暫時失效**（xcrun 載入 `/Applications/Xcode.app/.../libxcrun.dylib` 時出現 arm64 / arm64e 架構錯誤；Xcode.app 在 17:05–17:06Z 剛被修改，看起來正在更新）。
+- **2026-10-08 17:05Z（台北 10-09 01:05）起：`/usr/bin/git` 失效**（xcrun 載入 `/Applications/Xcode.app/.../libxcrun.dylib` 時出現 arm64 / arm64e 架構錯誤；Xcode.app 在 17:05–17:06Z 剛被修改，看起來正在更新）。
   影響：專案的 provenance（collect preflight、normalize 的乾淨 checkout 檢查）會失敗。暫時做法：在本 session 的 shell 用
   `PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH`（CommandLineTools 的 git 正常；沒有改任何系統設定），測試 601 passed。
-  若 Xcode 更新結束後仍失敗，需要使用者處理（例如開一次 Xcode 完成安裝，或用 `xcode-select` 切換，需 sudo）。
+  18:45Z 仍失敗（已 1.5 小時）→ 列入 A4，需要使用者處理。本 session 的 commit、測試與兩次冒煙測試都在上述 PATH 下完成。
 - **2026-10-09 晚上（使用者指示）：Mac 使用自動電力模式 → 正式 incident collection 延後**（會產生 performance-sensitive 的正式結果）。
   一般 heavy 工作、correctness、資料處理、開發測試照常。電力模式恢復正常（使用者告知）且 heavy lock 空出後，從 `collect next --set pilot`（目前是 paymentFailure 100%）繼續。
 - **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
