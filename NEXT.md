@@ -2,16 +2,19 @@
 
 ## 目前位置
 
-**Core §1 完成；Core §2 / §4 的工具全部就緒。soak #3（新 lock）只有 R7 失敗 → 查出原因、事先修訂 R7（decision 008 修訂）→ 跑 soak #4。**
-- 記憶體設定已凍結（soak #2）。raw export（decision 008）改變 lock → soak #3 判定 R1–R9：R1–R6、R8、R9 通過；R7 失敗（collector stop exit 1）。
-- exit 1 的原因（診斷 run 重現）：pipeline 都正常關閉（`Shutdown complete.`）後，collector 把自己的 self-telemetry 推給自己已關閉的 4318 → connection refused。
-  R7 改為「exit 0，或 exit 1 且保存的關閉 log 證明只有這個錯誤」；soak #3 維持 FAILED，同一個 lock 要重跑完整 soak #4。
-- policy v1 校準（soak #3 raw）：check_snapshot 0 個問題、沒有未知欄位或未知服務；但 docker_stats 漏了 shipping 整個 run（receiver 啟動 race）→
-  decision 012：up 後對每個 container 補送 no-op `docker update`，incident 視窗內缺任何 SUT container metrics 即無效。待診斷 run 確認補送有效。
-- 收集協定（decision 009 + 修訂）、第一個 incident 的 fault 與 affected 規則（decision 010）、canonical schema 與 normalize policy v1（decision 011）都已寫定並實作。
-- normalize policy v1 目前是 `calibrating`：**要先用 soak #3 的 raw 校準並凍結，才能打開任何含 fault 的 raw**（程式會擋）。
-- Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（schema + normalize，待校準凍結）、5 工具就緒、6 工具就緒（`python -m collect replay`）。
-- 沒有進入 Advanced / Optional。外部費用規則（MACHINE_POLICY）已加入；目前沒有任何付費用量。
+**Core §1 完成；Core §2 / §4 的工具全部就緒。soak #4（同一個 lock，R7 已事先修訂）執行中；之後：補送 update 的診斷 run → 校準兩份 soak → 凍結 policy v1 → INC-001。**
+- 記憶體設定已凍結（soak #2）。soak #3（raw export 的新 lock）：R1–R6、R8、R9 通過，R7 失敗 → 維持 FAILED。
+- R7 失敗原因（診斷 run 重現）：pipeline 都正常關閉後，collector 把 self-telemetry 推給自己已關閉的 4318 → exit 1。
+  R7 修訂為「exit 0，或 exit 1 且關閉 log 證明只有這個錯誤」（decision 008 修訂），soak #4 用新標準判定。
+- decision 012：docker_stats receiver 啟動 race 讓 shipping 整個 run 沒有 container metrics → up 後補送 no-op `docker update`；
+  incident 視窗內缺任何 SUT container metrics 即無效。**補送是否有效還要診斷 run 確認**（`tools/rescan_diag.py`，見下一步 2）。
+- loss accounting 完成（decision 008 修訂 2）：soak #3 視窗內 receiver accepted = file exporter sent（三種 signal 完全相等），沒有旗標。
+- review workflow（normalize / 收集協定 / replay，24 個確認問題）全部修正並測試：FA-11、X8 套用到所有可見字串、check_snapshot 解碼檢查、
+  double 編碼、G0 policy sha 與乾淨 checkout、manifest 先驗證再發布、seed 移到 ground truth（002 / 003 修訂）、report 計數與 schema、
+  calibrate 可重跑與凍結條件 F1–F6（decision 011）、取樣失敗只看 normal period、verify-running、crash 也留 run record、收尾遮蔽訊號（009 修訂 2）。
+- normalize policy v1 仍是 `calibrating`：**凍結前不得打開任何含 fault 的 raw**（程式會擋：status、釘選 sha、乾淨 checkout）。
+- Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（待凍結）、5 工具就緒、6 工具就緒。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：456 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -73,14 +76,18 @@
 
 ## 下一步（Core，依序）
 
-1. **soak #3 結果**（`data/external/soak/20261008T120419Z/`）：R1–R9。通過 → decision 008「結果」填實測數字。不通過 → 調查，不動凍結的記憶體設定。
-2. **校準並凍結 normalize policy v1**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z`。
-   依 inventory 補 receiver scope / container name / 未知服務等（只能改 policy 與 decision 011，不看任何 fault raw），`check_snapshot` 通過後把 `status` 改為 `frozen`、重釘 sha、commit。
-   同時用實際的 `otelcol_*` / `otel.sdk.*` 完成 loss accounting（008 §6）。
-3. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（commit 乾淨時才跑；manifest 的 formal check 要求 clean tree）。
-4. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，`compose down` 後 `uv run python -m collect replay --incident INC-001`。
-5. **INC-001 的 label**：decision 010 的 a priori label → 對照 snapshot review（`catalog+review`、`telemetry_coverage`），`check_label` 的服務詞彙用 18 個 SUT 服務。
-6. 之後：Pilot fault 清單（M3/M5）、Core §6 leakage audit、baseline 前要決定的時間框架與預算（decision 011「延後」）；LLM baseline / Agent 第一次呼叫付費 API 前依 MACHINE_POLICY 報告成本並等批准。
+1. **soak #4 結果**（`data/external/soak/20261008T134542Z/`）：R1–R9（R7 用修訂後的標準）。通過 → 這個 lock 可以收集；decision 008「結果」補 soak #4。
+   不通過 → 調查，不動凍結的設定。
+2. **補送 update 的診斷 run**（不是正式 run，持有 heavy lock）：`./tools/with-mac-lock uv run python tools/rescan_diag.py data/external/diagnostics/<時間>-rescan`
+   （up → verify-running → 90 s → rescan → 150 s → stop / cp → down；比較補送前後每個 container 的 docker_stats 分鐘）。
+   若這次沒有 container 被漏掉，結果是「無害但未證明有效」：可以再跑一次；仍無法證明時，以 run group 的覆蓋率無效條件為防線，記在 decision 012「結果」。
+3. **校準並凍結 policy v1**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #4 各一次；
+   F1–F6 全部通過 → `attribute_key_inventory` = 兩份 report 的 `attribute_keys` 聯集 → `status: frozen` → 重釘 sha → decision 011 記錄凍結證據 → commit。
+4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（preflight 會擋 dirty tree 與沒有通過 soak 的 lock）。
+5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
+6. **INC-001 的 label**：decision 010 的 a priori label → 對照 snapshot review（`catalog+review`、`telemetry_coverage`），`check_label` 的服務詞彙用 18 個 SUT 服務。
+7. 之後：Pilot fault 清單（M3/M5）、Core §6 leakage audit（含 normalize report 的 `new_attribute_keys`）、baseline 前要決定的時間框架與預算；
+   LLM baseline / Agent 第一次呼叫付費 API 前依 MACHINE_POLICY 報告成本並等批准。
 
 ## Blocked
 
