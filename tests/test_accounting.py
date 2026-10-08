@@ -4,7 +4,7 @@ import json
 
 import yaml
 
-from collect.accounting import RAW_RECEIVERS, account, collector_snapshots, sdk_error_series
+from collect.accounting import RAW_RECEIVERS, account, collector_snapshots, counter_key, sdk_error_series
 from env.lock import PROJECT_DIR
 from env.soak import RAW_CONFIG
 
@@ -74,8 +74,8 @@ def test_snapshots_group_one_export_of_the_collector_and_ignore_other_services(t
                          "{broken"])
     snaps = collector_snapshots(p)
     assert [s["t"] for s in snaps] == [T0, T0 + 60 * S]
-    assert snaps[1]["values"]["otelcol_exporter_sent_spans{exporter=file/raw_traces}"] == 250
-    assert "otelcol_process_uptime{}" not in snaps[0]["values"]
+    assert snaps[1]["values"][counter_key("otelcol_exporter_sent_spans", {"exporter": "file/raw_traces"})] == 250
+    assert counter_key("otelcol_process_uptime", {}) not in snaps[0]["values"]
     assert snaps[0]["start"] == T0 - 60 * S
 
 
@@ -86,7 +86,7 @@ def snaps_for(tmp_path, *exports):
 def test_a_clean_window_has_no_flags_and_counts_deltas_between_the_bracketing_exports(tmp_path):
     snaps = snaps_for(tmp_path, (T0, counters(100, logs=10, points=20)), (T0 + 60 * S, counters(250, logs=30, points=50)),
                       (T0 + 120 * S, counters(400, logs=50, points=90)))
-    acc = account(snaps, [], SCANS, start_ns=START, end_ns=T0 + 90 * S)
+    acc = account(snaps, {}, SCANS, start_ns=START, end_ns=T0 + 90 * S)
     assert acc["flags"] == []
     assert acc["snapshots"] == {"base": T0, "final": T0 + 120 * S}  # last export <= start, first export >= end
     assert acc["signals"]["traces"] == {"accepted": 300, "refused": 0, "failed": 0, "sent": 300, "send_failed": 0,
@@ -96,7 +96,7 @@ def test_a_clean_window_has_no_flags_and_counts_deltas_between_the_bracketing_ex
 
 def test_memory_limiter_drops_and_raw_exporter_failures_are_flagged(tmp_path):
     snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, counters(400, ml_in=800, ml_out=790, failed_export=3)))
-    acc = account(snaps, [], SCANS, start_ns=START, end_ns=T0 + 90 * S)
+    acc = account(snaps, {}, SCANS, start_ns=START, end_ns=T0 + 90 * S)
     assert "memory_limiter_refused" in acc["flags"] and "exporter_rejected" in acc["flags"]
     assert acc["signals"]["traces"]["memory_limiter_dropped"] == 10
 
@@ -104,32 +104,52 @@ def test_memory_limiter_drops_and_raw_exporter_failures_are_flagged(tmp_path):
 def test_raw_path_must_balance_with_the_receiver_and_the_file(tmp_path):
     # sent below accepted: items accepted but never written
     snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, counters(400, sent=390)))
-    assert "accounting_mismatch:traces" in account(snaps, [], SCANS, start_ns=START, end_ns=T0 + 90 * S)["flags"]
+    assert "accounting_mismatch:traces" in account(snaps, {}, SCANS, start_ns=START, end_ns=T0 + 90 * S)["flags"]
     # a refused batch the raw pipeline still wrote (another pipeline failed): sent within accepted + refused
     snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, counters(400, refused=5, sent=405)))
-    acc = account(snaps, [], dict(SCANS, traces=scan(400, duplicates=5)), start_ns=START, end_ns=T0 + 90 * S)
+    acc = account(snaps, {}, dict(SCANS, traces=scan(400, duplicates=5)), start_ns=START, end_ns=T0 + 90 * S)
     assert acc["flags"] == [] and acc["signals"]["traces"]["refused"] == 5
     # the file holds fewer items than the exporter reported sent
     snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, counters(400)))
-    acc = account(snaps, [], dict(SCANS, traces=scan(399)), start_ns=START, end_ns=T0 + 90 * S)
+    acc = account(snaps, {}, dict(SCANS, traces=scan(399)), start_ns=START, end_ns=T0 + 90 * S)
     assert "accounting_mismatch:traces" in acc["flags"]
 
 
 def test_no_export_after_the_window_end_means_the_window_cannot_be_accounted(tmp_path):
     snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 60 * S, counters(250)))
-    acc = account(snaps, [], SCANS, start_ns=START, end_ns=T0 + 90 * S)
+    acc = account(snaps, {}, SCANS, start_ns=START, end_ns=T0 + 90 * S)
     assert "accounting_unavailable" in acc["flags"]
-    assert "accounting_unavailable" in account([], [], SCANS, start_ns=START, end_ns=T0 + 90 * S)["flags"]
+    assert "accounting_unavailable" in account([], {}, SCANS, start_ns=START, end_ns=T0 + 90 * S)["flags"]
 
 
 def sdk_line(service, t, value, *, error_type="java.net.UnknownHostException"):
-    point = {"attributes": kv(**{"otel.component.name": "otlp_http_log_exporter/0", "error.type": error_type}),
-             "timeUnixNano": str(t), "asInt": str(value)}
+    """One SDK export of otel.sdk.exporter.log.exported: the success series, and the error series unless error_type is None."""
     ok = {"attributes": kv(**{"otel.component.name": "otlp_http_log_exporter/0"}), "timeUnixNano": str(t), "asInt": "99"}
-    metric = {"name": "otel.sdk.exporter.log.exported", "sum": {"dataPoints": [point, ok]}}
+    points = [ok]
+    if error_type is not None:
+        points.append({"attributes": kv(**{"otel.component.name": "otlp_http_log_exporter/0", "error.type": error_type}),
+                       "timeUnixNano": str(t), "asInt": str(value)})
+    metric = {"name": "otel.sdk.exporter.log.exported", "sum": {"dataPoints": points}}
     return json.dumps({"resourceMetrics": [{"resource": {"attributes": kv(**{"service.name": service})},
                                             "scopeMetrics": [{"scope": {"name": "io.opentelemetry.sdk.logs"},
                                                               "metrics": [metric]}]}]})
+
+
+def test_counter_attributes_may_contain_separators(tmp_path):
+    # review: "a,b" in an attribute value crashed the key parsing and could mis-match keys
+    c = counters(100)
+    c[("otelcol_receiver_accepted_spans", (("receiver", "otlp"), ("transport", "grpc,x=1")))] = 7
+    snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, c))
+    acc = account(snaps, {}, SCANS, start_ns=START, end_ns=T0 + 90 * S)
+    assert acc["signals"]["traces"]["accepted"] == 7  # its own series: 0 -> 7; the grpc series stays at 100
+
+
+def test_sdk_errors_after_the_window_are_not_charged_to_it(tmp_path):
+    # review: a series first seen after the window (errors during the drain) was counted as loss inside it
+    p = write(tmp_path, [sdk_line("frontend", T0, 0, error_type=None), sdk_line("frontend", T0 + 120 * S, 0, error_type=None),
+                         sdk_line("frontend", T0 + 240 * S, 25)])
+    snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, counters(400)))
+    assert account(snaps, sdk_error_series(p), SCANS, start_ns=START, end_ns=T0 + 90 * S)["sdk_errors"] == {}
 
 
 def test_sdk_errors_count_only_inside_the_window_and_are_reported_not_flagged(tmp_path):
@@ -137,7 +157,7 @@ def test_sdk_errors_count_only_inside_the_window_and_are_reported_not_flagged(tm
     p = write(tmp_path, [sdk_line("kafka", T0, 160), sdk_line("kafka", T0 + 120 * S, 160),
                          sdk_line("ad", T0, 0), sdk_line("ad", T0 + 120 * S, 12)])
     series = sdk_error_series(p)
-    assert {s["service"] for s in series} == {"kafka", "ad"}
+    assert {s["service"] for s in series["errors"]} == {"kafka", "ad"} and set(series["exports"]) == {"kafka", "ad"}
     snaps = snaps_for(tmp_path, (T0, counters(100)), (T0 + 120 * S, counters(400)))
     acc = account(snaps, series, SCANS, start_ns=START, end_ns=T0 + 90 * S)
     assert acc["sdk_errors"] == {"ad": {"otel.sdk.exporter.log.exported java.net.UnknownHostException": 12}}

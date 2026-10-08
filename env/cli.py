@@ -377,7 +377,7 @@ def cmd_soak(
         report.update(docker_events=events, opensearch=soak.opensearch_rejections(collector_log),
                       sampling_errors=[s for s in samples if s["kind"] == "error"])
         if raw := report.get("raw"):  # decision 008 §6: reported for the window, not judged
-            report["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or [],
+            report["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or {},
                                                raw["files"], start_ns=soak.ts_ns(window_start),
                                                end_ns=soak.ts_ns(window_end))
         if report.get("aborted") or report["sampling_errors"]:

@@ -461,7 +461,7 @@ def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str,
     return {"collector": collector, "files": files,
             "container_minutes": container_minutes(metrics) if have else {},  # decision 012
             "collector_snapshots": collector_snapshots(metrics) if have else [],  # decision 008 §6
-            "sdk_errors": sdk_error_series(metrics) if have else []}
+            "sdk_errors": sdk_error_series(metrics) if have else {"exports": {}, "errors": []}}
 
 
 def rescan_container_metrics(lock: dict, env: dict[str, str], run: Run = _run) -> dict:

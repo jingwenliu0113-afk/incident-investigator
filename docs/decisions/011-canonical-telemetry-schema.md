@@ -162,6 +162,9 @@
    （soak #4 有一次被 docker_stats 收到，當時名稱是 Docker 隨機給的 `cool_tharp`）；normalize 以 X1 丟掉、記為 `harness-probe`，不算未知服務。
    soak #4 的 raw 裡那筆仍是隨機名稱，會被算成未知服務，所以凍結證據改用 soak #3 與 soak #5。
 
+10. （同日第二輪 review）X9 隱私規則同時套用在原始 key 與 X8 清洗後的 key（`ofrep.user.email` 清洗後是 `user.email`，原本會漏掉 hash）；
+    normalize report 改在 snapshot 發布**之前**驗證 schema；失敗的 normalize 不留 staging，未發布的暫存目錄在重試時清掉，同一個 incident 可以重跑。
+
 policy 檔的 sha 隨 FA-11、`harness_container_prefixes` 重新釘選（狀態仍是 `calibrating`）。
 
 ### 凍結條件（2026-10-08 約 14:15Z 寫定，在用最終程式重跑校準之前）

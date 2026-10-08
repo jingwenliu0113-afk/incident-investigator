@@ -196,6 +196,8 @@ Error: failed to shutdown service after error: failed to shutdown meter provider
    要在報告裡揭露，但不是 raw 路徑的缺失。
 5. collector 最後一次 self-telemetry（關閉時推送失敗，見修訂）不影響計算：final 是視窗結束後的第一次正常 export。
 6. soak 報告也附上視窗的 accounting，但不加入判定（R1–R9 已固定）。
+7. （2026-10-08 review 修正）SDK 錯誤的增量用**該服務的 SDK export 時間**夾住視窗（視窗結束後的第一次 export），不是錯誤 series 自己的點：
+   視窗結束後才第一次出現的錯誤 series（例如 drain 期間）不算在視窗內。計數器的 key 改用 JSON（`[名稱, attribute 配對]`），attribute 值含 `,` / `=` 也不會解析錯。
 
 ## 修訂 3（2026-10-08 約 14:40Z：soak #4 判定為 FAILED 之後、soak #5 開始之前）
 

@@ -113,4 +113,6 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
    store 在搬動 raw 之前先檢查 raw export，被拒絕時可以重試。
 4. **收尾不會被打斷**：SIGTERM / SIGHUP 轉成和 Ctrl-C 一樣的流程；收尾期間忽略 SIGINT / SIGTERM / SIGHUP（子程序 `compose stop` / `down` 也繼承），
    而且 `down` 放在最內層的 finally，一定會執行。
+5. （同日 review 修正）收尾的每一步（還原 flag 檔、關 samples、停 event watch、複製 raw）各自執行，任何一步失敗只記在 `teardown_errors`，
+   後面的步驟（特別是複製 raw）與 `down` 照常執行；失敗的 run 記為 `aborted_error` 並保留 run record。判定有效性時出錯也一樣保留 record。
 

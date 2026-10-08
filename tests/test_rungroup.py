@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from collect.accounting import counter_key
 from collect.policy import load_policy
 from collect.rungroup import Plan, normal_minutes, recovery_minutes, run_group
 
@@ -113,9 +114,11 @@ class Stack:
                 "collector_snapshots": [
                     {"t": int(T0.timestamp()) * 10**9, "start": 1, "values": {}},
                     {"t": int(self.clock.time()) * 10**9, "start": 1, "values": {
-                        "otelcol_processor_incoming_items{otel.signal=traces,processor=memory_limiter}": 10 + self.dropped,
-                        "otelcol_processor_outgoing_items{otel.signal=traces,processor=memory_limiter}": 10}}],
-                "sdk_errors": []}
+                        counter_key("otelcol_processor_incoming_items",
+                                    {"otel.signal": "traces", "processor": "memory_limiter"}): 10 + self.dropped,
+                        counter_key("otelcol_processor_outgoing_items",
+                                    {"otel.signal": "traces", "processor": "memory_limiter"}): 10}}],
+                "sdk_errors": {"exports": {}, "errors": []}}
 
 
 @pytest.fixture
@@ -380,3 +383,42 @@ def test_incomplete_raw_invalidates_the_run(tmp_path, flag_path, bad):
     stack.finalize_raw = finalize
     rec = go(stack, clock, flag_path, tmp_path)
     assert rec["status"] == "invalid" and rec["reasons"] == ["raw_incomplete"] and "incident_window" not in rec
+
+
+def test_a_failing_teardown_step_still_copies_raw_tears_down_and_keeps_the_record(tmp_path, flag_path, monkeypatch):
+    # review: an I/O error restoring the flag file skipped finalize_raw (raw lost at `down`) and dropped the record
+    import collect.rungroup as rg
+
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    real_write = rg.write_atomic
+    writes = []
+
+    def failing_write(path, content):
+        writes.append(content)
+        if len(writes) >= 2:  # fault on works; fault off and the teardown's restore hit ENOSPC
+            raise OSError(28, "No space left on device")
+        return real_write(path, content)
+
+    monkeypatch.setattr(rg, "write_atomic", failing_write)
+    with pytest.raises(OSError) as info:
+        go(stack, clock, flag_path, tmp_path)
+    rec = info.value.run_record
+    assert "finalize_raw" in stack.calls and stack.calls[-1] == ["down", "--volumes"]
+    assert rec["status"] == "aborted_error" and rec["raw"] is not None and rec["teardown_errors"]
+
+
+def test_a_crash_while_judging_the_run_keeps_the_record(tmp_path, flag_path, monkeypatch):
+    import collect.rungroup as rg
+
+    def broken(*a, **kw):
+        raise ValueError("unexpected counter shape")
+
+    monkeypatch.setattr(rg, "account", broken)
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    with pytest.raises(ValueError) as info:
+        go(stack, clock, flag_path, tmp_path)
+    rec = info.value.run_record
+    assert rec["status"] == "aborted_error" and "unexpected counter shape" in rec["reasons"][-1]
+    assert stack.calls[-1] == ["down", "--volumes"]

@@ -146,18 +146,19 @@ class _Run:
                 self.count("X5_attribute")
                 continue
             self.keys_seen[f"{self.signal}/{self.ctx[0]}"].add(k)
-            if k in priv["delete_keys"] or any(re.search(p, k) for p in priv["delete_key_patterns"]):
+            k2 = self.scrub(k)
+            names = (k, k2)  # privacy applies to the raw key and to what is left of it after X8
+            if any(n in priv["delete_keys"] or any(re.search(p, n) for p in priv["delete_key_patterns"]) for n in names):
                 self.count("X9_delete")
                 continue
-            if k in priv["hash_keys"]:
+            if hashed := next((n for n in names if n in priv["hash_keys"]), None):
                 self.count("X9_hash")
-                out[priv["hash_keys"][k]] = hashlib.sha256(str(v).encode()).hexdigest()
+                out[priv["hash_keys"][hashed]] = hashlib.sha256(str(v).encode()).hexdigest()
                 continue
-            if k in priv["mask_last4_keys"] and isinstance(v, str):
+            if any(n in priv["mask_last4_keys"] for n in names) and isinstance(v, str):
                 self.count("X9_mask")
-                out[k] = "****-****-****-" + "".join(c for c in v if c.isdigit())[-4:]
+                out[k2] = "****-****-****-" + "".join(c for c in v if c.isdigit())[-4:]
                 continue
-            k2 = self.scrub(k)
             if not k2 or k2 in out:
                 self.count("X8_key")
                 continue
@@ -229,7 +230,20 @@ def _lines(path: Path):
 
 def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, report_path: Path,
               staging_dir: Path, code: dict | None = None) -> dict:
-    """`code`: git state of the normalizer's checkout, recorded in the report (EXPERIMENT_RULES: record the commit)."""
+    """`code`: git state of the normalizer's checkout, recorded in the report (EXPERIMENT_RULES: record the commit).
+
+    A failure leaves nothing published and no staging behind, so the same incident can be normalized again."""
+    try:
+        return _normalize(inputs, policy, incident_dir=incident_dir, report_path=report_path, staging_dir=staging_dir,
+                          code=code)
+    except BaseException:
+        if not (incident_dir / "normalized").exists():  # never touch another run's staging after a refused start
+            shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+
+def _normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, report_path: Path,
+               staging_dir: Path, code: dict | None) -> dict:
     ws, we = _check_inputs(inputs, policy, incident_dir)
     key = hashlib.blake2b(dumps(sorted(inputs.raw_sha256.values())).encode(), digest_size=32).digest()
     run = _Run(policy, key)
@@ -418,6 +432,8 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
 
     # ---------------------------------------------------------------- write, check, publish
     tmp = incident_dir / f"normalized.tmp-{os.getpid()}"
+    if tmp.exists():  # an unpublished leftover of an earlier failed attempt in this process
+        shutil.rmtree(tmp)
     if tmp.exists():
         shutil.rmtree(tmp)
     tmp.mkdir(parents=True)
@@ -464,10 +480,6 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
     (tmp / "snapshot.json").write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")
     if problems := check_snapshot(tmp, policy):
         raise NormalizeError(f"snapshot failed its checks (left in {tmp}): {problems[:10]}")
-    for p in tmp.iterdir():
-        p.chmod(0o444)
-    os.replace(tmp, incident_dir / "normalized")
-    shutil.rmtree(staging_dir)
 
     report = {
         "report_version": 1,
@@ -488,7 +500,13 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
         "content_sha256": snapshot["content_sha256"],
     }
     if problems := [e.message[:200] for e in _report_validator().iter_errors(report)]:
-        raise NormalizeError(f"normalize report does not match schemas/normalize_report.schema.json: {problems[:5]}")
+        raise NormalizeError(f"normalize report does not match schemas/normalize_report.schema.json: {problems[:5]} "
+                             f"(snapshot left unpublished in {tmp})")
+    # publish only once everything about this snapshot has been checked: it is write-once
+    for p in tmp.iterdir():
+        p.chmod(0o444)
+    os.replace(tmp, incident_dir / "normalized")
+    shutil.rmtree(staging_dir)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report

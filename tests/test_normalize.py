@@ -353,3 +353,30 @@ def test_harness_probe_containers_are_dropped_as_harness_not_unknown(tmp_path):
     _, report = run_with(tmp_path, {"metrics": [probe]})
     assert report["unknown_services"] == {}
     assert report["removed_detail"]["X1"]["metrics"]["by_service"]["harness-probe"] == 1
+
+
+def test_privacy_rules_also_apply_to_the_key_left_after_scrubbing(tmp_path):
+    # review: "ofrep.user.email" scrubs to "user.email" and slipped past the privacy rules checked on the raw key
+    w = T0 + 120 * S
+    sp = span("4" * 32, "5" * 16, w, "Charge", attrs={"ofrep.user.email": "a@b.c", "flagd.demo.payment.card_cvv": 123})
+    norm, report = run_with(tmp_path, {"traces": [traces_line(res("payment"), [sp])]})
+    s5 = next(x for x in lines(norm / "spans.jsonl") if x["span_id"] == "5" * 16)
+    assert "user.email" not in s5["attributes"] and s5["attributes"]["user.hash"] == hashlib.sha256(b"a@b.c").hexdigest()
+    assert not any("cvv" in k for k in s5["attributes"])
+
+
+def test_a_report_that_fails_its_schema_never_leaves_a_published_snapshot(setup, monkeypatch):
+    import collect.normalize as nz
+
+    layout, _ = setup
+
+    class Refuse:
+        def iter_errors(self, report):
+            yield type("E", (), {"message": "forced"})()
+
+    monkeypatch.setattr(nz, "_report_validator", lambda: Refuse())
+    with pytest.raises(NormalizeError, match="schema"):
+        run(setup)
+    assert not (layout.incident_dir("INC-001") / "normalized").exists()  # write-once: nothing to retry around
+    monkeypatch.undo()
+    run(setup)

@@ -178,7 +178,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
                                  "latency_seconds": round(clock.time() - host_t, 3)}
         return written_at, mono_t, confirmed
 
-    watch, raw, up_started, events = None, None, False, None
+    watch, raw, up_started, events, crashed = None, None, False, None, False
     times: dict[str, str] = {}
     try:
         watch = stack.watch(work_dir / "docker-events.jsonl")
@@ -232,33 +232,68 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
         events = watch.stop()  # before the collector stop: its exit is judged with the raw export
         raw = stack.finalize_raw(work_dir)
     except BaseException as e:  # decision 009 §4: a run that started always leaves a record, a crashed one too
+        crashed = True
         record["status"] = "aborted_error"
         record["reasons"].append(f"harness error: {type(e).__name__}: {str(e)[:300]}")
         e.run_record = record  # the same dict: the teardown below still fills raw / events / down_exit_code
         raise
     finally:
         masked = _mask_signals()  # a second Ctrl-C / SIGTERM must not cut the teardown short
-        try:
+        teardown_errors: list[BaseException] = []
+
+        def step(name: str, fn) -> None:
+            """Each teardown step runs whatever the previous one did; a failure is recorded, not propagated here."""
             try:
-                if flag_path.read_bytes() != original:
-                    write_atomic(flag_path, original)
-                samples_file.close()
-                if watch is not None:
-                    stopped = watch.stop()
-                    events = events if events is not None else stopped
-                if up_started and raw is None:
-                    try:
-                        raw = stack.finalize_raw(work_dir)  # whatever exists is kept for debugging (decision 009 §4)
-                    except BaseException as e:  # noqa: BLE001 - teardown must still run
-                        record["raw_error"] = f"{type(e).__name__}: {str(e)[:300]}"
-                record["raw"] = raw
-                record["events"] = events
-            finally:
+                fn()
+            except BaseException as e:  # noqa: BLE001 - every teardown step must run
+                teardown_errors.append(e)
+                record.setdefault("teardown_errors", []).append(f"{name}: {type(e).__name__}: {str(e)[:300]}")
+
+        def restore_flag() -> None:
+            if flag_path.read_bytes() != original:
+                write_atomic(flag_path, original)
+
+        def stop_watch() -> None:
+            nonlocal events
+            if watch is not None:
+                stopped = watch.stop()
+                events = events if events is not None else stopped
+
+        def copy_raw() -> None:
+            nonlocal raw
+            if up_started and raw is None:
+                raw = stack.finalize_raw(work_dir)  # whatever exists is kept for debugging (decision 009 §4)
+
+        try:
+            step("restore flag file", restore_flag)
+            step("close samples", samples_file.close)
+            step("stop event watch", stop_watch)
+            step("copy raw", copy_raw)
+            record["raw"], record["events"] = raw, events
+        finally:
+            try:
                 if up_started:
                     record["down_exit_code"] = stack.compose(["down", "--volumes"])
-        finally:
-            _restore_signals(masked)
+            finally:
+                _restore_signals(masked)
+        if teardown_errors and not crashed:
+            record["status"] = "aborted_error"
+            record["reasons"].append(f"teardown error: {record['teardown_errors'][0]}")
+            teardown_errors[0].run_record = record
+            raise teardown_errors[0]
 
+    try:
+        _judge(record, samples, events, raw, times)
+    except BaseException as e:
+        record["status"] = "aborted_error"
+        record["reasons"].append(f"harness error while judging: {type(e).__name__}: {str(e)[:300]}")
+        e.run_record = record
+        raise
+    return record
+
+
+def _judge(record: dict, samples: list[dict], events: list[dict] | None, raw: dict | None, times: dict) -> None:
+    """Validity of a run group that ran to its end (decision 009 §4, 008 §6, 012)."""
     if {"fault_on", "fault_off"} <= times.keys():
         record["schedule"] = dict(times)
         record["normal_period"] = period_observations(samples, events or [], start=times["normal_start"],
@@ -270,7 +305,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
         if events is None:
             record["reasons"].append("event_stream_missing")
     if raw is not None and {"normal_start", "end"} <= times.keys():
-        record["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or [],
+        record["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or {},
                                            raw["files"], start_ns=_ns(times["normal_start"]), end_ns=_ns(times["end"]))
     if raw is None or raw_flags(raw["collector"], raw["files"]) or record.get("raw_accounting", {}).get("flags"):
         record["reasons"].append("raw_incomplete")
@@ -293,7 +328,6 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
     record["status"] = "valid" if not record["reasons"] else "invalid"
     if record["status"] == "valid":
         record["incident_window"] = {"start": times["normal_start"], "end": times["end"]}  # decision 009 §1
-    return record
 
 
 # ---------------------------------------------------------------- storing a finished run group
