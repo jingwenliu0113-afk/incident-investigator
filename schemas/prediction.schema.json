@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prediction.schema.json",
+  "title": "Prediction of one method for one incident (decision 013)",
+  "description": "Every method (baselines and the agent) writes this shape; there is no free-form root-cause field (SPEC \u00a78).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "prediction_version",
+    "incident_id",
+    "method",
+    "fault",
+    "origin_candidates",
+    "affected_services",
+    "user_symptom",
+    "evidence",
+    "usage"
+  ],
+  "properties": {
+    "prediction_version": {
+      "const": 1
+    },
+    "incident_id": {
+      "type": "string",
+      "pattern": "^INC-[0-9]{3,}(?!\\n)$"
+    },
+    "method": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "version"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fault_type",
+        "fault_family"
+      ],
+      "properties": {
+        "fault_type": {
+          "enum": [
+            "added_latency",
+            "cpu_saturation",
+            "error_response",
+            "gc_pressure",
+            "lock_contention",
+            "memory_leak",
+            "queue_backlog",
+            "traffic_flood",
+            "unreachable_dependency",
+            null
+          ]
+        },
+        "fault_family": {
+          "enum": [
+            "connectivity",
+            "error",
+            "latency",
+            "messaging",
+            "resource",
+            "traffic",
+            null
+          ]
+        }
+      }
+    },
+    "origin_candidates": {
+      "description": "ranked, most likely first; empty = abstain",
+      "type": "array",
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "affected_services": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "user_symptom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kinds"
+      ],
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "errors",
+              "latency",
+              "degraded_feature",
+              "none"
+            ]
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[slmpt]-[0-9a-f]{16,32}(?!\\n)$"
+          },
+          "t0": {
+            "type": "integer"
+          },
+          "t1": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokens_in": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tokens_out": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "proxy_tokens": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "tool_calls": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "retrievals": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "latency_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cost_usd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

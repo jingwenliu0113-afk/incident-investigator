@@ -113,3 +113,18 @@ def test_lone_surrogates_are_cleaned_in_every_field_so_readers_never_crash(tmp_p
     assert "GET \ufffd/x" in names and report["value_fixes"]["lone_surrogates"] >= 1
     for sp in snap.spans():
         assert proxy_tokens(render_v1(sp, snap.window["start_ns"])) > 0
+
+
+def test_evidence_existence_counts_cited_ids_that_resolve_in_the_snapshot(snap_dir):
+    # SPEC §9 Existence: does each cited log / trace / metric really exist (relevance is a separate layer)
+    from eval.evidence import existence
+
+    layout, norm = snap_dir
+    snap = open_snapshot(norm, layout)
+    span, series = next(snap.spans()), next(snap.series())
+    t = next(p["time_unix_nano"] for p in snap.points() if p["series_id"] == series["id"])
+    cited = [{"id": span["id"]}, {"id": "t-" + span["trace_id"]}, {"id": series["id"], "t0": t, "t1": t},
+             {"id": series["id"], "t0": T0 + 9000 * S, "t1": T0 + 9001 * S}, {"id": "l-" + "f" * 16}]
+    out = existence(cited, snap)
+    assert out == {"cited": 5, "resolved": 3, "rate": 0.6, "unresolved": [series["id"], "l-" + "f" * 16]}
+    assert existence([], snap) == {"cited": 0, "resolved": 0, "rate": None, "unresolved": []}
