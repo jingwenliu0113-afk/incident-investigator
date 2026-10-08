@@ -150,4 +150,24 @@
    `attribute_keys` 列出保留 record 的原始 attribute key（依 `signal/service`）；policy 帶 `attribute_key_inventory` 時，`new_attribute_keys` 列出
    inventory 沒見過的 key，給 Core §6 的稽核用（deny-list 的補強）。inventory 在凍結時由沒有 fault 的 soak 的 `attribute_keys` 產生，放進 policy 檔，受同一個 sha 保護。
 
+7. **校準可以重跑、只讀 soak**：`collect calibrate` 每次寫進新的 `data/external/calibration/<soak>/<UTC 時間>/`（之前的結果保留為證據）；
+   輸入必須是有 soak `report.json` 的目錄（不接受 run group 的 raw）；錯誤以 exit 2 回報。
+
 policy 檔的 sha 隨 FA-11 重新釘選（狀態仍是 `calibrating`）。
+
+### 凍結條件（2026-10-08 約 14:15Z 寫定，在用最終程式重跑校準之前）
+
+policy 只有在**每一份**沒有 fault 的 soak raw（soak #3，以及 soak #4 的 raw 若可用）上同時滿足下列條件，才可以把 `status` 改為 `frozen`
+（`collect.calibrate.freeze_check`，`collect calibrate` 的 exit code 只有全部通過才是 0）：
+
+| # | 條件 |
+|---|---|
+| F1 | `check_snapshot` 沒有任何問題 |
+| F2 | 沒有未知服務（不在 SUT 也不在 excluded），沒有未知的 OTLP 欄位 |
+| F3 | X7（Class A 樣板，含 span event）在沒有 fault 的 raw 裡命中 0 次：命中就是樣板太寬 |
+| F4 | X8 刪除的 token 為 0：沒有 fault 時出現 token，代表缺規則或詞彙太寬 |
+| F5 | raw 裡有 telemetry 的 SUT 服務，snapshot 裡都至少留下一筆（沒有服務被規則整個清掉） |
+| F6 | 約 40 分鐘的 soak：normalize ≤ 600 s、最大 RSS ≤ 4 GiB |
+
+凍結時同時寫入：`attribute_key_inventory` = 各 soak 校準 report 的 `attribute_keys` 聯集；這裡記錄 soak 目錄、每份 `calibration.json` 的 sha256、
+凍結後的 policy sha 與 commit。凍結之後，任何改動都是 v2（見 §4）。

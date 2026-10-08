@@ -2,8 +2,22 @@
 
 import json
 
-from collect.calibrate import calibrate, inventory
-from normalize_fixtures import write_raw
+import pytest
+
+from collect.calibrate import calibrate, freeze_check, inventory
+from normalize_fixtures import S, T0, log, logs_line, raw_lines, res, write_raw
+
+
+def soak(tmp_path, name="soak", *, lines=None):
+    d = tmp_path / name
+    if lines is None:
+        write_raw(d / "raw")
+    else:
+        (d / "raw").mkdir(parents=True)
+        for sig, ls in lines.items():
+            (d / "raw" / f"{sig}.jsonl").write_text("\n".join(ls) + "\n")
+    (d / "report.json").write_text(json.dumps({"env_lock_sha256": "sha256:" + "1" * 64, "criteria": {}, "raw": {}}))
+    return d
 
 
 def test_inventory_lists_what_the_policy_must_know_about(tmp_path):
@@ -20,11 +34,43 @@ def test_inventory_lists_what_the_policy_must_know_about(tmp_path):
 
 
 def test_calibrate_runs_normalize_dry_over_the_whole_soak_and_reports(tmp_path):
-    soak = tmp_path / "soak"
-    write_raw(soak / "raw")
-    out = calibrate(soak, tmp_path / "calibration")
+    out = calibrate(soak(tmp_path), tmp_path / "calibration")
     assert out["check_problems"] == []
     assert out["report"]["signals"]["traces"]["kept"] >= 3
     assert out["seconds"] >= 0 and out["max_rss_bytes"] > 0
     saved = json.loads((tmp_path / "calibration" / "calibration.json").read_text())
     assert saved["inventory"]["services"] == out["inventory"]["services"]
+
+
+def test_calibrate_only_reads_a_soak_and_never_overwrites_an_earlier_iteration(tmp_path):
+    not_a_soak = tmp_path / "rg"
+    write_raw(not_a_soak / "raw")  # raw/ but no soak report: could be anything, including fault raw
+    with pytest.raises(ValueError, match="soak"):
+        calibrate(not_a_soak, tmp_path / "c0")
+    s = soak(tmp_path)
+    calibrate(s, tmp_path / "c1")
+    with pytest.raises(FileExistsError):
+        calibrate(s, tmp_path / "c1")
+    assert calibrate(s, tmp_path / "c2")["check_problems"] == []  # a second iteration in a fresh directory
+
+
+def test_freeze_criteria_fail_on_fault_artifacts_or_tokens_in_a_no_fault_soak(tmp_path):
+    # the fixture raw carries fault-only lines on purpose (X7 templates, X8 tokens): in a real soak they are false positives
+    out = calibrate(soak(tmp_path), tmp_path / "c")
+    fc = out["freeze_check"]
+    assert fc["F3"]["pass"] is False and fc["F4"]["pass"] is False and fc["pass"] is False
+    assert fc["F1"]["pass"] is True and fc["F2"]["pass"] is True
+    clean = {sig: [ln for ln in ls if not any(t in ln for t in ("garbage collection", "kafkaQueueProblems", "Feature Flag",
+                                                                "paymentFailure"))]
+             for sig, ls in raw_lines().items()}
+    clean["logs"].append(logs_line(res("shipping"), [log(T0 + 120 * S, "quote sent")]))  # its only other log is X5
+    ok = calibrate(soak(tmp_path, "clean", lines=clean), tmp_path / "c2")["freeze_check"]
+    assert {k: v["pass"] for k, v in ok.items() if k != "pass"} == {f"F{i}": True for i in range(1, 7)} and ok["pass"]
+
+
+def test_freeze_check_budget_and_service_coverage():
+    report = {"signals": {}, "removed": {}, "tokens_deleted": {}, "unknown_services": {}}
+    fc = freeze_check(report, check_problems=[], unknown_fields={}, raw_services={"cart", "email"},
+                      kept_services={"cart"}, seconds=700, max_rss_bytes=5 * 2**30)
+    assert fc["F5"]["pass"] is False and "email" in fc["F5"]["detail"]
+    assert fc["F6"]["pass"] is False

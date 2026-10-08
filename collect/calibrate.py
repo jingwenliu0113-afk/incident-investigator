@@ -105,8 +105,56 @@ def inventory(raw_dir: Path) -> dict:
     }
 
 
+MAX_SECONDS = 600  # F6: normalize of a ~40-minute soak
+MAX_RSS_BYTES = 4 * 2**30
+
+
+def freeze_check(report: dict, *, check_problems: list[str], unknown_fields: dict, raw_services: set[str],
+                 kept_services: set[str], seconds: float, max_rss_bytes: int) -> dict:
+    """Pre-registered criteria for freezing the policy on no-fault soak raw (decision 011, freeze criteria F1–F6)."""
+    removed = report.get("removed", {})
+    x7 = sum(sum(v.values()) for rule, v in removed.items() if rule.startswith("X7"))
+    tokens = sum(report.get("tokens_deleted", {}).values())
+    lost = sorted(raw_services - kept_services)
+    crit = {
+        "F1": {"pass": not check_problems, "detail": f"check_snapshot problems: {check_problems[:5] or 'none'}"},
+        "F2": {"pass": not report.get("unknown_services") and not unknown_fields,
+               "detail": f"unknown services {report.get('unknown_services') or 'none'}; unknown OTLP fields {unknown_fields or 'none'}"},
+        "F3": {"pass": x7 == 0, "detail": f"{x7} items matched a fault-artifact template in raw without a fault"},
+        "F4": {"pass": tokens == 0, "detail": f"{tokens} lexicon tokens deleted in raw without a fault"},
+        "F5": {"pass": not lost, "detail": f"SUT services with raw telemetry but nothing kept: {lost or 'none'}"},
+        "F6": {"pass": seconds <= MAX_SECONDS and max_rss_bytes <= MAX_RSS_BYTES,
+               "detail": f"normalize {seconds:.1f} s (<= {MAX_SECONDS}), max RSS {max_rss_bytes / 2**30:.2f} GiB (<= 4)"},
+    }
+    crit["pass"] = all(c["pass"] for c in crit.values())
+    return crit
+
+
+def _require_soak(soak_dir: Path) -> None:
+    """Only a soak directory: its report.json says so and raw/ holds the three files. Never a run group's raw."""
+    try:
+        report = json.loads((soak_dir / "report.json").read_text())
+    except (OSError, ValueError):
+        report = None
+    if not isinstance(report, dict) or not {"env_lock_sha256", "criteria", "raw"} <= report.keys():
+        raise ValueError(f"{soak_dir} is not a soak directory (no soak report.json): calibrate only reads no-fault soak raw")
+    if missing := [s for s in ("traces", "metrics", "logs") if not (soak_dir / "raw" / f"{s}.jsonl").is_file()]:
+        raise ValueError(f"{soak_dir}/raw has no {missing}")
+
+
+def _kept_services(snapshot: Path) -> set[str]:
+    out = set()
+    for name in ("spans.jsonl", "logs.jsonl", "metric_series.jsonl"):
+        with (snapshot / name).open("rb") as f:
+            out.update(json.loads(line)["service"] for line in f)
+    return out
+
+
 def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> dict:
+    """One calibration iteration into a fresh `out_dir` (earlier iterations stay as evidence)."""
     policy = policy or load_policy()
+    _require_soak(soak_dir)
+    out_dir.mkdir(parents=True, exist_ok=False)
     raw_dir = soak_dir / "raw"
     scans = {sig: scan_raw_file(raw_dir / f"{sig}.jsonl", sig) for sig in ("traces", "metrics", "logs")}
     times = [t for s in scans.values() for t in (s["min_time"], s["max_time"]) if t]
@@ -123,11 +171,21 @@ def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> di
     seconds = time.monotonic() - t0
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS
     snapshot = layout.incident_dir("INC-000") / "normalized"
+    inv = inventory(raw_dir)
+    problems = check_snapshot(snapshot, policy)
+    sut = set(policy.sut_services)
+    receiver_services = {r["service"] for r in policy.raw["receivers"].values()
+                         if "service" in r and any(r["scope_contains"] in scope for scope in inv["metric_scopes"])}
+    raw_services = sut & ({svc for per in inv["services"].values() for svc in per} | set(inv["docker_container_names"])
+                          | receiver_services)
     result = {"soak": str(soak_dir), "policy": {"version": policy.raw["version"], "sha256": policy.sha256},
               "scans": {sig: {k: s[k] for k in ("bytes", "lines", "items", "duplicates", "min_time", "max_time")}
                         for sig, s in scans.items()},
-              "inventory": inventory(raw_dir), "report": report, "check_problems": check_snapshot(snapshot, policy),
+              "inventory": inv, "report": report, "check_problems": problems,
               "snapshot_bytes": sum(p.stat().st_size for p in snapshot.iterdir()), "seconds": round(seconds, 2),
               "max_rss_bytes": rss}
+    result["freeze_check"] = freeze_check(report, check_problems=problems, unknown_fields=inv["unknown_fields"],
+                                          raw_services=raw_services, kept_services=_kept_services(snapshot),
+                                          seconds=seconds, max_rss_bytes=rss)
     (out_dir / "calibration.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
     return result

@@ -86,14 +86,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"incident_id": ns.incident, "content_sha256": report["content_sha256"]}, indent=2))
         return 0
     if ns.command == "calibrate":
+        from datetime import UTC, datetime
+
         from collect.calibrate import calibrate
 
-        out = PROJECT_DIR / "data/external/calibration" / ns.soak.name
-        result = calibrate(ns.soak, out)
-        print(json.dumps({"out": str(out), "check_problems": result["check_problems"], "seconds": result["seconds"],
-                          "max_rss_bytes": result["max_rss_bytes"], "unknown_services": result["report"]["unknown_services"],
-                          "unknown_fields": result["inventory"]["unknown_fields"]}, indent=2))
-        return 0 if not result["check_problems"] else 1
+        # one directory per iteration: earlier iterations stay as evidence (decision 011 §4)
+        out = PROJECT_DIR / "data/external/calibration" / ns.soak.name / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        try:
+            result = calibrate(ns.soak, out)
+        except (ValueError, OSError, RuntimeError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps({"out": str(out), "policy": result["policy"], "freeze_check": result["freeze_check"],
+                          "seconds": result["seconds"], "max_rss_bytes": result["max_rss_bytes"]}, indent=2))
+        return 0 if result["freeze_check"]["pass"] else 1
 
     try:
         _check_args(ns)
