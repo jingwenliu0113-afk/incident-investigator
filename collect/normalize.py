@@ -434,8 +434,6 @@ def _normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, r
     tmp = incident_dir / f"normalized.tmp-{os.getpid()}"
     if tmp.exists():  # an unpublished leftover of an earlier failed attempt in this process
         shutil.rmtree(tmp)
-    if tmp.exists():
-        shutil.rmtree(tmp)
     tmp.mkdir(parents=True)
     firsts = {pid for (pid,) in db.execute(
         "SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY series_id ORDER BY t, id) AS rn FROM points) WHERE rn = 1")}
