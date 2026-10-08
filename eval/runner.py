@@ -53,7 +53,44 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> l
     return written
 
 
+def _clock_offset(layout: DataLayout, inc: str) -> float:
+    """Data clock minus host clock of the incident's run (the label is on the host clock)."""
+    return json.loads(layout.normalize_report_path(inc).read_text())["window"]["clock_offsets"][0]
+
+
+def _gold_path(layout: DataLayout, inc: str) -> Path:
+    return layout.label_path(inc).with_name("evidence_gold.json")
+
+
+def _gold(layout: DataLayout, inc: str) -> dict | None:
+    path = _gold_path(layout, inc)
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+EVIDENCE_LAYERS = {  # decision 017 §4: each reported on its own, never combined
+    "existence": lambda r: r["evidence_existence"],
+    "temporal": lambda r: r["evidence_weak"]["temporal"],
+    "service": lambda r: r["evidence_weak"]["service"],
+    "origin": lambda r: r["evidence_weak"]["origin"],
+    "weak": lambda r: r["evidence_weak"]["weak"],
+    "gold_precision": lambda r: r["evidence_gold"]["precision"],
+    "gold_coverage": lambda r: r["evidence_gold"]["coverage"],
+}
+
+
+def _evidence_aggregate(rows: list[dict]) -> dict:
+    out = {}
+    for name, get in EVIDENCE_LAYERS.items():
+        have = [{"incident_id": r["incident_id"], "run_group_id": r["run_group_id"], name: get(r)} for r in rows
+                if get(r) is not None]
+        m = aggregate(have)["metrics"][name] if have else {"mean": None, "ci95": None}
+        out[name] = {"n": len(have), **m}
+    return out
+
+
 def score_method(layout: DataLayout, method: str, split: str, out_root: Path) -> dict:
+    from eval.relevance import gold_score, weak_score
+
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     rows = []
@@ -61,11 +98,14 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
         pred = json.loads((out_dir / f"{inc}.json").read_text())
         label = json.loads(layout.label_path(inc).read_text())
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        rows.append(score_incident(pred, label) | {"run_group_id": rg,
-                                                    "evidence_existence": existence(pred["evidence"], snapshot)["rate"]})
-    scored = [{k: v for k, v in r.items() if k != "evidence_existence"} for r in rows]
+        rows.append(score_incident(pred, label) | {
+            "run_group_id": rg,
+            "evidence_existence": existence(pred["evidence"], snapshot)["rate"],
+            "evidence_weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=_clock_offset(layout, inc)),
+            "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc))})
+    scored = [{k: v for k, v in r.items() if not k.startswith("evidence_")} for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
-    result = {"method": method, "split": split, "incidents": rows, "aggregate": agg}
+    result = {"method": method, "split": split, "incidents": rows, "aggregate": agg, "evidence": _evidence_aggregate(rows)}
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
     return result
@@ -83,10 +123,74 @@ def _table(result: dict) -> str:
     for name, m in agg["metrics"].items():
         mark = " (main)" if name in MAIN_METRICS else ""
         lines.append(f"| {name}{mark} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
-    rates = [r["evidence_existence"] for r in result["incidents"] if r["evidence_existence"] is not None]
-    lines += ["", f"evidence existence: {sum(rates) / len(rates):.3f} over {len(rates)} incidents that cite evidence"
-              if rates else "evidence existence: no incident cites evidence"]
+    lines += ["", "## Evidence (decisions 013 §4, 017; each layer on its own)", "",
+              "| layer | n incidents | mean | 95% interval |", "|---|---:|---:|---|"]
+    names = {"existence": "existence", "temporal": "weak: temporal", "service": "weak: affected service",
+             "origin": "weak: origin service", "weak": "weak: temporal and service", "gold_precision": "gold precision",
+             "gold_coverage": "gold coverage"}
+    for key, m in result["evidence"].items():
+        if m["mean"] is None:
+            lines.append(f"| {names[key]} | 0 | - | - |")
+        else:
+            lines.append(f"| {names[key]} | {m['n']} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
     return "\n".join(lines) + "\n"
+
+
+def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:
+    """Blind gold worksheets (decision 017 §3): per incident of `split`, the pooled citations of every method's predictions
+    still to judge, written to the ground-truth side as evidence_gold_todo.json (record text and label, no method)."""
+    from collect.snapshot import _rel
+    from eval.relevance import _ns, gold_sample, key, resolved_unique
+
+    rows = []
+    for inc, _ in incidents_in(layout, split):
+        snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
+        cited = {}
+        for path in sorted(Path(out_root, split).glob(f"*/{inc}.json")):
+            pred = json.loads(path.read_text())
+            cited[pred["method"]["name"]] = [{"id": k[0], "t0": k[1], "t1": k[2]}
+                                             for k, _ in resolved_unique(pred["evidence"], snapshot)]
+        gold = _gold(layout, inc)
+        todo = gold_sample(inc, cited, annotated={key(e) for e in (gold or {}).get("items", [])})
+        label = json.loads(layout.label_path(inc).read_text())
+        start, offset = snapshot.window["start_ns"], _clock_offset(layout, inc)
+        sheet = {"incident_id": inc,
+                 "how_to": "set relevant to true or false for each item (decision 017 §3), leave null to judge later, "
+                           "then: python -m eval gold-add --incident <INC> --file <this file> --annotator human:<name>",
+                 "context": {"fault_type": label["injected_fault"]["fault_type"], "origin_service": label["origin_service"],
+                             "affected_services": label["affected_services"],
+                             "fault": [_rel(_ns(label["fault_start"], offset), start), _rel(_ns(label["fault_end"], offset), start)]},
+                 "items": [{**e, "record": _render(snapshot, e), "relevant": None} for e in todo]}
+        layout.label_path(inc).with_name("evidence_gold_todo.json").write_text(json.dumps(sheet, indent=2) + "\n")
+        rows.append({"incident_id": inc, "to_judge": len(todo)})
+    return {"split": split, "incidents": rows}
+
+
+def _render(snapshot, e: dict, limit: int = 20) -> list[str]:
+    """The cited record as the snapshot renders it (render v1): a trace as its spans, a series with its points in range."""
+    from collect.snapshot import render_v1
+
+    start = snapshot.window["start_ns"]
+    if e["id"].startswith("t-"):
+        return [render_v1(s, start) for s in snapshot.spans() if s["trace_id"] == e["id"][2:]][:limit]
+    lines = [render_v1(snapshot.resolve(e["id"], e["t0"], e["t1"]), start)]
+    if e["id"].startswith("m-"):
+        lo, hi = e["t0"] if e["t0"] is not None else -1, e["t1"] if e["t1"] is not None else 2**63
+        lines += [render_v1(p, start) for p in snapshot.points()
+                  if p["series_id"] == e["id"] and lo <= p["time_unix_nano"] <= hi][:limit]
+    return lines
+
+
+def gold_add(layout: DataLayout, incident_id: str, sheet_path: Path, *, annotator: str, now: str) -> dict:
+    """Merge the judged items of a filled worksheet into evidence_gold.json (append-only, decision 017 §3)."""
+    from eval.relevance import merge_gold
+
+    items = json.loads(Path(sheet_path).read_text())["items"]
+    judged = [e for e in items if e.get("relevant") is not None]
+    before = _gold(layout, incident_id)
+    doc = merge_gold(before, incident_id, judged, annotator=annotator, now=now)
+    _gold_path(layout, incident_id).write_text(json.dumps(doc, indent=2) + "\n")
+    return {"added": len(doc["items"]) - len((before or {}).get("items", [])), "unjudged": len(items) - len(judged)}
 
 
 def audit_set(layout: DataLayout, split: str, out_root: Path) -> dict:

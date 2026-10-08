@@ -77,3 +77,57 @@ def test_leakage_audit_of_a_set_lands_on_the_ground_truth_side(tmp_path):
     assert layout.is_ground_truth(path) and json.loads(path.read_text())["difficulty"] in ("easy", "medium", "hard")
     assert out["incidents"][0]["incident_id"] == "INC-001" and out["incidents"][0]["lexicon_hits"] == 0
     assert "difficulty" in (tmp_path / "results" / "pilot" / "leakage.md").read_text()
+
+
+def test_evidence_relevance_weak_labels_a_blind_gold_worksheet_and_gold_precision(tmp_path, monkeypatch):
+    from baselines.statistical import predict
+    from collect.snapshot import open_snapshot
+    from eval.runner import gold_add, gold_todo_set
+
+    layout = stored(tmp_path / "data")
+    snap = open_snapshot(layout.incident_dir("INC-001") / "normalized", layout)
+    spans = [s["id"] for s in snap.spans()][:3]
+
+    def cites(snapshot, incident_id):
+        return {**predict(snapshot, incident_id), "evidence": [{"id": i} for i in spans] + [{"id": "s-" + "f" * 16}]}
+
+    monkeypatch.setitem(METHODS, "cites", cites)
+    out = tmp_path / "results"
+    run_method(layout, "cites", "pilot", out)
+    todo = gold_todo_set(layout, "pilot", out)
+    path = layout.label_path("INC-001").with_name("evidence_gold_todo.json")
+    assert todo["incidents"] == [{"incident_id": "INC-001", "to_judge": 3}] and layout.is_ground_truth(path)
+    sheet = json.loads(path.read_text())
+    assert sheet["context"]["origin_service"] == "payment" and len(sheet["items"]) == 3
+    assert all(set(e) == {"id", "t0", "t1", "record", "relevant"} and e["relevant"] is None for e in sheet["items"])
+    assert "cites" not in path.read_text()  # blind: no method name
+
+    sheet["items"][0]["relevant"] = True
+    sheet["items"][1]["relevant"] = False  # the third is left for later
+    filled = tmp_path / "filled.json"
+    filled.write_text(json.dumps(sheet))
+    assert gold_add(layout, "INC-001", filled, annotator="human:jw", now="2026-10-09T10:00:00Z") == {"added": 2, "unjudged": 1}
+    assert gold_todo_set(layout, "pilot", out)["incidents"][0]["to_judge"] == 1
+
+    result = score_method(layout, "cites", "pilot", out)
+    row = result["incidents"][0]
+    assert row["evidence_existence"] == 0.75 and row["evidence_weak"]["n"] == 3
+    assert row["evidence_gold"] == {"cited": 3, "judged": 2, "relevant": 1, "precision": 0.5, "coverage": 2 / 3}
+    assert result["evidence"]["gold_precision"]["n"] == 1 and "weak" in result["evidence"]
+    table = (out / "pilot" / "cites" / "table.md").read_text()
+    assert "gold precision" in table and "weak" in table and "existence" in table
+
+
+def test_eval_cli_checks_its_arguments_and_gold_add_refuses_an_agent(tmp_path, monkeypatch, capsys):
+    import eval.__main__ as cli
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)
+    with pytest.raises(SystemExit):
+        cli.main(["gold-add", "--incident", "INC-001"])  # needs --file and --annotator
+    with pytest.raises(SystemExit):
+        cli.main(["leakage"])  # needs --set
+    assert cli.main(["gold-todo", "--set", "pilot"]) == 0  # an empty set: nothing to judge
+    sheet = tmp_path / "s.json"
+    sheet.write_text(json.dumps({"items": [{"id": "s-" + "a" * 16, "t0": None, "t1": None, "relevant": True}]}))
+    assert cli.main(["gold-add", "--incident", "INC-001", "--file", str(sheet), "--annotator", "agent:claude-code"]) == 2
+    assert "human" in capsys.readouterr().err

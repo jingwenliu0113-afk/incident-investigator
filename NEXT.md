@@ -19,7 +19,9 @@
 - 評分與 baseline（decision 013–015）：prediction 格式與分層評分、時間框架（只給「前 10 分鐘正常」）、統計 baseline v1、leakage audit v1；`python -m eval run|score|leakage`、`python -m collect label|freeze`。
 - **Pilot 清單已預先登錄（decision 016）**：10 個 fault 與各自的 a priori label（`collect/pilot.py`）；origin 規則（flag 改變誰的程式 / 設定）、
   規則 3 補充（非 origin 只算錯誤或延遲，OOM / 重啟算錯誤）、user_symptom 在 edge 判定、fault 沒被觸發就重收。`collect run --set pilot` 只收清單上的 fault，`collect label` 只從清單取答案。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：524 passed（`-m "not network and not docker_daemon"`）。
+- **evidence relevance（decision 017）**：pool = 各方法引用的聯集；弱標籤 temporal（fault 窗 + 60 s）/ service / origin；人工 gold 每個方法每個 incident 盲抽 5 筆、只能由人標、不可改；
+  `python -m eval gold-todo --set pilot` → 填表 → `python -m eval gold-add --incident … --file … --annotator human:<name>`；score 表分層列出 existence、弱標籤、gold precision。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：533 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -98,7 +100,8 @@
    productCatalogFailure on、paymentUnreachable on、cartFailure 100%、intlShippingSlowdown 10sec、productCatalogLockContention on、
    adHighCpu on、adManualGc on、emailMemoryLeak 1000x、recommendationCacheFailure on。
    review 時要檢查的 a priori 不確定項目見 decision 016 §5（例如 cartFailure 的 EmptyCart 耗時、intlShippingSlowdown 是否真的被觸發）。
-9. 之後：第一張 baseline 表（Pilot）、evidence relevance（§9）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
+9. **Gate 前請使用者做的人工作業**：label review（`catalog+review`）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
+10. 之後：第一張 baseline 表（Pilot）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
 ## Blocked
