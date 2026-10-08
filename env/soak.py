@@ -32,6 +32,14 @@ RAW_EXTRAS_TARGET = "/etc/otelcol-config-extras.yml"
 RAW_DIR_IN_COLLECTOR = "/raw"
 RAW_SIGNALS = ("traces", "metrics", "logs")
 RAW_STOP_TIMEOUT = 120  # seconds of graceful shutdown before SIGKILL
+RAW_LOG_TAIL = 1000  # lines of the stopped collector's log kept as the R7 evidence
+
+# The upstream config pushes the collector's own metrics and logs to its own OTLP receiver (service.telemetry ->
+# http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_HTTP}). Receivers stop first, so that final flush is refused
+# and every graceful stop exits 1 (decision 008 revision). Each matched clause is one such refused flush.
+_SELF_FLUSH = re.compile(
+    r'failed to shutdown (?:meter provider|logger|tracer provider): (?:failed to upload (?:metrics|logs|traces): )?'
+    r'Post "http://otel-collector:4318/v1/(?:metrics|logs|traces)": dial tcp \S+: connect: connection refused')
 
 _5XX = re.compile(r"HTTPError\('5\d\d\b")
 _SIGNALS = {"Traces": ("traces", "spans"), "Metrics": ("metrics", "data points"), "Logs": ("logs", "log records")}
@@ -224,9 +232,11 @@ def evaluate_raw(raw: dict, *, window_start: str, window_end: str) -> dict:
     """R7–R9 (decision 008 §8). raw = {"collector": {restarts, stop_exit_code, copied}, "files": {signal: scan | None}}."""
     col, files = raw["collector"], raw["files"]
     missing = [sig for sig in RAW_SIGNALS if not files.get(sig) or not files[sig]["bytes"]]
-    r7_ok = col.get("restarts") == 0 and col.get("stop_exit_code") == 0 and bool(col.get("copied")) and not missing
+    graceful = col.get("stop_exit_code") == 0 or col.get("graceful_stop") is True
+    r7_ok = col.get("restarts") == 0 and graceful and bool(col.get("copied")) and not missing
     crit = {"R7": {"pass": r7_ok, "detail": (
-        f"collector restarts {col.get('restarts')}, stop exit code {col.get('stop_exit_code')}, "
+        f"collector restarts {col.get('restarts')}, stop exit code {col.get('stop_exit_code')} "
+        f"({'graceful' if graceful else 'not graceful'}{': ' + col['shutdown_reason'] if col.get('shutdown_reason') else ''}), "
         f"copied {col.get('copied')}; missing or empty files: {missing or 'none'}"
         + (f"; {col['error']}" if col.get("error") else ""))}}
 
@@ -349,6 +359,43 @@ def collector_state(container_id: str, env: dict[str, str], run: Run = _run) -> 
     return {"restarts": int(out[0]), "exit_code": int(out[1]), "status": out[2]}
 
 
+def shutdown_verdict(log: str, exit_code: int | None) -> dict:
+    """Did the collector stop gracefully (R7, decision 008 revision)? Exit 0; or exit 1 whose log shows the service
+    shut down ("Shutdown complete.") with no error-level line on the way, and whose exit error is only the
+    self-telemetry flush to its own, already stopped, OTLP receiver."""
+    def verdict(graceful: bool, reason: str, errors: list[str] | None = None, exit_error: str | None = None) -> dict:
+        return {"graceful": graceful, "reason": reason, "shutdown_errors": errors or [], "exit_error": exit_error}
+
+    if exit_code == 0:
+        return verdict(True, "exit 0")
+    if exit_code != 1:
+        return verdict(False, f"exit {exit_code}")
+    lines = log.splitlines()
+    starts = [i for i, line in enumerate(lines) if "\tStarting shutdown..." in line]
+    if not starts:
+        return verdict(False, "exit 1 and no shutdown in the log")
+    done = next((i for i in range(starts[-1], len(lines)) if "\tShutdown complete." in lines[i]), None)
+    if done is None:
+        return verdict(False, "exit 1 and the shutdown did not complete")
+    errors = [line[:300] for line in lines[starts[-1]:done] if line.split("\t")[1:2] == ["error"]]
+    if errors:
+        return verdict(False, "exit 1 with errors while shutting down", errors)
+    tail = "\n".join(line for line in lines[done + 1:] if line.strip())
+    if not tail.startswith("Error: "):
+        return verdict(False, "exit 1 without an exit error after the shutdown", exit_error=tail[:500] or None)
+    message = tail.removeprefix("Error: ").removeprefix("failed to shutdown service after error: ")
+    if not all(_SELF_FLUSH.fullmatch(c) for c in re.split(r"; |\n", message) if c):
+        return verdict(False, "exit 1 with an error other than the self-telemetry flush", exit_error=tail[:500])
+    return verdict(True, "exit 1: service shut down; only the self-telemetry flush to its own receiver failed",
+                   exit_error=tail[:500])
+
+
+def container_log(container_id: str, env: dict[str, str]) -> str:
+    """The container's stdout and stderr, in order (the collector logs to stderr)."""
+    return subprocess.run(["docker", "logs", "--tail", str(RAW_LOG_TAIL), container_id], env=env, check=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True).stdout
+
+
 def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str, str], out_dir: Path) -> dict:
     """decision 008 §4: stop the collector gracefully (final flush), then copy /raw out before anything is removed.
 
@@ -364,6 +411,15 @@ def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str,
         collector.update(container_id=cid, restarts=st["restarts"], stop_exit_code=st["exit_code"])
     except (StopIteration, subprocess.CalledProcessError, ValueError, IndexError) as e:
         collector["error"] = f"collector state unknown: {str(e)[:200]}"
+    else:
+        try:
+            log = container_log(cid, env)
+            (out_dir / "otel-collector-shutdown.log").write_text(log)
+        except (subprocess.CalledProcessError, OSError) as e:
+            log = ""
+            collector["error"] = f"collector log unavailable: {str(e)[:200]}"
+        verdict = shutdown_verdict(log, st["exit_code"])
+        collector.update(graceful_stop=verdict["graceful"], shutdown_reason=verdict["reason"], shutdown=verdict)
     dest = out_dir / "raw"
     t0 = time.monotonic()
     cp_rc = compose(["cp", f"{RAW_SERVICE}:{RAW_DIR_IN_COLLECTOR}", str(dest)])

@@ -57,7 +57,7 @@ container 重啟時 cgroup 會重建、`memory.events` 歸零，只看 memcg 會
 取樣窗少於 30 分鐘、沒有持有本 Project 的 heavy lock、或已經有本 Project 的 container（要先 `compose down --volumes`），都會被拒絕。
 `compose up` 失敗時仍會 `down` 並寫出報告。
 鎖定的 stack 有 raw pipeline 時（decision 008），視窗結束後再 drain 3 分鐘（`--drain-minutes`），接著 `stop -t 120 otel-collector`，
-在 `down` 之前把 `/raw` 用 `compose cp` 複製到結果目錄的 `raw/`，再用 R7（collector 正常停止、檔案都在）、R8（每行都能解析）、R9（視窗內每分鐘三種 signal 都有資料）判定。
+在 `down` 之前把 `/raw` 用 `compose cp` 複製到結果目錄的 `raw/`，再用 R7（collector 正常停止、檔案都在；這個 lock 的 collector 停止時一定 exit 1，所以 exit 1 要靠保存下來的 `otel-collector-shutdown.log` 證明只是 self-telemetry 推給自己失敗，見 decision 008 修訂）、R8（每行都能解析）、R9（視窗內每分鐘三種 signal 都有資料）判定。
 結果寫在 `data/external/soak/<UTC 時間>/`（`report.md`、`report.json`、`samples.jsonl`、`docker-events.jsonl`、`raw/`、log、docker inspect）；
 R1–R6（有 raw pipeline 時加上 R7–R9）全部通過才算 baseline 穩定。報告記錄 lock 的 sha256，收集前會檢查「這個 lock」通過過 soak（decision 009）。
 

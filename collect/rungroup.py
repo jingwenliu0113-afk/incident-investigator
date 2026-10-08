@@ -281,7 +281,7 @@ def store_run_group(record: dict, work_dir: Path, layout: DataLayout, *, lock_sh
     truth.mkdir(parents=True)
     harness = truth / "harness"
     harness.mkdir()
-    for name in ("samples.jsonl", "docker-events.jsonl"):
+    for name in ("samples.jsonl", "docker-events.jsonl", "otel-collector-shutdown.log"):
         if (work_dir / name).exists():
             shutil.move(work_dir / name, harness / name)
     if incident_ids:

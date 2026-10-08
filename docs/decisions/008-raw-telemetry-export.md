@@ -1,6 +1,6 @@
 # 008 — M2 raw telemetry export：collector 內新增 raw pipeline，寫進 container 再複製出來
 
-- 狀態：Accepted（2026-10-08）；實際 run 的數據見文末「結果」
+- 狀態：Accepted（2026-10-08）；R7 於 soak #3 之後修訂（見文末「修訂」）；實際 run 的數據見文末「結果」
 - 影響範圍：鎖定的實驗環境（collector config → 新的 lock sha256）、資料格式（raw 檔與 raw export record）、
   目錄結構與 Agent 可讀範圍、收集協定（drain / 收尾 / loss accounting）
 - 研究依據：M2 研究 workflow（4 個主題 + 逐條反向覆核 + 彙整），引用的檔案與上游原始碼見各條；以下「（推論）」表示沒有直接文件依據、要由實際 run 確認。
@@ -80,7 +80,7 @@ raw = collector **收到、尚未經過任何 processor** 的 OTLP 資料，加�
   - SDK 端 `otel.sdk.*`（8 個開了 self-observability 的 service；任何非空的 `error.type` 都算 loss）。
   - collector stdout（執行中即時串流保存；debug exporter 的輸出有 sampling，只當錯誤與重啟的佐證，不拿來算數量）；`docker events`（重啟 / OOM）。
 - 檢查式（traces / logs）：兩個內部快照之間，Δ `otlp` receiver（accepted + refused）與 Δ `file/raw_*`（sent + send_failed）一致；檔案裡的項目數 ≥ 最後快照的 sent，重複另外回報。
-- 下列任一成立，該 run group 標記為 **raw 不完整**：collector 重啟、stop exit code 137、memory_limiter 有 refusal、file exporter `Rejecting data`、raw 檔有解析錯誤（最後一行截斷除外，另外回報）。
+- 下列任一成立，該 run group 標記為 **raw 不完整**：collector 重啟、stop exit code 137、沒有 graceful stop 判定的其他 exit code（見文末修訂）、memory_limiter 有 refusal、file exporter `Rejecting data`、raw 檔有解析錯誤（最後一行截斷除外，另外回報）。
   標記後的處理（判為無效或在 label 標記）與「穩定判斷條件」一起在收集第一個 incident 前定案。
 - Ambient loss 不算 raw 路徑的 loss：OpenSearch 拒收、Prometheus 500、host_metrics process scraper 錯誤、`ask_agent`（decision 005）。
 
@@ -98,7 +98,7 @@ raw = collector **收到、尚未經過任何 processor** 的 OTLP 資料，加�
 
 | # | 條件 | 通過標準 |
 |---|---|---|
-| R7 | raw 收尾 | collector 沒有重啟；`stop -t 120` 的 exit code 為 0；`cp` 成功；三個 raw 檔都存在且非空 |
+| R7 | raw 收尾 | collector 沒有重啟；`stop -t 120` 的 exit code 為 0（**已修訂**：或 exit 1 加上 log 證據，見文末修訂）；`cp` 成功；三個 raw 檔都存在且非空 |
 | R8 | raw 可讀 | 三個檔案逐行 `json.loads` 的解析錯誤為 0（最後一行截斷也算失敗）；每一行的 signal 都正確 |
 | R9 | raw 完整 | soak 視窗內每一分鐘，traces / metrics / logs 三個 raw 檔都有資料（依資料自己的時間戳） |
 
@@ -120,6 +120,70 @@ raw = collector **收到、尚未經過任何 processor** 的 OTLP 資料，加�
 - 研究筆記與 decision 001 的文件差異（照 CLAUDE.md 先記錄）：`prometheus/ad` 是被 full layer（不是 observability layer）拿掉的，在我們的組合裡效果相同；
   研究筆記 §4「每個 run 用不同路徑」擋不住 run 內的重啟清空（所以用 `append: true`）；「Jaeger 2.21 移除 legacy query API」說得太廣（只移除 UI 已不用的 v1 HTTP endpoints）。
 
+## 修訂（2026-10-08 約 13:50Z 寫定：soak #3 判定為 FAILED 之後、soak #4 開始之前）
+
+### 背景：soak #3 的 R7 失敗
+
+soak #3（`data/external/soak/20261008T120419Z/`，新 lock）：R1–R6、R8、R9 全部通過；**R7 失敗**，因為 `stop -t 120 otel-collector` 後
+collector 的 exit code 是 1（沒有重啟，停止花 0.3 s，`cp` 成功，三個檔案都完整）。
+
+### 原因（2026-10-08 13:33–13:35Z 的診斷 run 重現，`data/external/diagnostics/20261008-collector-exit/`）
+
+在同一個 lock 上 up → 2 分鐘 → `stop -t 120 otel-collector`，exit code 一樣是 1。collector 的最後幾行：
+
+```
+info  service@v0.159.0/service.go:320  Starting shutdown...
+info  spanmetricsconnector ... Shutting down spanmetrics connector
+info  extensions/extensions.go:73  Stopping extensions...
+info  service@v0.159.0/service.go:334  Shutdown complete.
+Error: failed to shutdown service after error: failed to shutdown meter provider: failed to upload metrics:
+  Post "http://otel-collector:4318/v1/metrics": dial tcp 172.19.0.12:4318: connect: connection refused;
+  failed to shutdown logger: Post "http://otel-collector:4318/v1/logs": dial tcp ...:4318: connect: connection refused
+```
+
+- upstream 的 `service.telemetry` 把 collector 自己的 metrics / logs 用 OTLP 推給**自己的** receiver（`http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_HTTP}`，見「背景」）。
+- 關閉順序：先關 receiver 與 pipeline（file exporter 在這一步 flush 並關檔）→ extensions → `Shutdown complete.` → 最後才關 telemetry provider。
+  provider 關閉時的最後一次推送打到已關閉的 4318，被拒絕，`Run` 回傳錯誤 → exit 1。
+- 所以這個 lock 的 collector **每次正常停止都會 exit 1**，和 raw pipeline 無關；`exit code 0` 這個標準在這個環境裡永遠不會成立。
+- 唯一的資料損失是 collector 自己最後一批 self-telemetry（`otelcol_*` metrics 與 collector logs），時間在 drain 的最後，不在任何分析視窗內。
+
+### 修訂內容
+
+1. **R7 的「graceful stop」改為**：exit code 0；**或** exit code 1，且 stop 之後的 collector log（`docker logs --tail 1000`，保存為 `otel-collector-shutdown.log`）同時滿足：
+   - 最後一次 `Starting shutdown...` 之後有 `Shutdown complete.`；
+   - 兩者之間沒有任何 `error` 等級的 log；
+   - `Shutdown complete.` 之後只有一行 `Error: ...`，拆開後的每一段都是「telemetry provider（meter provider / logger / tracer provider）推送到
+     `http://otel-collector:4318/v1/{metrics,logs,traces}` 時 `connection refused`」。
+   其他 exit code、找不到 log、或多出任何別的錯誤，都**不算** graceful。exit 137 仍然失敗。R7 的其他條件（沒有重啟、`cp` 成功、三個檔非空）不變。
+2. 實作：`env/soak.py` 的 `shutdown_verdict()`、`container_log()`；`finalize_raw()` 在讀完 collector 狀態後保存 log 並記錄 `graceful_stop`、`shutdown_reason`。
+   測試用診斷 run 的真實 log（`tests/fixtures/otelcol-shutdown-0.159.0.txt`），並逐一驗證每一種偏離都會失敗。
+3. **資料格式**：`raw_export.json` 的 `collector` 新增 `graceful_stop`（boolean | null）與 `shutdown_reason`；旗標新增 `collector_unclean_stop`
+   （exit code 不是 0 也不是 137，且沒有 graceful 判定，包含狀態讀不到的情況）。第 6 節「raw 不完整」的條件同步加上這一項。
+   目前還沒有任何正式 run group，不影響既有資料。
+4. **soak #3 的判定不變**：仍然是 FAILED（它的 collector log 是在 drain 之前擷取的，沒有關閉過程，也無法用新標準重判）。
+   新標準只用在之後的 soak；**要用同一個 lock 重新跑一次完整的 soak（#4）**，通過後才算這個 lock 可以收集。
+
+### 放棄的替代方案
+
+- **改 collector config 讓 exit code 變 0**（例如關掉 self-telemetry 或改成 pull 模式）：會改變 raw 裡的 `otelcol_*` 計數器，而第 6 節的 loss accounting 依賴它們；也會改變 lock。
+- **直接放寬成「exit 0 或 1 都算」**：exit 1 也可能來自 file exporter 關檔失敗等真正的問題；新標準要求看到 log 證據，只接受已知、無害的那一種。
+- **用新標準重判 soak #3**：沒有關閉過程的 log；而且看過結果後改標準再重判同一份資料，就是 CLAUDE.md 禁止的事。
+
 ## 結果
 
-- （待：config 實作、lock 重新 resolve、決策 8 的 soak）
+### soak #3（新 lock，判定 FAILED：R7；見上方修訂）
+
+up 12:04:19Z；視窗 12:10:02Z – 12:40:09Z（31 分鐘）；drain 3 分鐘；stop 0.3 s；`cp` 2.0 s；teardown `down` exit 0、`verify` 乾淨。
+
+| 檔案 | bytes | 行數 | 項目 | 重複 | 解析錯誤 | 資料時間範圍（UTC） |
+|---|---:|---:|---:|---:|---:|---|
+| traces.jsonl | 249,729,046 | 21,372 | 253,053 spans | 0 | 0 | 12:04:34 – 12:43:09 |
+| metrics.jsonl | 97,624,212 | 2,077 | 291,292 points | 0 | 0 | 12:04:34 – 12:43:04 |
+| logs.jsonl | 84,232,303 | 16,666 | 80,351 records | 0 | 0 | 12:04:32 – 12:43:09 |
+
+- 規模（約 38.6 分鐘的資料）：約 6.6k spans/min（≈ 990 B/span）、7.5k points/min（≈ 335 B/point）、2.1k log records/min（≈ 1.05 kB/record）；
+  合計約 432 MB，約 11 MB/min。一個 run group（約 40–50 分鐘）在 Docker VM 與 host 上各約 0.5 GB。
+- collector 記憶體：memcg 的 p95 是 399.7 MiB（幾乎貼著上限），視窗內碰到 `memory.max` 2,196 次（soak #2 沒有 raw 時是 203 次）；
+  增加的部分是寫 raw 檔產生的 page cache（可回收）。沒有 OOM、沒有重啟；collector log 裡 `memory_limiter` 拒收次數為 0。不在判定範圍內，只記錄。
+- 已知 ambient（decision 005）：`ask_agent` 失敗 136 次；OpenSearch 失敗請求 1,078、丟掉 20,158 筆、mapping 拒收 7,562。
+- normalize policy v1 的校準（decision 011 §4）在這份 raw 上跑完整個 soak 視窗：151.5 s、最大 RSS 約 0.91 GB。

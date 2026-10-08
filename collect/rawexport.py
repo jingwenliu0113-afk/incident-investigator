@@ -17,6 +17,8 @@ def raw_flags(collector: dict, scans: dict[str, dict | None]) -> list[str]:
         flags.append("collector_restarted")  # append keeps data, but the restart edge may glue or cut a line
     if collector.get("stop_exit_code") == 137:
         flags.append("collector_sigkilled")  # killed before the final flush
+    elif collector.get("stop_exit_code") != 0 and not collector.get("graceful_stop"):
+        flags.append("collector_unclean_stop")  # exit 1 is graceful only with the shutdown-log verdict (decision 008 revision)
     if not collector.get("copied"):
         flags.append("copy_failed")
     for sig in SIGNALS:
@@ -38,8 +40,8 @@ def build_raw_export(run_group_id: str, lock_sha256: str, collector: dict, scans
         "raw_export_version": 1,
         "run_group_id": run_group_id,
         "env_lock_sha256": lock_sha256,
-        "collector": {k: collector.get(k) for k in ("container_id", "restarts", "stop_exit_code", "stop_seconds",
-                                                    "cp_seconds", "copied")},
+        "collector": {k: collector.get(k) for k in ("container_id", "restarts", "stop_exit_code", "graceful_stop",
+                                                    "shutdown_reason", "stop_seconds", "cp_seconds", "copied")},
         "files": files,
         "flags": flags,
         "complete": not flags,

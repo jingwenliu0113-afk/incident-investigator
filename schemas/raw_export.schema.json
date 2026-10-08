@@ -56,6 +56,19 @@
             "null"
           ]
         },
+        "graceful_stop": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "exit 0, or exit 1 with the shutdown-log verdict (decision 008 revision)"
+        },
+        "shutdown_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "stop_seconds": {
           "type": [
             "number",
@@ -201,7 +214,7 @@
       "type": "array",
       "items": {
         "type": "string",
-        "pattern": "^(collector_restarted|collector_sigkilled|copy_failed|memory_limiter_refused|exporter_rejected|missing_file:(traces|metrics|logs)|parse_errors:(traces|metrics|logs))(?!\\n)$"
+        "pattern": "^(collector_restarted|collector_sigkilled|collector_unclean_stop|copy_failed|memory_limiter_refused|exporter_rejected|missing_file:(traces|metrics|logs)|parse_errors:(traces|metrics|logs))(?!\\n)$"
       }
     },
     "complete": {

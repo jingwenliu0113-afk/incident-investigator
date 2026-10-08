@@ -18,11 +18,14 @@ from env.soak import (
     parse_memcg_dump,
     raw_export_expected,
     require_heavy_lock,
+    shutdown_verdict,
 )
 
 MiB = 1024 * 1024
 LIMIT = 64 * MiB
 W0, W1 = "2026-10-08T10:05:00Z", "2026-10-08T10:08:00Z"  # 3-minute window keeps fixtures small
+# `docker logs` of a collector stopped with `stop -t 120` (2026-10-08 diagnostic run, decision 008 revision)
+SHUTDOWN_LOG = (Path(__file__).parent / "fixtures" / "otelcol-shutdown-0.159.0.txt").read_text()
 
 
 def state(ts, *, restarts=0, health="healthy", streak=0, extra=None):
@@ -201,6 +204,43 @@ def test_raw_export_passes_when_collector_stopped_cleanly_and_files_cover_the_wi
 ])
 def test_r7_collector_must_stop_gracefully_and_files_must_be_copied(collector, failing):
     assert evaluate_raw(raw_ok(**collector), window_start=W0, window_end=W1)[failing]["pass"] is False
+
+
+def test_shutdown_verdict_accepts_exit_0_and_the_known_self_telemetry_flush_failure():
+    # every pipeline shut down ("Shutdown complete."); only the collector's own telemetry, pushed to its own
+    # OTLP receiver (stopped first), failed afterwards -> exit 1 (decision 008 revision)
+    assert shutdown_verdict(SHUTDOWN_LOG, 1)["graceful"] is True
+    assert shutdown_verdict("", 0)["graceful"] is True
+    v = shutdown_verdict(SHUTDOWN_LOG, 1)
+    assert "meter provider" in v["exit_error"] and v["shutdown_errors"] == []
+
+
+def _with_error(log, clause):
+    return log.replace("connection refused\n", "connection refused; " + clause + "\n")
+
+
+@pytest.mark.parametrize("log, code", [
+    (SHUTDOWN_LOG, 137),  # SIGKILLed: never graceful whatever the log says
+    (SHUTDOWN_LOG, 2),
+    ("", 1),  # no log, no evidence
+    (SHUTDOWN_LOG.replace("Shutdown complete.", "Shutting down"), 1),  # pipelines did not finish
+    (_with_error(SHUTDOWN_LOG, "failed to shutdown pipelines: file/raw_traces: sync /raw/traces.jsonl: no space"), 1),
+    (SHUTDOWN_LOG.replace("http://otel-collector:4318/v1/metrics", "http://jaeger:4318/v1/metrics"), 1),
+    (SHUTDOWN_LOG.replace("connect: connection refused", "i/o timeout"), 1),
+    (SHUTDOWN_LOG.replace("Error: ", "panic: "), 1),
+    (SHUTDOWN_LOG.replace("\tinfo\textensions/extensions.go:73\t",
+                          "\terror\texporterhelper/queue.go:9\t"), 1),  # an error while shutting down
+])
+def test_shutdown_verdict_rejects_any_other_exit(log, code):
+    assert shutdown_verdict(log, code)["graceful"] is False
+
+
+def test_r7_accepts_exit_1_only_with_a_graceful_shutdown_verdict():
+    assert evaluate_raw(raw_ok(stop_exit_code=1, graceful_stop=True), window_start=W0, window_end=W1)["R7"]["pass"]
+    assert not evaluate_raw(raw_ok(stop_exit_code=1), window_start=W0, window_end=W1)["R7"]["pass"]
+    assert not evaluate_raw(raw_ok(stop_exit_code=1, graceful_stop=False), window_start=W0, window_end=W1)["R7"]["pass"]
+    crit = evaluate_raw(raw_ok(stop_exit_code=1, graceful_stop=True), window_start=W0, window_end=W1)
+    assert "graceful" in crit["R7"]["detail"]
 
 
 def test_r7_needs_all_three_non_empty_files_and_r8_needs_clean_lines():
@@ -498,7 +538,8 @@ def raw_soak(monkeypatch, soak_env):
     """A stack with the raw pipeline: `compose cp` produces three small valid raw files."""
     soak_mod = soak_env.soak
     monkeypatch.setattr(soak_mod, "raw_export_expected", lambda lock: True)
-    monkeypatch.setattr(soak_mod, "collector_state", lambda cid, env: {"restarts": 0, "exit_code": 0, "status": "exited"})
+    monkeypatch.setattr(soak_mod, "collector_state", lambda cid, env: {"restarts": 0, "exit_code": 1, "status": "exited"})
+    monkeypatch.setattr(soak_mod, "container_log", lambda cid, env: SHUTDOWN_LOG)
 
     class GoodSampler:
         def __init__(self, *a, **kw):
@@ -539,6 +580,9 @@ def test_soak_drains_stops_the_collector_and_copies_raw_before_down(tmp_path, ra
     assert calls.index("watch stopped") < calls.index(stop) < calls.index(cp) < calls.index(["down", "--volumes"])
     assert report["criteria"]["R7"]["pass"] is True and report["criteria"]["R8"]["pass"] is True
     assert report["raw"]["files"]["traces"]["sha256"].startswith("sha256:")
+    # the collector's own shutdown log is the R7 evidence for its exit 1 (decision 008 revision)
+    assert report["raw"]["collector"]["stop_exit_code"] == 1 and report["raw"]["collector"]["graceful_stop"] is True
+    assert (tmp_path / "out" / "otel-collector-shutdown.log").read_text() == SHUTDOWN_LOG
     # decision 009 §2: collection checks that *this* lock passed a soak
     from env.lock import LOCK_PATH, PROJECT_DIR, sha256_path
     assert report["env_lock_sha256"] == sha256_path(PROJECT_DIR / LOCK_PATH)

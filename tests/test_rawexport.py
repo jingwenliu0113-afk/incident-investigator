@@ -38,11 +38,22 @@ def test_complete_export_has_no_flags_and_passes(scans):
 @pytest.mark.parametrize("over, flag", [
     ({"restarts": 1}, "collector_restarted"),
     ({"stop_exit_code": 137}, "collector_sigkilled"),
+    ({"stop_exit_code": 1}, "collector_unclean_stop"),
+    ({"stop_exit_code": 1, "graceful_stop": False}, "collector_unclean_stop"),
+    ({"stop_exit_code": None}, "collector_unclean_stop"),  # state unknown
     ({"copied": False}, "copy_failed"),
 ])
 def test_collector_problems_make_the_export_incomplete(scans, over, flag):
     rec = build_raw_export("RG-001", LOCK, collector(**over), scans)
     assert flag in rec["flags"] and rec["complete"] is False
+    assert check_raw_export(rec) == []
+
+
+def test_exit_1_with_a_graceful_shutdown_verdict_is_complete(scans):
+    # decision 008 revision: the self-telemetry flush to the collector's own stopped receiver makes every graceful stop exit 1
+    rec = build_raw_export("RG-001", LOCK, collector(stop_exit_code=1, graceful_stop=True,
+                                                     shutdown_reason="self-telemetry flush only"), scans)
+    assert rec["complete"] is True and rec["collector"]["graceful_stop"] is True
     assert check_raw_export(rec) == []
 
 
