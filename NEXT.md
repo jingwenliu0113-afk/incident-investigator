@@ -2,11 +2,12 @@
 
 ## 目前位置
 
-**Core §1 完成（baseline soak #2 通過，記憶體設定凍結）；Core §2 / M2 進行中：raw export 與 run group 工具已完成，等 soak #3。**
-- soak #2 PASSED（decision 004 / 007）：product-catalog 128 MiB、checkout 64 MiB 凍結。
-- decision 008（raw export）改變了 lock → 依 008 §8 要再跑一次含 R7–R9 的 soak #3，通過後才能收集第一個 incident（decision 009 §2 會檢查）。
-- Day 1 清單：1 ✅、2 ✅（label schema）、3 ✅；4（canonical telemetry schema）設計中；5（收集 1 個 incident）工具已就緒、待 soak #3；6 未開始。
-- 沒有進入 Advanced / Optional。
+**Core §1 完成；Core §2 / §4 的工具全部就緒，正在跑 soak #3（新 lock，含 raw export，2026-10-08 12:04:19Z 起，持有 heavy lock）。**
+- 記憶體設定已凍結（soak #2）。raw export（decision 008）改變 lock → soak #3 判定 R1–R9。
+- 收集協定（decision 009 + 修訂）、第一個 incident 的 fault 與 affected 規則（decision 010）、canonical schema 與 normalize policy v1（decision 011）都已寫定並實作。
+- normalize policy v1 目前是 `calibrating`：**要先用 soak #3 的 raw 校準並凍結，才能打開任何含 fault 的 raw**（程式會擋）。
+- Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（schema + normalize，待校準凍結）、5 工具就緒、6 工具就緒（`python -m collect replay`）。
+- 沒有進入 Advanced / Optional。外部費用規則（MACHINE_POLICY）已加入；目前沒有任何付費用量。
 
 ## 上次完成
 
@@ -37,8 +38,13 @@
   normal period 有異常、raw 不完整、flag 生效未確認、sampling 錯誤都判為無效（保留紀錄、不給 incident id）。
   已實作（TDD）：`collect/faults.py`（原子寫入 flag 檔、targeting rule、OFREP 確認）、`collect/validity.py`、`collect/rungroup.py`（orchestrator 與落地）、
   `collect/live.py`（真實 Docker）、`python -m collect run`。
-- Core §4 canonical schema 的設計 workflow（3 個方向 + 3 個評審 + 彙整）已啟動。
-- 測試：352 passed（`-m "not network"`；`docker_daemon` 會跑一個幾秒的 `--rm` collector validate container）。
+- **decision 009 修訂**：recovery 改 5 + U(0,5) 分鐘、Pilot fault 一律 10 分鐘、時鐘漂移 > 1 s 判無效（避免窗長洩漏 fault 時間 / 類型）。
+- **decision 010**：第一個 incident = `paymentFailure 100%`（Pilot、驗證 pipeline）；affected services = 自己出現因 fault 造成的錯誤或延遲的服務。
+- **decision 011**（Core §4 設計 workflow：3 方向 × 3 評審 + 彙整）：ctel/1 snapshot（6 個決定性檔案、18 個 SUT 服務、資料時鐘原值、keyed id）、
+  policy v1（X1–X10、控制面子樹 closure、Class A 樣板附 upstream file:line、靜默刪 token、隱私對齊）、GT-blind normalize、fail-closed `check_snapshot`。
+  實作：`collect/otlp.py`、`policy.py`、`normalize.py`、`incident.py`（manifest）、`calibrate.py`、`snapshot.py`、`derive.py`、`replay.py`；CLI `normalize` / `calibrate` / `replay`。
+- `MACHINE_POLICY.md` 新增「外部費用」：付費 API / 雲端 GPU / 付費資料服務在第一次使用前要報告用途、請求數、token / 運算量與成本，經使用者批准。
+- 測試：397 passed（`-m "not network and not docker_daemon"`；`docker_daemon` 會跑一個幾秒的 `--rm` collector validate container）。
 
 ### 2026-10-08 session 2（smoke test + baseline commit）
 
@@ -63,20 +69,18 @@
 
 ## 下一步（Core，依序）
 
-1. **soak #3**（新 lock，含 raw export；Mac heavy lock）：`./tools/with-mac-lock uv run python -m env soak --minutes 30 --warmup-minutes 5`。
-   判定 R1–R9（decision 004 修訂 + 008 §8）。通過後把實測數字（bytes/item、items/min、檔案大小、stop / cp 時間、時鐘差、內部計數器名稱）填進 decision 008「結果」，
-   並用實際的 raw metrics 完成 loss accounting（`otelcol_*`、`otel.sdk.*`；008 §6）。不通過 → 先調查，不改凍結的記憶體設定。
-2. **Day 1 #5 收集第一個 incident**：`./tools/with-mac-lock uv run python -m collect run --flag <flag> --variant <v> --fault-minutes 10`。
-   第一個 incident 用來驗證 pipeline，選答案最不模糊的 fault；選哪個與它的 a priori label 要寫 decision log（屬於 Pilot，永遠不進 final test）。
-3. **Core §4 canonical telemetry schema + normalize**（Day 1 #4）：依設計 workflow 的結果寫 decision log，再 TDD 實作；
-   產出 `incidents/<INC>/normalized/` 與 manifest（decision 002），並依 Core §6 事先固定的規則去掉 flagd / harness 的 telemetry（009 §5）。
-4. **Day 1 #6**：刪掉 live system 後，只靠 frozen snapshot 重做分析。
-5. Pilot fault 清單（M3/M5）：每個 flag 的 a priori origin / affected / symptom 與 fault 持續時間（decision 006 / 009）。
+1. **soak #3 結果**（`data/external/soak/20261008T120419Z/`）：R1–R9。通過 → decision 008「結果」填實測數字。不通過 → 調查，不動凍結的記憶體設定。
+2. **校準並凍結 normalize policy v1**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z`。
+   依 inventory 補 receiver scope / container name / 未知服務等（只能改 policy 與 decision 011，不看任何 fault raw），`check_snapshot` 通過後把 `status` 改為 `frozen`、重釘 sha、commit。
+   同時用實際的 `otelcol_*` / `otel.sdk.*` 完成 loss accounting（008 §6）。
+3. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（commit 乾淨時才跑；manifest 的 formal check 要求 clean tree）。
+4. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，`compose down` 後 `uv run python -m collect replay --incident INC-001`。
+5. **INC-001 的 label**：decision 010 的 a priori label → 對照 snapshot review（`catalog+review`、`telemetry_coverage`），`check_label` 的服務詞彙用 18 個 SUT 服務。
+6. 之後：Pilot fault 清單（M3/M5）、Core §6 leakage audit、baseline 前要決定的時間框架與預算（decision 011「延後」）；LLM baseline / Agent 第一次呼叫付費 API 前依 MACHINE_POLICY 報告成本並等批准。
 
 ## Blocked
 
-- **soak #3 等 Mac heavy lock**：2026-10-08 11:14:59Z 起由 `llm-serving-lab` 持有（pid 97925，`batch_4b.sh`）。
-  依 MACHINE_POLICY 不搶占；lock 釋放後再跑 soak #3，期間做不需要 heavy lock 的 Core 工作（canonical schema、normalize）。
+- 目前沒有 blocker。soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。
 - 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
   執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
   （理由：跑 decision 004 的 soak test；當時 daemon 是停止狀態，沒有其他 workload 在跑），接著先 `compose down --volumes` 清掉本 Project 被 restart policy 拉起的 container。
