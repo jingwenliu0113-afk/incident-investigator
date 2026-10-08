@@ -18,6 +18,7 @@ from env.soak import (
     parse_memcg_dump,
     raw_export_expected,
     require_heavy_lock,
+    rescan_container_metrics,
     shutdown_verdict,
 )
 
@@ -241,6 +242,27 @@ def test_r7_accepts_exit_1_only_with_a_graceful_shutdown_verdict():
     assert not evaluate_raw(raw_ok(stop_exit_code=1, graceful_stop=False), window_start=W0, window_end=W1)["R7"]["pass"]
     crit = evaluate_raw(raw_ok(stop_exit_code=1, graceful_stop=True), window_start=W0, window_end=W1)
     assert "graceful" in crit["R7"]["detail"]
+
+
+def test_rescan_sends_a_no_op_update_to_every_project_container(monkeypatch):
+    # decision 012: an "update" event makes docker_stats inspect a container it missed at start-up;
+    # the restart policy is set to the value it already has, so nothing about the container changes
+    import env.soak as soak_mod
+
+    monkeypatch.setattr(soak_mod, "project_container_ids", lambda lock, env: {"id1": "shipping", "id2": "cart"})
+    calls = []
+
+    def run(cmd, env=None):
+        calls.append(cmd)
+        if cmd[:2] == ["docker", "inspect"]:
+            return "unless-stopped\n"
+        if cmd[-1] == "id2":
+            raise __import__("subprocess").CalledProcessError(1, cmd, "", "no such container")
+        return cmd[-1] + "\n"
+
+    out = rescan_container_metrics({}, {}, run=run)
+    assert ["docker", "update", "--restart", "unless-stopped", "id1"] in calls
+    assert out == {"updated": 1, "failed": ["cart"]}
 
 
 def test_r7_needs_all_three_non_empty_files_and_r8_needs_clean_lines():
@@ -583,6 +605,7 @@ def test_soak_drains_stops_the_collector_and_copies_raw_before_down(tmp_path, ra
     # the collector's own shutdown log is the R7 evidence for its exit 1 (decision 008 revision)
     assert report["raw"]["collector"]["stop_exit_code"] == 1 and report["raw"]["collector"]["graceful_stop"] is True
     assert (tmp_path / "out" / "otel-collector-shutdown.log").read_text() == SHUTDOWN_LOG
+    assert report["raw"]["container_minutes"] == {}  # decision 012: docker_stats coverage of the copied metrics
     # decision 009 §2: collection checks that *this* lock passed a soak
     from env.lock import LOCK_PATH, PROJECT_DIR, sha256_path
     assert report["env_lock_sha256"] == sha256_path(PROJECT_DIR / LOCK_PATH)

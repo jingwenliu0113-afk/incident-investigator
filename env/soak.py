@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from collect.rawfile import scan_raw_file
+from collect.rawfile import container_minutes, scan_raw_file
 from env.lock import pinned_images
 from env.runtime import PROJECT_LABEL, SERVICE_LABEL
 
@@ -426,7 +426,24 @@ def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str,
     collector.update(cp_rc=cp_rc, cp_seconds=round(time.monotonic() - t0, 1), copied=cp_rc == 0 and dest.is_dir())
     files = {sig: scan_raw_file(dest / f"{sig}.jsonl", sig) if (dest / f"{sig}.jsonl").is_file() else None
              for sig in RAW_SIGNALS}
-    return {"collector": collector, "files": files}
+    metrics = dest / "metrics.jsonl"
+    return {"collector": collector, "files": files,
+            "container_minutes": container_minutes(metrics) if metrics.is_file() else {}}  # decision 012
+
+
+def rescan_container_metrics(lock: dict, env: dict[str, str], run: Run = _run) -> dict:
+    """decision 012: the docker_stats receiver lists running containers, then starts its event loop "since now",
+    so a container that starts in between is never collected. An `update` event makes it inspect the container:
+    each project container gets its restart policy set to the value it already has (nothing else changes)."""
+    updated, failed = 0, []
+    for cid, svc in sorted(project_container_ids(lock, env).items(), key=lambda kv: kv[1]):
+        try:
+            policy = run(["docker", "inspect", "--format", "{{.HostConfig.RestartPolicy.Name}}", cid], env).strip()
+            run(["docker", "update", "--restart", policy or "no", cid], env)
+            updated += 1
+        except subprocess.CalledProcessError:
+            failed.append(svc)
+    return {"updated": updated, "failed": sorted(failed)}
 
 
 def project_container_ids(lock: dict, env: dict[str, str], run: Run = _run) -> dict[str, str]:

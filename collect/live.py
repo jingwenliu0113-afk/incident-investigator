@@ -113,6 +113,9 @@ class LiveStack:
         self.sampler = soak.Sampler(self.lock, soak.project_container_ids(self.lock, self.env), self.env)
         return problems
 
+    def rescan_containers(self) -> dict:
+        return soak.rescan_container_metrics(self.lock, self.env)
+
     def sample(self, kind: str) -> dict:
         try:
             return getattr(self.sampler, kind)()

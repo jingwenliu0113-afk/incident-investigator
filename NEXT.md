@@ -6,6 +6,8 @@
 - 記憶體設定已凍結（soak #2）。raw export（decision 008）改變 lock → soak #3 判定 R1–R9：R1–R6、R8、R9 通過；R7 失敗（collector stop exit 1）。
 - exit 1 的原因（診斷 run 重現）：pipeline 都正常關閉（`Shutdown complete.`）後，collector 把自己的 self-telemetry 推給自己已關閉的 4318 → connection refused。
   R7 改為「exit 0，或 exit 1 且保存的關閉 log 證明只有這個錯誤」；soak #3 維持 FAILED，同一個 lock 要重跑完整 soak #4。
+- policy v1 校準（soak #3 raw）：check_snapshot 0 個問題、沒有未知欄位或未知服務；但 docker_stats 漏了 shipping 整個 run（receiver 啟動 race）→
+  decision 012：up 後對每個 container 補送 no-op `docker update`，incident 視窗內缺任何 SUT container metrics 即無效。待診斷 run 確認補送有效。
 - 收集協定（decision 009 + 修訂）、第一個 incident 的 fault 與 affected 規則（decision 010）、canonical schema 與 normalize policy v1（decision 011）都已寫定並實作。
 - normalize policy v1 目前是 `calibrating`：**要先用 soak #3 的 raw 校準並凍結，才能打開任何含 fault 的 raw**（程式會擋）。
 - Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（schema + normalize，待校準凍結）、5 工具就緒、6 工具就緒（`python -m collect replay`）。

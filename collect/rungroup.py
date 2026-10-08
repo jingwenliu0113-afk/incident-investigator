@@ -19,7 +19,8 @@ from collect.faults import check_context, inject, write_atomic
 from collect.layout import DataLayout
 from collect.rawexport import SIGNALS, build_raw_export, check_raw_export, raw_flags
 from collect.records import _schema_problems, canonical_json_sha256
-from collect.validity import gate, period_observations
+from collect.policy import load_policy
+from collect.validity import container_metric_gaps, gate, period_observations
 
 
 @dataclass(frozen=True)
@@ -71,6 +72,7 @@ class Stack(Protocol):
     def compose(self, args: list[str]) -> int: ...
     def watch(self, path: Path): ...  # .seen() / .stop() like env.soak.EventWatch
     def verify_running(self, wait: float) -> list[str]: ...
+    def rescan_containers(self) -> dict: ...  # env.soak.rescan_container_metrics (decision 012)
     def sample(self, kind: str) -> dict: ...  # "state" | "locust" | "memcg", shaped like env.soak.Sampler
     def ofrep(self, flag: str, context: dict) -> tuple[str, object]: ...
     def vm_time(self) -> float: ...
@@ -164,6 +166,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             record["reasons"].append(f"compose up exit {rc}")
             return record
         record["initial_verify_running"] = stack.verify_running(300)
+        record["container_rescan"] = stack.rescan_containers()
 
         run_until(clock.monotonic() + plan.warmup_minutes * 60)
         give_up = clock.monotonic() + plan.gate_extra_minutes * 60
@@ -230,6 +233,12 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             record["reasons"].append("event_stream_missing")
     if raw is None or raw_flags(raw["collector"], raw["files"]):
         record["reasons"].append("raw_incomplete")
+    if raw is not None and {"normal_start", "end"} <= times.keys():
+        record["container_metric_gaps"] = container_metric_gaps(
+            raw.get("container_minutes") or {}, services=load_policy().raw["sut_services"],
+            start=times["normal_start"], end=times["end"])
+        if record["container_metric_gaps"]:
+            record["reasons"].append("container_metrics_missing")  # decision 012
     offsets = record["clock_offset_seconds"]
     if len(offsets) == 2 and abs(offsets[1] - offsets[0]) > MAX_CLOCK_DRIFT:
         record["reasons"].append("clock_drift")  # the window cannot be mapped onto the data clock reliably

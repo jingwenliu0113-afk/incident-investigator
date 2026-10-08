@@ -123,3 +123,32 @@ def scan_raw_file(path: Path, signal: str) -> dict:
         "by_service": dict(sorted(by_service.items())),
         "minutes": sorted(minutes),
     }
+
+
+DOCKER_STATS_SCOPE = "dockerstatsreceiver"
+
+
+def container_minutes(path: Path) -> dict[str, list[str]]:
+    """container.name -> the minutes (UTC, "YYYY-MM-DDTHH:MM") in which docker_stats reported it (decision 012).
+
+    Unparsable lines are skipped here; scan_raw_file() reports them.
+    """
+    seen: dict[str, set[str]] = {}
+    with Path(path).open("rb") as f:
+        for raw in f:
+            try:
+                doc = json.loads(raw)
+            except ValueError:
+                continue
+            for rm in doc.get("resourceMetrics") or [] if isinstance(doc, dict) else []:
+                name = next((a.get("value", {}).get("stringValue") for a in (rm.get("resource") or {}).get("attributes") or []
+                             if a.get("key") == "container.name"), None)
+                for sm in rm.get("scopeMetrics") or []:
+                    if name is None or DOCKER_STATS_SCOPE not in ((sm.get("scope") or {}).get("name") or ""):
+                        continue
+                    for m in sm.get("metrics") or []:
+                        for kind in _POINT_KINDS:
+                            for pt in (m.get(kind) or {}).get("dataPoints") or []:
+                                if t := nanos(pt.get("timeUnixNano")):
+                                    seen.setdefault(name, set()).add(_utc(t).strftime("%Y-%m-%dT%H:%M"))
+    return {name: sorted(minutes) for name, minutes in sorted(seen.items())}

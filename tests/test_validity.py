@@ -1,6 +1,6 @@
 """Stability gate and run validity (decision 009 §3–4)."""
 
-from collect.validity import gate, period_observations
+from collect.validity import container_metric_gaps, gate, period_observations
 
 E504 = "/api/products/X | HTTPError('504 Server Error: Gateway Timeout for url: /api/products/X')"
 ASK = "/prompt | gaierror(-2, 'Name or service not known')"
@@ -75,3 +75,14 @@ def test_period_observations_list_what_happened_between_two_times():
     assert any("checkout" in h for h in obs["health"])
     clean = period_observations(stable(minutes=10), [], start="2026-10-08T10:02:00Z", end="2026-10-08T10:07:00Z")
     assert clean["clean"] is True
+
+
+def test_container_metric_gaps_cover_every_full_minute_of_the_window():
+    # decision 012: every SUT container needs docker_stats data in every full minute of the incident window
+    minutes = {"cart": ["2026-10-08T10:01", "2026-10-08T10:02", "2026-10-08T10:03"],
+               "shipping": ["2026-10-08T10:01", "2026-10-08T10:03"]}
+    gaps = container_metric_gaps(minutes, services=["cart", "shipping", "quote"],
+                                 start="2026-10-08T10:00:30Z", end="2026-10-08T10:03:40Z")
+    assert gaps == {"shipping": ["10:02"], "quote": ["10:01", "10:02"]}  # 10:00 and 10:03 are partial minutes
+    assert container_metric_gaps(minutes, services=["cart"], start="2026-10-08T10:01:00Z",
+                                 end="2026-10-08T10:03:00Z") == {}

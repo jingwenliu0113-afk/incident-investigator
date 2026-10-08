@@ -52,6 +52,7 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 | fault on 到 end | 重啟、OOM、health 失敗、5xx | **不影響有效性**（可能就是 fault 的效果）；逐筆記在 run record，給 label review 參考 |
 | 整個 run | raw 不完整（decision 008 §6 的任一旗標） | **run 無效** |
 | 整個 run | flag 寫入後的生效確認失敗（見決策 5） | **run 無效** |
+| incident 視窗 | 任何 SUT 服務的 container 在某個完整分鐘沒有 docker_stats 資料（decision 012） | **run 無效**（`container_metrics_missing`） |
 
 - 無效的 run 保留紀錄與原始資料（供除錯），但不指派 incident id、不進任何 split；之後以**新的 run group id 與新 seed** 重收，不重用 seed。
 - 所有 run（包含中止與無效）都寫一份 run record，讓「丟掉了多少 run、為什麼」可以回報（EXPERIMENT_RULES：不得只回報成功案例）。

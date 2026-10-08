@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from collect.rawfile import scan_raw_file
+from collect.rawfile import container_minutes, scan_raw_file
 
 T0 = 1791453665_000000000  # 2026-10-08T10:01:05Z in unix nanos
 MIN = 60 * 10**9
@@ -114,3 +114,19 @@ def test_empty_file_and_unknown_signal(tmp_path):
     assert s["lines"] == 0 and s["items"] == 0 and s["min_time"] is None and s["minutes"] == []
     with pytest.raises(ValueError):
         scan_raw_file(tmp_path / "e.jsonl", "profiles")
+
+
+def docker_line(name, t):
+    scope = "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver"
+    return json.dumps({"resourceMetrics": [{
+        "resource": {"attributes": [{"key": "container.name", "value": {"stringValue": name}}]},
+        "scopeMetrics": [{"scope": {"name": scope, "version": "0.159.0"}, "metrics": [
+            {"name": "container.cpu.utilization", "gauge": {"dataPoints": [{"timeUnixNano": str(t), "asDouble": 0.1}]}}]}]}]})
+
+
+def test_container_minutes_lists_the_minutes_docker_stats_reported_each_container(tmp_path):
+    # decision 012: docker_stats can miss a container for the whole run; coverage is checked per minute
+    p = write(tmp_path, "m.jsonl", [docker_line("cart", T0), docker_line("cart", T0 + MIN), docker_line("shipping", T0 + MIN),
+                                    metrics_line("cart", [point(T0 + 2 * MIN)]),  # an SDK metric, not docker_stats
+                                    "{broken"])
+    assert container_minutes(p) == {"cart": ["2026-10-08T10:01", "2026-10-08T10:02"], "shipping": ["2026-10-08T10:02"]}

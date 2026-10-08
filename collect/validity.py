@@ -86,3 +86,21 @@ def period_observations(samples: list[dict], events: list[dict], *, start: str, 
            "kills": _kills(events, t0, t1), "health": _health_problems(inside), "http_5xx": http_5xx}
     obs["clean"] = bool(inside) and http_5xx == 0 and not (new_restarts or obs["kills"] or obs["health"])
     return obs
+
+
+def container_metric_gaps(container_minutes: dict[str, list[str]], *, services: list[str], start: str,
+                          end: str) -> dict[str, list[str]]:
+    """decision 012: the full minutes of [start, end] in which docker_stats has no data for a service's container."""
+    t = _t(start).replace(second=0, microsecond=0)
+    if t < _t(start):
+        t += timedelta(minutes=1)
+    full = []
+    while t + timedelta(minutes=1) <= _t(end):
+        full.append(t.strftime("%Y-%m-%dT%H:%M"))
+        t += timedelta(minutes=1)
+    gaps = {}
+    for svc in services:
+        have = set(container_minutes.get(svc, ()))
+        if missing := [m[11:] for m in full if m not in have]:
+            gaps[svc] = missing
+    return gaps

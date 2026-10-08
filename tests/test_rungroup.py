@@ -5,9 +5,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from collect.policy import load_policy
 from collect.rungroup import Plan, normal_minutes, recovery_minutes, run_group
 
 T0 = datetime(2026, 10, 8, 12, 0, 0, tzinfo=UTC)
+SUT = load_policy().raw["sut_services"]
 E504 = "/api/x | HTTPError('504 Server Error: Gateway Timeout for url: /api/x')"
 FLAGS = {"flags": {"paymentFailure": {"state": "ENABLED", "defaultVariant": "off",
                                       "variants": {"off": 0, "50%": 0.5, "100%": 1}}}}
@@ -49,6 +51,7 @@ class Stack:
         self.clock, self.flag_path = clock, flag_path
         self.restart_at, self.fivexx_until, self.confirm = restart_at, fivexx_until, confirm
         self.calls, self.events, self.n5xx, self.flag_writes = [], [], 0, []
+        self.unseen = set()  # containers docker_stats never reported (decision 012)
 
     def minute(self):
         return self.clock.t / 60
@@ -68,7 +71,12 @@ class Stack:
         return Watch(self)
 
     def verify_running(self, wait):
+        self.calls.append("verify_running")
         return []
+
+    def rescan_containers(self):
+        self.calls.append("rescan")
+        return {"updated": 28, "failed": []}
 
     def sample(self, kind):
         ts = self.clock.now()
@@ -96,7 +104,10 @@ class Stack:
         return {"collector": {"container_id": "c", "restarts": 0, "stop_exit_code": 0, "stop_seconds": 1.0,
                               "cp_seconds": 1.0, "copied": True},
                 "files": {sig: {"signal": sig, "bytes": 10, "parse_errors": 0, "wrong_signal_lines": 0}
-                          for sig in ("traces", "metrics", "logs")}}
+                          for sig in ("traces", "metrics", "logs")},
+                "container_minutes": {c: [(T0 + timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M")
+                                          for m in range(int(self.minute()) + 1)]
+                                      for c in SUT if c not in self.unseen}}
 
 
 @pytest.fixture
@@ -159,6 +170,18 @@ def test_valid_run_follows_the_protocol_and_restores_the_flag_file(tmp_path, fla
     assert abs(rec["clock_offset_seconds"][0] - 0.25) < 1e-6
     assert rec["incident_window"] == {"start": s["normal_start"], "end": s["end"]}
     assert rec["provenance"]["project"]["commit"] == "a" * 40  # recorded before `up` for the incident manifest
+    # decision 012: every container is announced to docker_stats once the stack is up, before the warm-up
+    assert stack.calls.index("verify_running") < stack.calls.index("rescan") < stack.calls.index(("ofrep", "paymentFailure"))
+    assert rec["container_rescan"] == {"updated": 28, "failed": []} and rec["container_metric_gaps"] == {}
+
+
+def test_a_container_without_docker_stats_in_the_window_invalidates_the_run(tmp_path, flag_path):
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    stack.unseen = {"shipping"}  # 2026-10-08 soak #3: started inside the receiver's list -> event-loop gap
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and "container_metrics_missing" in rec["reasons"]
+    assert list(rec["container_metric_gaps"]) == ["shipping"]
 
 
 def test_unstable_stack_is_aborted_before_any_fault(tmp_path, flag_path):
