@@ -142,6 +142,8 @@
 - 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
 
 ### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
+- **2026-10-09 晚上（使用者指示）：Mac 使用自動電力模式 → 正式 incident collection 延後**（會產生 performance-sensitive 的正式結果）。
+  一般 heavy 工作、correctness、資料處理、開發測試照常。電力模式恢復正常（使用者告知）且 heavy lock 空出後，從 `collect next --set pilot`（目前是 paymentFailure 100%）繼續。
 - **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
 
 ### D. 歷史紀錄與環境狀態
