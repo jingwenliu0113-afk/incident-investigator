@@ -99,6 +99,9 @@ def test_freeze_needs_passing_calibrations_of_this_exact_policy_and_records_them
 
     policy_path = tmp_path / "policy.json"
     shutil.copy(POLICY_PATH, policy_path)
+    unfrozen = {k: v for k, v in json.loads(policy_path.read_text()).items()
+                if k not in ("attribute_key_inventory", "frozen_from")} | {"status": "calibrating"}
+    policy_path.write_text(json.dumps(unfrozen, indent=2) + "\n")  # the real file is frozen since 2026-10-08
     clean = {sig: [ln for ln in ls if not any(t in ln for t in ("garbage collection", "kafkaQueueProblems", "Feature Flag",
                                                                 "paymentFailure"))]
              for sig, ls in raw_lines().items()}

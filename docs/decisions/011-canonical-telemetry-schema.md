@@ -1,6 +1,6 @@
 # 011 — Canonical telemetry schema（ctel/1）與 normalize policy v1（Core §4，含 §6 需要的規則）
 
-- 狀態：Accepted（2026-10-08）；policy v1 在 soak #3 的 raw（沒有 fault）上校準後凍結，**凍結前不得打開任何含 fault 的 raw**
+- 狀態：Accepted（2026-10-08）；policy v1 **已凍結**（2026-10-08 15:2xZ，見文末「凍結紀錄」）。凍結前沒有打開任何含 fault 的 raw
 - 影響範圍：Agent 與所有 baseline 唯一可讀的資料格式；raw → canonical 的轉換與洩漏處理規則；evidence id；預算的計量單位
 - 依據：Core §4 設計 workflow（3 個獨立設計方向 × 3 個評審角度 + 彙整）；decision 002 / 005 / 006 / 008 / 009 / 010
 
@@ -186,3 +186,18 @@ policy 只有在**每一份**沒有 fault 的 soak raw（soak #3，以及之後�
 凍結由 `python -m collect freeze --calibration <a> --calibration <b>` 執行（`collect.calibrate.freeze`）：每份校準都必須是**目前這個 policy 檔**
 （sha 相同）、來自同一個乾淨的 commit（calibration.json 記錄 normalizer 的 git 狀態）且 F1–F6 全過，否則拒絕；policy 檔寫入 `status: frozen`、`attribute_key_inventory` 與 `frozen_from`（soak 與 calibration.json 的 sha256），
 之後手動重釘 `POLICY_SHA256`（測試會檢查）。
+
+### 凍結紀錄（2026-10-08）
+
+- 校準程式：commit `131446d`（乾淨 tree）。兩份沒有 fault 的 soak raw，F1–F6 全部通過：
+
+| soak | calibration.json | sha256 | 保留 spans / logs / points | normalize | 最大 RSS |
+|---|---|---|---:|---:|---:|
+| `data/external/soak/20261008T120419Z`（soak #3） | `data/external/calibration/20261008T120419Z/20261008T151532Z/` | `sha256:4f0aec94…` | 179,719 / 67,377 / 149,402 | 142.3 s | 0.51 GiB |
+| `data/external/soak/20261008T143533Z`（soak #5） | `data/external/calibration/20261008T143533Z/20261008T151534Z/` | `sha256:e19827c1…` | 186,002 / 69,773 / 150,277 | 147.2 s | 0.53 GiB |
+
+  （兩份同時平行執行，時間比單獨跑長。）兩份都是：check_snapshot 0 問題、未知服務 / 欄位 0、X7 命中 0、X8 token 0、沒有 SUT 服務被清空。
+- 校準時的 policy：`sha256:0abfec2e…`（`calibrating`）。凍結（`python -m collect freeze`）後：**`sha256:95bc4b07388fb04c9e3a8b0ee7faf8cdeefa5d309c069f540d446d24f4609b4e`**，
+  `status: frozen`；`attribute_key_inventory` 為兩份 report 的 `attribute_keys` 聯集（`signal/service` 鍵），`frozen_from` 記錄來源。
+- 從現在起：policy v1 的任何改動都是 v2（§4：寫 decision log、所有 incident 重跑 normalize、兩版都報告；看到 test 結果後永遠不改）。
+

@@ -321,11 +321,13 @@ def test_every_removal_is_counted_by_rule_signal_service_and_minute(setup):
 
 def test_report_lists_attribute_keys_and_the_ones_the_soak_inventory_never_saw(setup):
     # decision 011 §3: a deny-list keeps unknown keys; new keys are listed on the ground-truth side for the audit
-    _, report = run(setup)
-    assert "rpc.service" in report["attribute_keys"]["traces/checkout"]
-    assert report["new_attribute_keys"] is None  # the policy has no inventory yet (calibrating)
     layout, inputs = setup
     p = load_policy()
+    no_inventory = Policy({k: v for k, v in p.raw.items() if k != "attribute_key_inventory"}, p.sha256)
+    report = normalize(inputs, no_inventory, incident_dir=layout.incident_dir("INC-001"),
+                       report_path=layout.normalize_report_path("INC-001"), staging_dir=layout.root / "staging" / "n1")
+    assert "rpc.service" in report["attribute_keys"]["traces/checkout"]
+    assert report["new_attribute_keys"] is None  # a calibrating policy has no inventory
     inventory = {k: [x for x in v if x != "rpc.service"] for k, v in report["attribute_keys"].items()}
     with_inventory = Policy({**p.raw, "attribute_key_inventory": inventory}, p.sha256)
     out = normalize(inputs, with_inventory, incident_dir=layout.incident_dir("INC-009"),

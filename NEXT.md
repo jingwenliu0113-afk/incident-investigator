@@ -14,7 +14,7 @@
 - review workflow（normalize / 收集協定 / replay，24 個確認問題）全部修正並測試：FA-11、X8 套用到所有可見字串、check_snapshot 解碼檢查、
   double 編碼、G0 policy sha 與乾淨 checkout、manifest 先驗證再發布、seed 移到 ground truth（002 / 003 修訂）、report 計數與 schema、
   calibrate 可重跑與凍結條件 F1–F6（decision 011）、取樣失敗只看 normal period、verify-running、crash 也留 run record、收尾遮蔽訊號（009 修訂 2）。
-- normalize policy v1 仍是 `calibrating`：**凍結前不得打開任何含 fault 的 raw**（程式會擋：status、釘選 sha、乾淨 checkout）。
+- normalize policy v1 **已凍結**（`sha256:95bc4b07…`）；normalize 會檢查 status、釘選 sha、乾淨 checkout。
 - Day 1 清單：1 ✅、2 ✅、3 ✅、4 ✅（待凍結）、5 工具就緒、6 工具就緒。
 - 沒有進入 Advanced / Optional；沒有任何付費用量。測試：456 passed（`-m "not network and not docker_daemon"`）。
 
@@ -79,10 +79,8 @@
 ## 下一步（Core，依序）
 
 1. ✅ **soak #5 PASSED**（`data/external/soak/20261008T143533Z/`）：這個 lock 可以收集（decision 008「結果」）。
-2. **校準（tree 必須乾淨）**：`uv run python -m collect calibrate --soak data/external/soak/20261008T120419Z` 與 soak #5 各一次
-   （同一個 commit；soak #4 的 raw 有隨機命名的探測 container，不用；14:29Z 那次 soak #3 校準沒有記錄 commit，不能用來凍結）。
-3. **凍結**：`uv run python -m collect freeze --calibration <soak #3 的 calibration.json> --calibration <soak #5 的>` →
-   重釘 `collect/policy.py` 的 `POLICY_SHA256` → 測試 → decision 011 記錄凍結證據（soak、calibration sha、policy sha、commit）→ commit。
+2. ✅ 校準：soak #3 與 soak #5 在 commit `131446d` 上 F1–F6 全過。
+3. ✅ **policy v1 已凍結**：`sha256:95bc4b07…`（decision 011「凍結紀錄」）。之後任何改動都是 v2。
 4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（preflight 擋 dirty tree 與沒通過 soak 的 lock）。
    run group 無效（例如 `container_metrics_missing`）→ 記錄原因、換新 seed 重收（decision 009 §4）。
 5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
