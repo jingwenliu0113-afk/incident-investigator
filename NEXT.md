@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-09 17:25Z）
+## 目前位置（2026-10-08 18:12Z，台北 10-09 02:12）
 
 **Core 的工具鏈都已完成並測試（602 passed），還沒有任何資料結果。**
 - **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
@@ -30,7 +30,14 @@
   - 程式碼審查：10 項；
   - 時鐘與單位稽核：9 項；
   - 在無 fault 的真實 snapshot 上試跑：發現 CPU 量測 bug、統計 baseline 在無 fault 時大量誤報、render 把 46% log 行的時間截掉、leakage 樣板出現大量假的 fault 專屬樣板。
-- **背景進行中**：非正式冒煙測試（`collect smoke`，資料只寫在 scratch），等 heavy lock 空出後自動執行，用來檢查整條真實 pipeline 的後半段。
+- **非正式冒煙測試 #1（`collect smoke`，資料只在 scratch，永不進任何 set）**：2026-10-08 18:08Z 完成，paymentFailure 100%，normal / fault / recovery 各 2 分鐘。
+  - 收集 → normalize → replay（每個 id 都能解析）→ label → leakage audit（easy、詞彙命中 0）→ 評分**全部走通**；run group valid，時鐘差 0.014 / 0.021 s。
+  - 資料上故障清楚：payment fault 期間 error ratio 1.0（每分鐘只有 4–6 個 span）、checkout 0.23、frontend 0.3%、frontend-proxy 0.2%；
+    accounting 在 fault 期間 0 span（訂單失敗 → Kafka 沒訊息；依規則「流量變少不算 affected」，review 時要注意）。
+  - review 工作表與 Agent 7 個工具在真實資料上正常（建索引 1.3 s、每次查詢 < 0.05 s）。
+  - stat-anomaly **不作答**：時間窗只有 6 分鐘，參考段固定前 10 分鐘 → 沒有可評的分鐘（設計如此，不是 bug）。
+    因此冒煙測試的 normal 改為 10 分鐘、並加上 review 工作表一步（開發工具，非實驗設計；正式收集協定不變）。
+- **背景進行中**：冒煙測試 #2（normal 10 分鐘），讓 stat-anomaly 第一次在真實 fault 資料上產生預測、走過 evidence / 失敗分類。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成

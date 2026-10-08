@@ -76,7 +76,8 @@ def _label(layout: DataLayout, incident: str, labeler: str) -> dict:
     return {"incident_id": incident, "label": "written", "method": label["labeling"]["method"]}
 
 
-SMOKE_MINUTES = {"normal": 2, "fault": 2, "recovery": 2}
+# normal covers the statistical baseline's 10-minute reference: with less, it abstains by design and checks nothing
+SMOKE_MINUTES = {"normal": 10, "fault": 2, "recovery": 2}
 
 
 def _smoke(ns: argparse.Namespace) -> int:
@@ -90,6 +91,7 @@ def _smoke(ns: argparse.Namespace) -> int:
     from datetime import UTC, datetime
 
     from collect.live import LiveStack, RealClock
+    from collect.review import review_sheet
     from eval.runner import audit_set, run_method, score_method
 
     layout = DataLayout(root)
@@ -112,6 +114,8 @@ def _smoke(ns: argparse.Namespace) -> int:
             out = _replay(layout, inc)
             steps["replay"] = {"every_id_resolves": out["every_id_resolves"], "checks": out["checks"]}
             steps["label"] = _label(layout, inc, "agent:smoke")["label"]
+            review_sheet(layout, inc)
+            steps["review_sheet"] = "written"
             results = root / "results"
             steps["leakage"] = audit_set(layout, "pilot", results)["incidents"]
             run_method(layout, "stat-anomaly", "pilot", results)
@@ -147,8 +151,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                                        "origin / affected / symptom from its set's pre-registered plan (decision 016)")
     lab.add_argument("--incident", required=True)
     lab.add_argument("--labeler", required=True, help="who labels, e.g. human:<name> or agent:claude-code")
-    smk = sub.add_parser("smoke", help="NOT a formal run: a short run (2-minute normal / fault / recovery) into a scratch data "
-                                       "root, then normalize, replay, label, leakage audit and the statistical baseline there; "
+    smk = sub.add_parser("smoke", help="NOT a formal run: a short run (10-minute normal, 2-minute fault / recovery) into a scratch "
+                                       "data root, then normalize, replay, label, review sheet, leakage audit and the "
+                                       "statistical baseline there; "
                                        "checks the whole pipeline and never enters any set")
     smk.add_argument("--root", type=Path, required=True, help="scratch data root, outside data/external")
     smk.add_argument("--flag", default="paymentFailure")

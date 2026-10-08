@@ -71,4 +71,8 @@ def test_a_smoke_run_never_writes_into_the_formal_data_tree(tmp_path, capsys):
 
     assert main(["smoke", "--root", str(cli.PROJECT_DIR / "data" / "external" / "x")]) == 2
     assert "outside" in capsys.readouterr().err
-    assert cli.SMOKE_MINUTES == {"normal": 2, "fault": 2, "recovery": 2}
+    # the normal part covers the statistical baseline's reference (its first 10 minutes), so the baseline has fault
+    # minutes to score; a shorter window makes it abstain by design and the last smoke step checks nothing
+    from baselines.statistical import REFERENCE_MINUTES
+
+    assert cli.SMOKE_MINUTES == {"normal": REFERENCE_MINUTES, "fault": 2, "recovery": 2}
