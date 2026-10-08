@@ -1,0 +1,14 @@
+{
+  "status": "proposed",
+  "note": "decisions 020 / 021: the model, prices and budgets are the user's decision; nothing runs until status is approved and the cost was reported under MACHINE_POLICY",
+  "model": null,
+  "price_per_mtok": null,
+  "budgets": {
+    "dump_all_proxy_tokens": 120000,
+    "retrieval_queries": 8,
+    "retrieval_k": 25,
+    "agent_max_tool_calls": 40,
+    "agent_max_proxy_tokens": 120000,
+    "agent_max_turns": 30
+  }
+}

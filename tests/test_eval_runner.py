@@ -178,3 +178,24 @@ def test_failures_are_classified_from_the_transcript_and_counted_by_category(tmp
     assert result["failures"]["n_failures"] == 1 and result["failures"]["by_category"]["seen_misread"] == 1
     assert result["failures"]["classified_without_review"] == 1
     assert "seen_misread" in (out / "pilot" / "wrong" / "table.md").read_text()
+
+
+def test_llm_methods_refuse_to_run_until_the_model_and_budgets_are_approved(tmp_path):
+    # decisions 020 / 021 and MACHINE_POLICY: no paid call before the user approves the model, budgets and cost
+    import json as _json
+
+    from eval.runner import LLM_CONFIG, load_llm_config
+
+    layout = stored(tmp_path / "data")
+    for method in ("dump-all", "retrieval", "agent"):
+        assert method in METHODS
+        with pytest.raises(ValueError, match="approved"):
+            run_method(layout, method, "pilot", tmp_path / "results")
+    config = _json.loads(LLM_CONFIG.read_text())
+    assert config["status"] == "proposed" and config["model"] is None
+    assert set(config["budgets"]) == {"dump_all_proxy_tokens", "retrieval_queries", "retrieval_k", "agent_max_tool_calls",
+                                      "agent_max_proxy_tokens", "agent_max_turns"}
+    approved = tmp_path / "c.json"
+    approved.write_text(_json.dumps({**config, "status": "approved", "model": "some-model"}))
+    with pytest.raises(ValueError, match="adapter"):
+        load_llm_config(approved, need_client=True)

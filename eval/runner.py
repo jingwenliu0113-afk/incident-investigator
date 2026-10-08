@@ -22,7 +22,30 @@ def _stat(snapshot, incident_id):
     return predict(snapshot, incident_id)
 
 
-METHODS = {"stat-anomaly": _stat}
+LLM_CONFIG = Path(__file__).resolve().parent / "llm_methods.json"
+
+
+def load_llm_config(path: Path = LLM_CONFIG, *, need_client: bool = True) -> dict:
+    """The approved model, prices and budgets of the LLM methods; refuses anything not approved (MACHINE_POLICY:
+    no paid call before the user approves the cost). The API client is an adapter added after approval (decision 020 §6)."""
+    config = json.loads(Path(path).read_text())
+    if config.get("status") != "approved" or not config.get("model"):
+        raise ValueError(f"the LLM methods are not approved yet ({path.name}: status {config.get('status')!r}); the model, "
+                         "budgets and estimated cost go to the user first (MACHINE_POLICY, decisions 020 / 021)")
+    if need_client:
+        raise ValueError("no model API adapter is installed yet: it is added only after the cost is approved (decision 020 §6)")
+    return config
+
+
+def _llm(kind: str):
+    def run(snapshot, incident_id):
+        config = load_llm_config()
+        raise AssertionError(f"unreachable until an adapter exists: {kind} {config['model']}")
+    return run
+
+
+LLM_METHODS = ("dump-all", "retrieval", "agent")
+METHODS = {"stat-anomaly": _stat, **{m: _llm(m) for m in LLM_METHODS}}
 MAIN_METRICS = ("fault_type", "origin_top1", "affected_f1", "symptom_exact")  # decision 013: one per layer
 DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 
@@ -40,6 +63,8 @@ def incidents_in(layout: DataLayout, split: str) -> list[tuple[str, str]]:
 
 def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> list[Path]:
     """Predictions of `method` for every incident of `split`, written to out_root/<split>/<method>/<INC>.json."""
+    if method in LLM_METHODS:
+        load_llm_config()  # refuses before any snapshot is opened
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     written = []
