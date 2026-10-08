@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://incident-investigator.local/schemas/incident_label.schema.json",
+  "title": "Incident label (GROUND TRUTH — never agent-readable)",
+  "description": "Stored at data/external/ground_truth/incidents/<incident_id>/label.json (decision 006). The curated answer for one incident (a telemetry window cut from a run group), scored per layer (SPEC §8): injected fault, origin service, affected services, user symptom. What was injected and when is the run group's injection.json; collect.labels.check_label keeps both consistent. Split assignment is not part of a label.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "label_version",
+    "incident_id",
+    "run_group_id",
+    "fault_family",
+    "injected_fault",
+    "origin_service",
+    "affected_services",
+    "user_symptom",
+    "fault_start",
+    "fault_end",
+    "traffic_profile",
+    "seed",
+    "labeling"
+  ],
+  "properties": {
+    "label_version": {
+      "const": 1
+    },
+    "incident_id": {
+      "type": "string",
+      "pattern": "^INC-[0-9]{3,}(?!\\n)$"
+    },
+    "run_group_id": {
+      "type": "string",
+      "pattern": "^RG-[0-9]{3,}(?!\\n)$"
+    },
+    "fault_family": {
+      "description": "Coarse class of fault_type (fixed mapping in collect.labels.FAULT_TYPES).",
+      "enum": [
+        "error",
+        "connectivity",
+        "latency",
+        "resource",
+        "messaging",
+        "traffic"
+      ]
+    },
+    "injected_fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fault_type",
+        "flag",
+        "variant"
+      ],
+      "properties": {
+        "fault_type": {
+          "description": "Closed, mechanism-level vocabulary that predictions are scored against; never a flagd flag name.",
+          "enum": [
+            "error_response",
+            "unreachable_dependency",
+            "added_latency",
+            "lock_contention",
+            "cpu_saturation",
+            "gc_pressure",
+            "memory_leak",
+            "queue_backlog",
+            "traffic_flood"
+          ]
+        },
+        "flag": {
+          "type": "string",
+          "minLength": 1,
+          "description": "flagd flag actually injected (provenance; must equal injection.json fault.flag)"
+        },
+        "variant": {
+          "type": "string",
+          "minLength": 1,
+          "description": "must equal injection.json fault.variant"
+        }
+      }
+    },
+    "origin_service": {
+      "$ref": "#/$defs/service"
+    },
+    "affected_services": {
+      "description": "Services whose telemetry deviates because of the fault, including origin_service: expected from the fault design (catalog) or confirmed against the frozen snapshot (catalog+review).",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/service"
+      }
+    },
+    "user_symptom": {
+      "description": "What the traffic generator (the user side) experiences.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kinds"
+      ],
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "errors",
+              "latency",
+              "degraded_feature",
+              "none"
+            ]
+          },
+          "if": {
+            "contains": {
+              "const": "none"
+            }
+          },
+          "then": {
+            "maxItems": 1
+          }
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "fault_start": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "fault_end": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "traffic_profile": {
+      "description": "Traffic profile id (decision 006); locust-upstream-3.1.0 = the locked upstream Locust settings of decision 003 (collect.traffic.TRAFFIC_PROFILES).",
+      "enum": [
+        "locust-upstream-3.1.0"
+      ]
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "telemetry_coverage": {
+      "description": "Per signal, how far the snapshot shows the fault: at the origin service, only as downstream symptoms, or not at all. Only knowable by looking at the frozen snapshot: required for catalog+review labels, absent from catalog-only labels.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traces",
+        "metrics",
+        "logs"
+      ],
+      "properties": {
+        "traces": {
+          "$ref": "#/$defs/coverage"
+        },
+        "metrics": {
+          "$ref": "#/$defs/coverage"
+        },
+        "logs": {
+          "$ref": "#/$defs/coverage"
+        }
+      }
+    },
+    "labeling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "labeled_at",
+        "labeler"
+      ],
+      "properties": {
+        "method": {
+          "description": "catalog: derived from the fault design only; catalog+review: checked by a person against the frozen snapshot.",
+          "enum": [
+            "catalog",
+            "catalog+review"
+          ]
+        },
+        "labeled_at": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "labeler": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "service": {
+      "description": "compose service name of the locked stack",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(?!\\n)$"
+    },
+    "coverage": {
+      "enum": [
+        "origin",
+        "symptom_only",
+        "none"
+      ]
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z(?!\\n)$"
+    }
+  },
+  "if": {
+    "properties": {
+      "labeling": {
+        "properties": {
+          "method": {
+            "const": "catalog+review"
+          }
+        }
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "telemetry_coverage"
+    ]
+  },
+  "else": {
+    "not": {
+      "required": [
+        "telemetry_coverage"
+      ]
+    }
+  }
+}

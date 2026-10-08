@@ -2,7 +2,7 @@ import shutil
 
 import pytest
 
-from collect.traffic import TRAFFIC_SERVICE, traffic_settings
+from collect.traffic import TRAFFIC_PROFILES, TRAFFIC_SERVICE, traffic_settings
 from env.lock import PROJECT_DIR
 
 
@@ -39,6 +39,7 @@ def test_locked_stack_traffic_profile_matches_decision_003():
     assert settings["LOCUST_AUTOSTART"] == "true"
     assert settings["LOCUST_HOST"] == "http://frontend-proxy:8080"
     assert "LOCUST_SPAWN_RATE" not in settings  # Locust default 1/s, see decision 003
+    assert settings == TRAFFIC_PROFILES["locust-upstream-3.1.0"]  # the only Core profile (decision 006)
     # the locked env override must reach the telemetry resource attributes
     env = rendered["services"][TRAFFIC_SERVICE]["environment"]
     assert "service.version=3.1.0" in env["OTEL_RESOURCE_ATTRIBUTES"]

@@ -5,7 +5,8 @@
     │   ├── raw/ normalized/
     │   └── manifest.json             provenance only
     └── ground_truth/                 NEVER mounted or readable by agents/baselines
-        └── run_groups/<RG-nnn>/injection.json
+        ├── run_groups/<RG-nnn>/injection.json
+        └── incidents/<INC-nnn>/label.json
 
 IDs are opaque counters so a path never reveals the fault.
 """
@@ -50,6 +51,10 @@ class DataLayout:
 
     def injection_path(self, run_group_id: str) -> Path:
         return self.run_group_truth_dir(run_group_id) / "injection.json"
+
+    def label_path(self, incident_id: str) -> Path:
+        return (self.ground_truth_root / "incidents" / _checked(incident_id, INCIDENT_ID, "incident id")
+                / "label.json")
 
     def is_ground_truth(self, path: Path) -> bool:
         """Is `path` (or what it points to) inside the ground-truth tree?
