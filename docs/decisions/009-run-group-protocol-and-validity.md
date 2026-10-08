@@ -131,6 +131,7 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 - **修訂**：以 normal 開始時量到的時鐘差（VM − host，`clock_offset_seconds[0]`）換算：事件時間減去時鐘差後再分到 normal / fault 時段；
   container metric 缺口（decision 012）與 loss accounting（decision 008 §6）的時間窗加上時鐘差後再比較。判定規則與門檻不變。
 - 測試：VM 快 120 s 時，host 時間 fault_on 前 60 s 的 OOM（VM 時間戳在 fault_on 之後）判為 normal period 的問題。
+- 補註（時鐘稽核）：時間窗的**終點**用第二次量到的時鐘差（`clock_offset_seconds[1]`），與 decision 011 §3 N3 發布 snapshot 的窗一致；起點與事件用第一次。換算一律用 `collect.normalize.host_to_data_ns`（四捨五入到 ns），eval / review 換算 label 時間也用同一個函式。
 
 ## 收集結果
 

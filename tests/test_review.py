@@ -166,3 +166,33 @@ def test_container_events_are_on_the_data_clock(incident):
     run.write_text(json.dumps(rec))
     sheet = review_sheet(incident, "INC-001")
     assert sheet["events"]["normal"] and not sheet["events"]["fault"]  # the fault starts at 11:52 on the data clock
+
+
+def test_per_minute_rates_count_only_the_part_of_the_last_minute_inside_the_window():
+    # clock audit: a partial last minute counted as a whole one made a fake ~11% traffic drop in the recovery
+    from collect.review import _summary
+
+    S, M = 10**9, 60 * 10**9
+
+    class Snap:
+        services = ["cart"]
+        window = {"start_ns": 0, "end_ns": 27 * M + 7 * S}
+
+        def spans(self):
+            for m in range(28):
+                n = 60 if m < 27 else 7  # one span per second for the whole window
+                for k in range(n):
+                    yield {"service": "cart", "start_time_unix_nano": m * M + k * S, "end_time_unix_nano": m * M + k * S + 1,
+                           "status_code": "unset", "kind": "server"}
+
+        def logs(self):
+            return iter(())
+
+        def series(self):
+            return iter(())
+
+        def points(self):
+            return iter(())
+
+    out = _summary(Snap(), 10 * M, 20 * M)["cart"]
+    assert out["normal"]["spans_per_min"] == out["fault"]["spans_per_min"] == out["recovery"]["spans_per_min"] == 60.0

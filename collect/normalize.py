@@ -57,6 +57,11 @@ def _host_ns(ts: str) -> int:
     return int(dt.replace(microsecond=0).timestamp()) * 10**9 + dt.microsecond * 1000
 
 
+def host_to_data_ns(ts: str, offset_s: float) -> int:
+    """A host-clock time on the data clock: the one conversion every reader uses (the window here, labels in eval)."""
+    return _host_ns(ts) + round(offset_s * 1e9)
+
+
 def _minute(ns: int | None) -> str:
     return "untimed" if ns is None else datetime.fromtimestamp(ns // 10**9, UTC).strftime("%Y-%m-%dT%H:%M")
 
@@ -214,8 +219,8 @@ def _check_inputs(inputs: NormalizeInputs, policy: Policy, incident_dir: Path) -
         path = inputs.raw_dir / f"{sig}.jsonl"
         if not path.is_file() or _sha256_file(path) != inputs.raw_sha256[sig]:
             raise NormalizeError(f"{path} is missing or its sha256 differs from the raw export record")
-    ws = _host_ns(inputs.window_host[0]) + round(o0 * 1e9)
-    we = _host_ns(inputs.window_host[1]) + round(o1 * 1e9)
+    ws = host_to_data_ns(inputs.window_host[0], o0)
+    we = host_to_data_ns(inputs.window_host[1], o1)
     if we <= ws:
         raise NormalizeError("empty window")
     return ws, we

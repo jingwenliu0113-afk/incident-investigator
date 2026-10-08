@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from datetime import datetime
 
+from collect.normalize import host_to_data_ns
 from collect.policy import Policy, load_policy
 
 WARN = 13  # OTLP severity_number: WARN and above count as error-level text
@@ -41,7 +41,7 @@ def _texts(snapshot):
 
 
 def _ns(ts: str, offset_s: float) -> int:
-    return int(datetime.fromisoformat(ts).timestamp() * 10**9) + int(offset_s * 10**9)
+    return host_to_data_ns(ts, offset_s)  # exactly as normalize maps the window (clock audit)
 
 
 def audit(snapshot, label: dict, *, clock_offset_s: float = 0.0, new_attribute_keys: dict | None = None,

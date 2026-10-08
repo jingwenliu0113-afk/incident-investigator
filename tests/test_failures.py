@@ -44,3 +44,22 @@ def test_what_counts_as_origin_evidence_in_the_fault_period():
     assert seen("stats:*")  # the overview block of dump-all and retrieval covers every service and minute
     assert not seen("s-" + "f" * 16)  # unresolved ids count for nothing
     assert FAULT_ON == W0 + 600 * S
+
+
+def test_label_times_map_onto_the_data_clock_exactly_as_the_snapshot_window_does():
+    # clock audit: int() on the offset vs normalize's round() put fault_on 1 ns before minute 10 of the window
+    from collect.normalize import host_to_data_ns
+
+    offset = 120.3000000006
+    start = host_to_data_ns("2026-10-08T11:46:40Z", offset)  # how normalize sets window.start_ns
+    assert start == host_to_data_ns("2026-10-08T11:46:40Z", 0.0) + round(offset * 1e9)
+
+    class Win:
+        window = {"start_ns": start}
+
+        def resolve(self, i):
+            return None
+
+    label = {"origin_service": "payment", "fault_start": "2026-10-08T11:56:40Z", "fault_end": "2026-10-08T12:06:40Z"}
+    assert not origin_evidence_seen(["stats:payment:0-9"], Win(), label, clock_offset_s=offset)  # normal minutes only
+    assert origin_evidence_seen(["stats:payment:10-10"], Win(), label, clock_offset_s=offset)

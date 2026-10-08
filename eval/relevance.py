@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import random
-from datetime import datetime
 from pathlib import Path
+
+from collect.normalize import host_to_data_ns
 
 GRACE_S = 60
 GOLD_PER_METHOD = 5
@@ -35,7 +36,7 @@ def resolved_unique(cited: list[dict], snapshot) -> list[tuple[tuple, dict]]:
 
 
 def _ns(ts: str, offset_s: float) -> int:
-    return int(datetime.fromisoformat(ts).timestamp() * 10**9) + int(offset_s * 10**9)
+    return host_to_data_ns(ts, offset_s)  # exactly as normalize maps the window (clock audit)
 
 
 def _traces(snapshot, wanted: set[str]) -> dict[str, tuple[int, set[str]]]:

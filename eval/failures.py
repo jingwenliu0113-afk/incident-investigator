@@ -5,7 +5,8 @@ A failure = origin_top1 or fault_type wrong. Each failure gets the first matchin
 
 from __future__ import annotations
 
-from datetime import datetime
+from collect.normalize import host_to_data_ns
+
 
 GRACE_S = 60  # the same tail as decision 017's temporal weak label
 MINUTE = 60 * 10**9
@@ -14,7 +15,7 @@ SUBMITTED = ("submitted", "submitted_after_limit")
 
 
 def _ns(ts: str, offset_s: float) -> int:
-    return int(datetime.fromisoformat(ts).timestamp() * 10**9) + int(offset_s * 10**9)
+    return host_to_data_ns(ts, offset_s)  # exactly as normalize maps the window (clock audit)
 
 
 def origin_evidence_seen(exposure: list[str], snapshot, label: dict, *, clock_offset_s: float = 0.0) -> bool:

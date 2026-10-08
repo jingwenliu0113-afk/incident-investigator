@@ -482,3 +482,18 @@ def test_vm_clock_data_is_judged_against_the_schedule_through_the_measured_offse
     assert abs(rec["clock_offset_seconds"][0] - 120.0) < 1e-6
     assert "normal_period_not_clean" in rec["reasons"] and rec["normal_period"]["kills"]
     assert "container_metrics_missing" not in rec["reasons"] and "raw_incomplete" not in rec["reasons"]
+
+
+def test_the_window_end_is_checked_with_the_second_offset_like_the_published_snapshot():
+    # decision 011 §3 N3: the published window ends at end + the second offset; VM 119.6 s ahead at the start, 120.5 s
+    # at the end: the snapshot covers VM 12:36 completely, so a docker_stats gap there must invalidate the run
+    from collect.rungroup import _judge
+
+    minutes = [f"2026-10-08T12:{m:02d}" for m in range(0, 37) if m != 36]
+    raw = {"collector": {"container_id": "c", "restarts": 0, "stop_exit_code": 0, "stop_seconds": 1.0, "cp_seconds": 1.0,
+                         "copied": True},
+           "files": {sig: {"signal": sig, "bytes": 10, "parse_errors": 0, "wrong_signal_lines": 0} for sig in ("traces", "metrics", "logs")},
+           "container_minutes": {c: minutes for c in SUT}, "collector_snapshots": [], "sdk_errors": {"exports": {}, "errors": []}}
+    record = {"clock_offset_seconds": [119.6, 120.5], "reasons": []}
+    _judge(record, [], [], raw, {"normal_start": "2026-10-08T12:05:00Z", "end": "2026-10-08T12:35:00Z"})
+    assert record["container_metric_gaps"] and all(v == ["12:36"] for v in record["container_metric_gaps"].values())

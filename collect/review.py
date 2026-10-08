@@ -16,6 +16,7 @@ from collect.derive import container_minute_stats, service_minute_stats
 from collect.incident import find_run
 from collect.labels import check_label
 from collect.layout import DataLayout
+from collect.normalize import host_to_data_ns
 from collect.pilot import GENERAL_CHECKS, REVIEW_CHECKS
 from collect.policy import load_policy
 from collect.snapshot import open_snapshot
@@ -52,6 +53,8 @@ def _summary(snapshot, on: int, off: int) -> dict:
     minutes = {p: [] for p in PERIODS}
     for m in range(-(-(end - start) // MINUTE)):
         minutes[_period(start + m * MINUTE + MINUTE // 2, on, off)].append(m)
+    # rates divide by the time each period covers: the last minute index may be only partly inside the window
+    covered = {p: sum(min(MINUTE, end - (start + m * MINUTE)) for m in ms) / MINUTE for p, ms in minutes.items()}
     spans, containers = service_minute_stats(snapshot)["services"], container_minute_stats(snapshot)["services"]
     out = {}
     for svc in snapshot.services:
@@ -64,11 +67,11 @@ def _summary(snapshot, on: int, off: int) -> dict:
             cpu = [c[m]["cpu"] for m in ms if c.get(m, {}).get("cpu") is not None]
             mem = [c[m]["memory"] for m in ms if c.get(m, {}).get("memory") is not None]
             out[svc][p] = {"minutes": len(ms),
-                           "spans_per_min": _r(n_spans / len(ms)) if ms else None,
+                           "spans_per_min": _r(n_spans / covered[p]) if covered[p] else None,
                            "error_ratio": _r(n_err / n_spans) if n_spans else None,
                            "p95_server_ms_median": _r(median(p95)) if p95 else None,
                            "p95_server_ms_max": _r(max(p95)) if p95 else None,
-                           "warn_logs_per_min": _r(sum(r["warn_logs"] for r in rows) / len(ms)) if ms else None,
+                           "warn_logs_per_min": _r(sum(r["warn_logs"] for r in rows) / covered[p]) if covered[p] else None,
                            "cpu_mean": _r(mean(cpu)) if cpu else None,
                            "memory_max_mib": _r(max(mem) / MiB) if mem else None}
     return out
@@ -87,8 +90,8 @@ def review_sheet(layout: DataLayout, incident_id: str, *, overwrite: bool = Fals
     run = json.loads((layout.run_group_truth_dir(rg) / "run.json").read_text())
     offset = json.loads(layout.normalize_report_path(incident_id).read_text())["window"]["clock_offsets"][0]
     snapshot = open_snapshot(layout.incident_dir(incident_id) / "normalized", layout)
-    shift = int(offset * 10**9)  # label and schedule: host clock; snapshot and docker events (the daemon runs in the VM): data clock
-    on, off = _ns(label["fault_start"]) + shift, _ns(label["fault_end"]) + shift
+    shift = round(offset * 1e9)  # label and schedule: host clock; snapshot and docker events (the daemon runs in the VM): data clock
+    on, off = host_to_data_ns(label["fault_start"], offset), host_to_data_ns(label["fault_end"], offset)
     events = {p: [] for p in PERIODS}
     for e in run.get("events", []):
         if _ns(e["ts"]) >= _ns(injection["schedule"]["normal_start"]) + shift:  # warm-up events are not part of the incident
