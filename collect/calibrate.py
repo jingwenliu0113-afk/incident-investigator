@@ -16,7 +16,7 @@ from pathlib import Path
 
 from collect.layout import DataLayout
 from collect.normalize import NormalizeInputs, check_snapshot, normalize
-from collect.otlp import attributes, nanos
+from collect.otlp import attributes
 from collect.policy import Policy, load_policy
 from collect.rawfile import scan_raw_file
 

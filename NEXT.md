@@ -25,7 +25,7 @@
 - **label review（decision 018）**：`python -m collect review-sheet --incident <INC>`（ground truth 側工作表：a priori、要檢查的項目、各服務 normal / fault / recovery 摘要、container 事件）→
   使用者填表 → `python -m collect review --incident <INC> --file … --reviewer human:<name>`；寫出另一份 `label.reviewed.json`（a priori 不變、origin 不可改、每個差異要有理由）；
   評分 / leakage / relevance 優先用 review 過的 label，`fault_exercised = false` 的 incident 不進評分。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：545 passed（`-m "not network and not docker_daemon"`）。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：551 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -90,22 +90,18 @@
 1. ✅ **soak #5 PASSED**（`data/external/soak/20261008T143533Z/`）：這個 lock 可以收集（decision 008「結果」）。
 2. ✅ 校準：soak #3 與 soak #5 在 commit `131446d` 上 F1–F6 全過。
 3. ✅ **policy v1 已凍結**：`sha256:95bc4b07…`（decision 011「凍結紀錄」）。之後任何改動都是 v2。
-4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --set pilot --flag paymentFailure --variant 100%`（preflight 擋 dirty tree 與沒通過 soak 的 lock）。
-   RG-001（15:21Z）aborted_unstable：暖機中 grafana exit 1 重啟、payment healthcheck 連續失敗（payment 140/140 MiB）→ 依規則重收（decision 009「收集結果」）。
-   run group 無效（例如 `container_metrics_missing`）→ 記錄原因、換新 seed 重收（decision 009 §4）。
-5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
-6. **a priori label**：`uv run python -m collect label --incident INC-001 --labeler agent:claude-code`（答案只從 decision 016 的清單取）。
-   `catalog+review`（對照 snapshot、填 `telemetry_coverage`）依 decision 006 / 010 要由**人**做：到 Gate 時請使用者 review。
-7. **leakage audit + 第一個 baseline**：`uv run python -m eval leakage --set pilot`（decision 015）；
-   `uv run python -m eval run --method stat-anomaly --set pilot` → `uv run python -m eval score --method stat-anomaly --set pilot`
-   （decision 013 / 014；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
-8. **其餘 9 個 Pilot fault**（decision 016 §4 的順序，每個約 45 分鐘、heavy lock，每個走 4–7 步）：
-   `./tools/with-mac-lock uv run python -m collect run --set pilot --flag <flag> --variant <variant>`，依序為
-   productCatalogFailure on、paymentUnreachable on、cartFailure 100%、intlShippingSlowdown 10sec、productCatalogLockContention on、
-   adHighCpu on、adManualGc on、emailMemoryLeak 1000x、recommendationCacheFailure on。
-   review 時要檢查的 a priori 不確定項目見 decision 016 §5（例如 cartFailure 的 EmptyCart 耗時、intlShippingSlowdown 是否真的被觸發）。
-9. **Gate 前請使用者做的人工作業**：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
-10. 之後：第一張 baseline 表（Pilot）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
+4. **每個 Pilot fault 的流程**（decision 016 的順序；`uv run python -m collect status --set pilot` 看進度）：
+   1. `uv run python -m collect next --set pilot` → 印出下一個 `--flag F --variant V`（全部收齊時不印；exit 3 = 某個 fault 需要人看：
+      連續 3 個 run group 無效，或 fault 兩次沒被觸發）。
+   2. `./tools/with-mac-lock uv run python -m collect run --set pilot --flag F --variant V`（約 45 分鐘；lock 被占用時 exit 75，不搶）。
+      run group 無效 → 記錄原因，`next` 會再給同一個 fault（新 seed，decision 009 §4）。
+   3. 有效時：`uv run python -m collect process --incident INC-nnn --labeler agent:claude-code`（normalize → Day 1 #6 replay → a priori label，做過的步驟跳過）。
+   4. 收完或告一段落時：`uv run python -m eval leakage --set pilot` → `uv run python -m eval run --method stat-anomaly --set pilot` →
+      `uv run python -m eval score --method stat-anomaly --set pilot`（表在 `data/external/results/pilot/stat-anomaly/table.md`）。
+   - 目前：RG-001（2026-10-08 15:21Z，paymentFailure）aborted_unstable（暖機中 grafana exit 1 重啟、payment healthcheck 連續失敗，payment 140/140 MiB）→ 下一個仍是 paymentFailure 100%。
+   - 每次 run 之間 lock 會釋放（wrapper 一次只包一個 run），其他 Project 可以在空檔取得。
+5. **Gate 前請使用者做的人工作業**：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
+6. 之後：第一張 baseline 表（Pilot）、LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
 ## Blocked

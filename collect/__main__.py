@@ -42,6 +42,40 @@ def _check_args(ns: argparse.Namespace) -> None:
                          "a set collects only its pre-registered faults")
 
 
+def _normalize(layout: DataLayout, incident: str) -> dict:
+    from datetime import UTC, datetime
+
+    from collect.incident import normalize_incident
+    from env.cli import _load_lock
+    from env.lock import lock_sha256
+
+    report = normalize_incident(layout, incident, lock_sha256=lock_sha256(_load_lock(PROJECT_DIR)),
+                                now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    # counts of what was removed stay in the ground-truth report; only the snapshot digest is printed
+    return {"incident_id": incident, "content_sha256": report["content_sha256"]}
+
+
+def _replay(layout: DataLayout, incident: str) -> dict:
+    import os
+
+    from collect.replay import replay
+    from env import compose, soak
+    from env.cli import _load_lock
+
+    lock, env = _load_lock(PROJECT_DIR), compose.sanitized_env(os.environ)
+    return replay(layout, incident, live_containers=lambda: sorted(soak.project_container_ids(lock, env).values()))
+
+
+def _label(layout: DataLayout, incident: str, labeler: str) -> dict:
+    from datetime import UTC, datetime
+
+    from collect.labeling import catalog_label_from_plan
+
+    label = catalog_label_from_plan(layout, incident, labeler=labeler, now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    # the label is ground truth: only say where it went
+    return {"incident_id": incident, "label": "written", "method": label["labeling"]["method"]}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m collect", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -64,6 +98,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                                        "origin / affected / symptom from its set's pre-registered plan (decision 016)")
     lab.add_argument("--incident", required=True)
     lab.add_argument("--labeler", required=True, help="who labels, e.g. human:<name> or agent:claude-code")
+    sta = sub.add_parser("status", help="decision 016: run groups and incidents of every planned fault of a set")
+    sta.add_argument("--set", dest="split", required=True, choices=["pilot"])
+    nxt = sub.add_parser("next", help="the next planned fault to collect, as `--flag F --variant V` (nothing when complete)")
+    nxt.add_argument("--set", dest="split", required=True, choices=["pilot"])
+    pro = sub.add_parser("process", help="after a valid run: normalize, replay and the a priori label (steps already done are skipped)")
+    pro.add_argument("--incident", required=True)
+    pro.add_argument("--labeler", required=True, help="who writes the a priori label, e.g. agent:claude-code")
     rsh = sub.add_parser("review-sheet", help="decision 018: the label review worksheet of one incident (ground-truth side)")
     rsh.add_argument("--incident", required=True)
     rev = sub.add_parser("review", help="decision 018: write the catalog+review label from a filled worksheet (a person only)")
@@ -73,18 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     ns = parser.parse_args(argv)
 
     if ns.command == "replay":
-        import os
-
-        from collect.replay import replay
-        from env import compose, soak
-        from env.cli import _load_lock
-
         import subprocess
 
         try:
-            lock, env = _load_lock(PROJECT_DIR), compose.sanitized_env(os.environ)
-            out = replay(DataLayout(PROJECT_DIR / "data/external"), ns.incident,
-                         live_containers=lambda: sorted(soak.project_container_ids(lock, env).values()))
+            out = _replay(DataLayout(PROJECT_DIR / "data/external"), ns.incident)
         except (RuntimeError, OSError, subprocess.CalledProcessError) as e:  # e.g. the Docker daemon is not running
             print(f"error: {e}", file=sys.stderr)
             return 2
@@ -102,6 +135,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         print(json.dumps({**out, "next": "re-pin POLICY_SHA256 in collect/policy.py to this sha256, run the tests, "
                                          "record the freeze in decision 011, commit"}, indent=2))
+        return 0
+    if ns.command in ("status", "next"):
+        from collect.pilot import next_planned, plan_status
+
+        layout = DataLayout(PROJECT_DIR / "data/external")
+        if ns.command == "status":
+            print(json.dumps(plan_status(layout, ns.split), indent=2))
+            return 0
+        try:
+            entry = next_planned(layout, ns.split)
+        except RuntimeError as e:  # a fault needs a person before it is collected again
+            print(f"error: {e}", file=sys.stderr)
+            return 3
+        if entry is not None:
+            print(f"--flag {entry['flag']} --variant {entry['variant']}")
+        return 0
+    if ns.command == "process":
+        import subprocess
+
+        layout = DataLayout(PROJECT_DIR / "data/external")
+        steps: dict = {"incident_id": ns.incident}
+        try:
+            if (layout.incident_dir(ns.incident) / "normalized" / "snapshot.json").exists():
+                steps["normalize"] = "already done"
+            else:
+                steps["normalize"] = _normalize(layout, ns.incident)["content_sha256"]
+            out = _replay(layout, ns.incident)
+            steps["replay"] = {"every_id_resolves": out["every_id_resolves"], "checks": out["checks"]}
+            if not out["every_id_resolves"] or out["checks"]:
+                print(json.dumps(steps, indent=2))
+                return 1
+            steps["label"] = ("already done" if layout.label_path(ns.incident).exists()
+                              else _label(layout, ns.incident, ns.labeler)["label"])
+        except (LookupError, ValueError, PermissionError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
+            print(json.dumps(steps, indent=2))
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps(steps, indent=2))
         return 0
     if ns.command in ("review-sheet", "review"):
         from datetime import UTC, datetime
@@ -123,35 +194,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         return 0
     if ns.command == "label":
-        from datetime import UTC, datetime
-
-        from collect.labeling import catalog_label_from_plan
-
         try:
-            label = catalog_label_from_plan(DataLayout(PROJECT_DIR / "data/external"), ns.incident, labeler=ns.labeler,
-                                            now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            print(json.dumps(_label(DataLayout(PROJECT_DIR / "data/external"), ns.incident, ns.labeler)))
         except (LookupError, ValueError, OSError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 2
-        # the label is ground truth: only say where it went
-        print(json.dumps({"incident_id": ns.incident, "label": "written", "method": label["labeling"]["method"]}))
         return 0
     if ns.command == "normalize":
-        from datetime import UTC, datetime
-
-        from collect.incident import normalize_incident
-        from env.cli import _load_lock
-        from env.lock import lock_sha256
-
-        layout = DataLayout(PROJECT_DIR / "data/external")
         try:
-            report = normalize_incident(layout, ns.incident, lock_sha256=lock_sha256(_load_lock(PROJECT_DIR)),
-                                        now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+            out = _normalize(DataLayout(PROJECT_DIR / "data/external"), ns.incident)
         except (LookupError, ValueError, PermissionError, RuntimeError, OSError) as e:  # OSError: a missing record file
             print(f"error: {e}", file=sys.stderr)
             return 2
-        # counts of what was removed stay in the ground-truth report; only the snapshot digest is printed
-        print(json.dumps({"incident_id": ns.incident, "content_sha256": report["content_sha256"]}, indent=2))
+        print(json.dumps(out, indent=2))
         return 0
     if ns.command == "calibrate":
         from datetime import UTC, datetime

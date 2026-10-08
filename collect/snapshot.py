@@ -88,7 +88,7 @@ class Snapshot:
         if evidence_id.startswith("t-"):
             tid = evidence_id[2:]
             return {"trace_id": tid} if tid in self._traces else None
-        if not evidence_id[:2] in ("s-", "l-", "m-", "p-") or evidence_id not in self._index:
+        if evidence_id[:2] not in ("s-", "l-", "m-", "p-") or evidence_id not in self._index:
             return None
         if evidence_id.startswith("m-") and (t0 is not None or t1 is not None):
             lo, hi = t0 if t0 is not None else -1, t1 if t1 is not None else 2**63

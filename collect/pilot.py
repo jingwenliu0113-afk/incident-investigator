@@ -8,6 +8,8 @@ separately (decision 006 §7) and records every difference from these entries. G
 
 from __future__ import annotations
 
+import json
+
 _EDGE = ["frontend", "frontend-proxy"]
 
 # decision 016 table; the first entry is decision 010's incident
@@ -91,3 +93,49 @@ GENERAL_CHECKS = [
     "telemetry_coverage per signal: origin (the origin shows the fault), symptom_only (only downstream), none (decision 006 §7)",
     "every field that differs from the a priori label needs a reason in review.reasons (decision 018 §3)",
 ]
+
+MAX_INVALID_ATTEMPTS = 3  # run groups of one fault that ended without an incident before a person must look
+
+
+def plan_status(layout, split: str) -> list[dict]:
+    """Per planned fault, in plan order: its run groups (id, status), its usable incident and its excluded incidents.
+
+    A run group recorded before `--set` existed (no split in its plan) was a Pilot run (decision 010)."""
+    runs = []
+    for path in sorted((layout.ground_truth_root / "run_groups").glob("RG-*/run.json")):
+        r = json.loads(path.read_text())
+        plan = r.get("plan") or {}
+        if plan.get("split", "pilot") == split:
+            runs.append((r["run_group_id"], r.get("status"), plan.get("flag"), plan.get("variant"), r.get("incident_ids") or []))
+    out = []
+    for e in PLANS[split]:
+        mine = [r for r in runs if (r[2], r[3]) == (e["flag"], e["variant"])]
+        usable, excluded = None, []
+        for _, status, _, _, incs in mine:
+            for inc in incs if status == "valid" else []:
+                review = layout.label_path(inc).with_name("label_review.json")
+                if review.exists() and json.loads(review.read_text()).get("fault_exercised") is False:
+                    excluded.append(inc)
+                elif usable is None:
+                    usable = inc
+        out.append({"flag": e["flag"], "variant": e["variant"], "run_groups": [(r[0], r[1]) for r in mine],
+                    "incident": usable, "excluded": excluded})
+    return out
+
+
+def next_planned(layout, split: str) -> dict | None:
+    """The first planned fault without a usable incident, or None when the set is complete. Raises when a fault needs a
+    person: its fault was not exercised twice (decision 016 §5 allows one recollection) or MAX_INVALID_ATTEMPTS run
+    groups ended without an incident."""
+    for s in plan_status(layout, split):
+        if s["incident"] is not None:
+            continue
+        failed = [rg for rg, status in s["run_groups"] if status != "valid"]
+        if len(s["excluded"]) >= 2:
+            raise RuntimeError(f"{s['flag']} {s['variant']}: the fault was not exercised in {s['excluded']}; "
+                               "decision 016 §5 allows one recollection, a person decides what next")
+        if len(failed) >= MAX_INVALID_ATTEMPTS:
+            raise RuntimeError(f"{s['flag']} {s['variant']}: {len(failed)} run groups ended invalid or aborted ({failed}); "
+                               "a person looks at the run records before collecting it again")
+        return planned(split, s["flag"], s["variant"])
+    return None
