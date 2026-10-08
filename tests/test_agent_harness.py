@@ -44,7 +44,7 @@ def test_a_tool_call_then_a_submission_gives_a_checked_prediction_with_usage_and
     assert pred["usage"]["tokens_in"] == 200 and pred["usage"]["tokens_out"] == 20 and pred["usage"]["tool_calls"] == 1
     assert pred["usage"]["proxy_tokens"] > 0 and pred["usage"]["retrievals"] == 0
     assert pred["usage"]["cost_usd"] == pytest.approx((200 * 3.0 + 20 * 15.0) / 1e6)
-    assert transcript["stop_reason"] == "submitted" and transcript["exposure"] == [hexid("s", 2), hexid("s", 3)]
+    assert transcript["stop_reason"] == "submitted" and transcript["exposure"] == [hexid("s", 2), "t-" + "a" * 32, hexid("s", 3), "t-" + "b" * 32]
     result = model.calls[1]["messages"][-1]["content"][0]
     assert result["type"] == "tool_result" and result["tool_use_id"] == "t1" and "2 spans match" in result["content"]
     assert {t["name"] for t in model.calls[0]["tools"]} >= {"search_spans", "submit_diagnosis"}
@@ -91,3 +91,29 @@ def test_the_task_text_is_the_same_framing_for_every_method_and_says_nothing_abo
     assert load_policy().lexicon_hit(text) == 0
     assert not re.search(r"flag|inject|chaos|run group|seed|10 minutes long|fault window", text, re.IGNORECASE)
     assert SUBMIT_SPEC["name"] == "submit_diagnosis" and load_policy().lexicon_hit(str(SUBMIT_SPEC)) == 0
+
+
+def test_impossible_evidence_times_are_a_correctable_problem_not_a_crash(tmp_path):
+    bad = {**ANSWER, "evidence": [{"id": "m-" + "c" * 16, "t0": "1e400", "t1": float("inf")}]}
+    pred, transcript = run(tmp_path, Scripted([tool("submit_diagnosis", bad)], [tool("submit_diagnosis", ANSWER, "t2")]))
+    assert transcript["stop_reason"] == "submitted" and pred["evidence"] == [{"id": hexid("s", 2)}]
+
+
+def test_every_tool_use_in_a_turn_gets_its_own_result(tmp_path):
+    # the Messages API rejects a request whose previous turn has a tool_use without a tool_result
+    from agent.harness import submit_round
+
+    model = Scripted([tool("submit_diagnosis", {**ANSWER, "origin_candidates": ["nope"]}, "a"),
+                      tool("submit_diagnosis", {**ANSWER, "origin_candidates": ["nope"]}, "b")],
+                     [tool("submit_diagnosis", ANSWER, "c"), tool("submit_diagnosis", ANSWER, "d")])
+    messages = [{"role": "user", "content": [{"type": "text", "text": "go"}]}]
+    pred, stop = submit_round(model, "sys", messages, Snap(), "INC-001", {"name": "m", "version": "1"}, {"input": 0, "output": 0})
+    assert stop == "submitted" and pred["origin_candidates"] == ["payment", "checkout"]
+    for i, m in enumerate(messages):
+        if m["role"] == "assistant":
+            uses = {b["id"] for b in m["content"] if b.get("type") == "tool_use"}
+            answered = {b["tool_use_id"] for b in messages[i + 1]["content"] if b.get("type") == "tool_result"}
+            assert uses == answered
+    _, transcript = run(tmp_path, Scripted([tool("submit_diagnosis", ANSWER, "x"), tool("submit_diagnosis", ANSWER, "y")]))
+    last = transcript["messages"][-1]["content"]
+    assert {b["tool_use_id"] for b in last} == {"x", "y"}

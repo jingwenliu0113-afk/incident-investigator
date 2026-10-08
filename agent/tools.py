@@ -7,6 +7,7 @@ substrings (ASCII case folding) of those lines. There is no ranking of anything:
 
 from __future__ import annotations
 
+import math
 import sqlite3
 from pathlib import Path
 
@@ -16,6 +17,10 @@ from collect.snapshot import proxy_tokens, render_v1
 INDEX_VERSION = 2  # 2: LIKE on the line itself, no lower-case copy
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 20
+MAX_SECONDS = 10**7  # time arguments are seconds since the window start; larger values are a unit mistake
+MAX_OFFSET = 10**7
+MAX_TEXT = 1000
+CUT_NOTE = "(output cut: token budget reached)"
 MiB = 2**20
 
 _T = {"type": "number", "description": "seconds since the start of the time window"}
@@ -109,6 +114,19 @@ class ToolError(ValueError):
     pass
 
 
+def _cut(text: str, remaining: int) -> tuple[str, int]:
+    """`text` if it fits in `remaining` proxy tokens, else its leading lines plus CUT_NOTE; and how many lines were kept."""
+    lines = text.split("\n")
+    if proxy_tokens(text) <= remaining:
+        return text, len(lines)
+    kept: list[str] = []
+    for line in lines:
+        if proxy_tokens("\n".join([*kept, line, CUT_NOTE])) > remaining:
+            break
+        kept.append(line)
+    return ("\n".join([*kept, CUT_NOTE]) if kept else "(cut)"), len(kept)
+
+
 def _rel_minute(minute: int) -> str:
     return f"+{minute:03d}:00"
 
@@ -128,10 +146,17 @@ class ToolSession:
         self.usage = {"tool_calls": 0, "proxy_tokens": 0}
         self.exposure: list[str] = []
         self._seen: set[str] = set()
+        self._cut_reached = False
+
+    @property
+    def exhausted(self) -> bool:
+        """No more tool output: the call limit is reached, or the token budget is used up or cut an answer."""
+        u = self.usage
+        return ((self.max_calls is not None and u["tool_calls"] >= self.max_calls) or self._cut_reached
+                or (self.max_proxy_tokens is not None and u["proxy_tokens"] >= self.max_proxy_tokens))
 
     def call(self, name: str, args: dict) -> str:
-        if (self.max_calls is not None and self.usage["tool_calls"] >= self.max_calls) or (
-                self.max_proxy_tokens is not None and self.usage["proxy_tokens"] >= self.max_proxy_tokens):
+        if self.exhausted:
             return "error: budget used up; no more tool output for this incident"
         self.usage["tool_calls"] += 1
         try:
@@ -139,9 +164,13 @@ class ToolSession:
                 raise ToolError(f"unknown tool {name!r}; tools: {', '.join(_SPECS)}")
             self._check(name, args)
             text, shown = getattr(self, "_" + name)(**args)
-        except ToolError as e:
+        except (ToolError, OverflowError, ValueError, sqlite3.Error) as e:  # a bad argument never ends a paid run
             text, shown = f"error: {e}", []
-        for i in shown:
+        if self.max_proxy_tokens is not None:  # decision 019 §6: never more than the budget, cut at a line
+            text, kept = _cut(text, self.max_proxy_tokens - self.usage["proxy_tokens"])
+            shown = [(n, i) for n, i in shown if n < kept]
+            self._cut_reached |= text.endswith(CUT_NOTE) or text == "(cut)"
+        for _, i in shown:
             if i not in self._seen:
                 self._seen.add(i)
                 self.exposure.append(i)
@@ -149,6 +178,8 @@ class ToolSession:
         return text
 
     def _check(self, name: str, args: dict) -> None:
+        if not isinstance(args, dict):
+            raise ToolError("arguments must be an object")
         props, spec = _SPECS[name]["parameters"]["properties"], _SPECS[name]["parameters"]
         if extra := sorted(set(args) - set(props)):
             raise ToolError(f"{name} has no argument(s) {extra}")
@@ -156,25 +187,45 @@ class ToolSession:
             raise ToolError(f"{name} needs {', '.join(missing)}")
         for k, v in args.items():
             p = props[k]
+            if v is None:
+                continue
             if "enum" in p and v not in p["enum"]:
                 raise ToolError(f"{k} must be one of {p['enum']}")
-            if p.get("type") in ("number", "integer") and v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
-                raise ToolError(f"{k} must be a number")
-            if p.get("type") == "string" and v is not None and not isinstance(v, str):
-                raise ToolError(f"{k} must be a string")
+            if p.get("type") in ("number", "integer"):
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+                    raise ToolError(f"{k} must be a finite number")
+                if p["type"] == "integer" and v != int(v):
+                    raise ToolError(f"{k} must be a whole number")
+                if "minimum" in p and v < p["minimum"]:
+                    raise ToolError(f"{k} must be at least {p['minimum']}")
+                if k in ("t0", "t1") and abs(v) > MAX_SECONDS:
+                    raise ToolError(f"{k} is seconds since the start of the window (|{k}| <= {MAX_SECONDS})")
+                if k == "offset" and v > MAX_OFFSET:
+                    raise ToolError(f"offset must be at most {MAX_OFFSET}")
+            if p.get("type") == "string":
+                if not isinstance(v, str):
+                    raise ToolError(f"{k} must be a string")
+                if len(v) > MAX_TEXT:
+                    raise ToolError(f"{k} must be at most {MAX_TEXT} characters")
 
     def _ns(self, seconds) -> int:
         return self.start + int(round(seconds * 1e9))
 
     def _page(self, what: str, table: str, where: list[str], params: list, limit, offset, order: str = "t, id") -> tuple[str, list]:
         limit = min(int(limit or DEFAULT_LIMIT), MAX_LIMIT)
-        offset = max(int(offset or 0), 0)
+        offset = int(offset or 0)
         clause = (" WHERE " + " AND ".join(where)) if where else ""
         total = self.db.execute(f"SELECT count(*) FROM {table}{clause}", params).fetchone()[0]
-        rows = self.db.execute(f"SELECT id, line FROM {table}{clause} ORDER BY {order} LIMIT ? OFFSET ?",
+        trace = "trace_id" if table == "spans" else "NULL"
+        rows = self.db.execute(f"SELECT id, line, {trace} FROM {table}{clause} ORDER BY {order} LIMIT ? OFFSET ?",
                                [*params, limit, offset]).fetchall()
         head = f"{total} {what} match; showing {offset + 1}-{offset + len(rows)}" if rows else f"{total} {what} match"
-        return "\n".join([head, *(line for _, line in rows)]), [i for i, _ in rows]
+        shown = []  # (line number, exposure id): the record, then its trace (decision 019 §6)
+        for n, (i, _, t) in enumerate(rows, start=1):
+            shown.append((n, i))
+            if t:
+                shown.append((n, "t-" + t))
+        return "\n".join([head, *(line for _, line, _ in rows)]), shown
 
     def _filters(self, service=None, text=None, t0=None, t1=None) -> tuple[list[str], list]:
         where, params = [], []
@@ -244,5 +295,5 @@ class ToolSession:
                                "WHERE service = ? AND minute >= ? AND minute < ? ORDER BY minute", (service, lo, hi)).fetchall()
         lines = [f"{_rel_minute(m)} spans={n} errors={e} p95_ms={_num(p)} warn_logs={w} cpu_cores={_num(c)} "
                  f"memory_mib={_num(None if mem is None else mem / MiB, '.1f')}" for m, n, e, p, w, c, mem in rows]
-        shown = [f"stats:{service}:{rows[0][0]}-{rows[-1][0]}"] if rows else []  # decision 022: what was looked at
+        shown = [(1, f"stats:{service}:{rows[0][0]}-{rows[-1][0]}")] if rows else []  # decision 022: what was looked at
         return "\n".join([f"{service} per minute ({len(lines)} minutes)", *lines]), shown

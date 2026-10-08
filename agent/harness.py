@@ -5,11 +5,12 @@ usage accounting and a transcript. The model is any object with complete(system,
 
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 
 from agent.prompt import SYMPTOM_KINDS, SYSTEM, task_prompt
-from agent.tools import TOOL_SPECS, ToolSession
+from agent.tools import MAX_SECONDS, TOOL_SPECS, ToolSession
 from collect.labels import FAULT_TYPES
 from eval.score import check_prediction
 
@@ -57,20 +58,17 @@ def _prediction(answer: dict, incident_id: str, method: dict, start_ns: int, ser
             item = {"id": e["id"]}
             for k in ("t0", "t1"):
                 if e.get(k) is not None:
-                    item[k] = start_ns + int(round(float(e[k]) * 1e9))
+                    seconds = float(e[k])
+                    if not math.isfinite(seconds) or abs(seconds) > MAX_SECONDS:
+                        return None, [f"evidence {e['id']}: {k} must be seconds since the start of the window"]
+                    item[k] = start_ns + int(round(seconds * 1e9))
             evidence.append(item)
         pred = {**_abstain(incident_id, method), **{k: answer[k] for k in
                 ("fault", "origin_candidates", "affected_services", "user_symptom") if k in answer}, "evidence": evidence}
-    except (TypeError, KeyError, ValueError, AttributeError) as e:
+    except (TypeError, KeyError, ValueError, AttributeError, OverflowError) as e:
         return None, [f"the answer is malformed: {e}"]
     problems = check_prediction({**pred, "usage": {}}, services=services)
     return (None, problems) if problems else (pred, [])
-
-
-def _exhausted(session: ToolSession) -> bool:
-    u = session.usage
-    return ((session.max_calls is not None and u["tool_calls"] >= session.max_calls)
-            or (session.max_proxy_tokens is not None and u["proxy_tokens"] >= session.max_proxy_tokens))
 
 
 def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: dict, max_turns: int = 30,
@@ -99,7 +97,10 @@ def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: 
                 if candidate is not None and pred is None:
                     pred = candidate
                     results.append({"type": "tool_result", "tool_use_id": block["id"], "content": "accepted"})
-                elif candidate is None:
+                elif candidate is not None:
+                    results.append({"type": "tool_result", "tool_use_id": block["id"],
+                                    "content": "ignored: a diagnosis was already accepted"})
+                else:
                     corrections += 1
                     results.append({"type": "tool_result", "tool_use_id": block["id"], "is_error": True,
                                     "content": "error: the diagnosis has problems, fix them and submit again: " + "; ".join(problems)})
@@ -119,7 +120,7 @@ def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: 
             if not results:
                 results = [{"type": "text", "text": "Continue: use the tools, or call submit_diagnosis."}]
             messages.append({"role": "user", "content": results})
-            if turns >= max_turns or _exhausted(session):
+            if turns >= max_turns or session.exhausted:
                 limit_reason = "turn_limit" if turns >= max_turns else "tool_budget"
                 messages[-1]["content"].append({"type": "text", "text": SUBMIT_NOW})
                 final_chance = True
@@ -147,24 +148,32 @@ def submit_round(model, system: str, messages: list[dict], snapshot, incident_id
         tokens["input"] += response.get("usage", {}).get("input_tokens", 0)
         tokens["output"] += response.get("usage", {}).get("output_tokens", 0)
         messages.append({"role": "assistant", "content": response["content"]})
-        uses = [b for b in response["content"] if b.get("type") == "tool_use" and b.get("name") == "submit_diagnosis"]
-        if uses:
-            pred, problems = _prediction(uses[0].get("input") or {}, incident_id, method, snapshot.window["start_ns"],
-                                         snapshot.services)
-            if pred is not None:
-                messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": uses[0]["id"],
-                                                               "content": "accepted"}]})
-                return pred, "submitted"
-            reply = [{"type": "tool_result", "tool_use_id": uses[0]["id"], "is_error": True,
-                      "content": "error: the diagnosis has problems, fix them and submit again: " + "; ".join(problems)}]
-            reason = "invalid_submission"
-        else:
+        pred, reply, problems = None, [], []
+        for b in response["content"]:  # every tool_use gets a tool_result (the API rejects the next turn otherwise)
+            if b.get("type") != "tool_use":
+                continue
+            if b.get("name") != "submit_diagnosis":
+                content, error = "error: only submit_diagnosis is available now", True
+            elif pred is not None:
+                content, error = "ignored: a diagnosis was already accepted", False
+            else:
+                candidate, issues = _prediction(b.get("input") or {}, incident_id, method, snapshot.window["start_ns"],
+                                                snapshot.services)
+                pred, problems = candidate, problems + issues
+                content = "accepted" if candidate else ("error: the diagnosis has problems, fix them and submit again: "
+                                                        + "; ".join(issues))
+                error = candidate is None
+            reply.append({"type": "tool_result", "tool_use_id": b["id"], "content": content, **({"is_error": True} if error else {})})
+        if pred is not None:
+            messages.append({"role": "user", "content": reply})
+            return pred, "submitted"
+        reason = "invalid_submission" if reply else "no_submission"
+        if not reply:
             reply = [{"type": "text", "text": "Call submit_diagnosis with your answer."}]
-            reason = "no_submission"
+        messages.append({"role": "user", "content": reply})
         corrections += 1
         if corrections > MAX_CORRECTIONS:
             return None, reason
-        messages.append({"role": "user", "content": reply})
 
 
 def finish(pred: dict | None, incident_id: str, method: dict, tokens: dict, *, proxy: int, tool_calls: int,

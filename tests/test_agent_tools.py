@@ -129,9 +129,9 @@ def test_limits_bad_arguments_and_the_budget(tmp_path):
     assert s.call("search_spans", {}).startswith("error: budget")  # unknown tools and bad arguments still count as calls
     assert s.usage["tool_calls"] == 3
 
-    s = ToolSession(Snap(), cache_root=tmp_path / "cache", max_proxy_tokens=10)
+    s = ToolSession(Snap(), cache_root=tmp_path / "cache", max_proxy_tokens=20)
     first = s.call("search_spans", {})
-    assert s.usage["proxy_tokens"] == proxy_tokens(first) > 10
+    assert s.usage["proxy_tokens"] == proxy_tokens(first) <= 20 and s.exhausted  # cut at the budget, then no more
     assert s.call("search_logs", {}).startswith("error: budget") and s.usage["tool_calls"] == 1  # a refusal is not a call
 
 
@@ -139,7 +139,7 @@ def test_the_exposure_log_lists_each_shown_record_once_in_order(session):
     session.call("search_spans", {"status": "error"})
     session.call("search_spans", {"service": "payment"})
     session.call("get_trace", {"trace_id": "b" * 32})
-    assert session.exposure == [hexid("s", 2), hexid("s", 3), hexid("s", 1), hexid("s", 4)]
+    assert session.exposure == [hexid("s", 2), "t-" + "a" * 32, hexid("s", 3), "t-" + "b" * 32, hexid("s", 1), hexid("s", 4)]
     session.call("service_minute_stats", {"service": "payment", "t0": 600})
     assert session.exposure[-1] == "stats:payment:11-11"  # decision 022: which service and minutes were looked at
 
@@ -153,3 +153,30 @@ def test_tool_descriptions_do_not_describe_the_collection_and_pass_the_lexicon()
         text = t["description"] + str(t["parameters"])
         assert policy.lexicon_hit(text) == 0, t["name"]
         assert not re.search(r"flag|inject|chaos|anomal|rank", text, re.IGNORECASE), t["name"]
+
+
+def test_arguments_out_of_range_are_refused_not_a_crash_or_a_bypass(session):
+    # review fixes: a negative limit was "no limit" in SQLite; huge or infinite numbers crashed the session
+    for args in ({"limit": -1}, {"limit": 0}, {"offset": -3}, {"limit": 2.5}, {"t0": 1e12}, {"t1": float("inf")},
+                 {"t0": float("nan")}, {"offset": 1e30}, {"min_duration_ms": float("inf")}, {"text": "x" * 5000}):
+        out = session.call("search_spans", args)
+        assert out.startswith("error:"), (args, out[:80])
+    assert session.call("get_points", {"series_id": "m-" + "c" * 16, "t1": float("inf")}).startswith("error:")
+    assert session.call("service_minute_stats", {"service": "payment", "t1": float("inf")}).startswith("error:")
+    assert session.call("search_spans", {"limit": 2}).splitlines()[0] == "4 spans match; showing 1-2"
+
+
+def test_the_call_that_reaches_the_token_budget_is_cut_at_a_line_and_never_exceeds_it(tmp_path):
+    s = ToolSession(Snap(), cache_root=tmp_path / "cache", max_proxy_tokens=150)
+    out = s.call("search_spans", {})
+    assert s.usage["proxy_tokens"] == proxy_tokens(out) <= 150
+    assert out.endswith("(output cut: token budget reached)")
+    shown = ids(out)
+    assert shown and len(shown) < 4
+    assert [e for e in s.exposure if e.startswith("s-")] == shown  # only what was actually shown counts as seen
+    assert s.call("search_logs", {}).startswith("error: budget")
+
+
+def test_trace_ids_are_part_of_the_exposure_log(session):
+    session.call("get_trace", {"trace_id": "b" * 32})
+    assert session.exposure[:3] == [hexid("s", 3), "t-" + "b" * 32, hexid("s", 4)]

@@ -63,3 +63,18 @@ def test_retrieval_asks_for_queries_then_answers_from_what_they_found(tmp_path):
     pred, _ = retrieval(Snap(), "INC-001", Scripted([tool("propose_queries", many)], [tool("submit_diagnosis", ANSWER, "x")]),
                         method=METHOD, cache_root=tmp_path / "cache", q=8, k=5)
     assert pred["usage"]["retrievals"] == 8  # at most q
+
+
+def test_retrieval_answers_every_tool_use_survives_bad_numbers_and_rebuilds_a_broken_cache(tmp_path):
+    two = Scripted([tool("propose_queries", {"queries": [{"text": "failed", "t1": 1e12}]}, "a"),
+                    tool("propose_queries", {"queries": [{"text": "cache", "t0": float("inf")}, {"text": "cache"}]}, "b")],
+                   [tool("submit_diagnosis", ANSWER, "c")])
+    pred, transcript = retrieval(Snap(), "INC-001", two, method=METHOD, cache_root=tmp_path / "cache", q=8, k=5)
+    reply = transcript["messages"][2]["content"]
+    assert {b["tool_use_id"] for b in reply if b.get("type") == "tool_result"} == {"a", "b"}
+    assert "skipped" in reply[0]["content"]  # bad time bounds: the query is not run, and the model is told
+    assert pred["usage"]["retrievals"] == 1 and hexid("l", 5) in transcript["exposure"]  # queries of both calls count
+    broken = tmp_path / "broken"
+    (broken / ("1" * 64)).mkdir(parents=True)
+    (broken / ("1" * 64) / "retrieval.sqlite").write_text("not a database")  # a derived cache: rebuilt, never "0 found"
+    assert search(Snap(), broken, "cache", k=5) == [hexid("l", 5)]

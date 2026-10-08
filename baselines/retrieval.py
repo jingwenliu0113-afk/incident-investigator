@@ -5,6 +5,7 @@ deduplicated records, in time order, go back to the model with only submit_diagn
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 import time
@@ -12,6 +13,7 @@ from pathlib import Path
 
 from agent.harness import finish, submit_round
 from agent.prompt import SYSTEM, task_prompt
+from agent.tools import MAX_SECONDS, MAX_TEXT
 from baselines.overview import overview
 from collect.snapshot import proxy_tokens, render_v1
 
@@ -33,8 +35,11 @@ def _index(snapshot, cache_root: Path) -> Path:
     digest = snapshot.meta["content_sha256"].removeprefix("sha256:")
     path = Path(cache_root) / digest / "retrieval.sqlite"
     if path.exists():
-        with sqlite3.connect(path) as db:
-            meta = dict(db.execute("SELECT key, value FROM meta"))
+        try:
+            with sqlite3.connect(path) as db:
+                meta = dict(db.execute("SELECT key, value FROM meta"))
+        except sqlite3.DatabaseError:  # a derived cache that is not a usable database: rebuild it
+            meta = {}
         if meta.get("content_sha256") == snapshot.meta["content_sha256"] and meta.get("index_version") == str(INDEX_VERSION):
             return path
         path.unlink()
@@ -62,7 +67,7 @@ def search(snapshot, cache_root: Path, text: str, *, k: int, service: str | None
     return [i for i, _, _ in _rows(snapshot, cache_root, text, k=k, service=service, t0=t0, t1=t1)]
 
 
-def _rows(snapshot, cache_root: Path, text: str, *, k: int, service=None, t0=None, t1=None) -> list[tuple]:
+def _rows(snapshot, cache_root: Path, text: str, *, k: int, service=None, t0=None, t1=None, db_path=None) -> list[tuple]:
     """(id, time, render-v1 line) of the top k matches."""
     words = re.findall(r"[A-Za-z0-9]+", text or "")
     if not words:
@@ -79,7 +84,7 @@ def _rows(snapshot, cache_root: Path, text: str, *, k: int, service=None, t0=Non
     if t1 is not None:
         where.append("t < ?")
         params.append(start + int(t1 * 1e9))
-    with sqlite3.connect(_index(snapshot, cache_root)) as db:
+    with sqlite3.connect(_index(snapshot, cache_root) if db_path is None else db_path) as db:
         return db.execute(f"SELECT id, t, line FROM docs WHERE {' AND '.join(where)} ORDER BY bm25(docs), t, id LIMIT ?",
                           [*params, k]).fetchall()
 
@@ -96,25 +101,41 @@ def retrieval(snapshot, incident_id: str, model, *, method: dict, cache_root: Pa
     tokens["input"] += response.get("usage", {}).get("input_tokens", 0)
     tokens["output"] += response.get("usage", {}).get("output_tokens", 0)
     messages.append({"role": "assistant", "content": response["content"]})
-    use = next((b for b in response["content"] if b.get("type") == "tool_use" and b.get("name") == "propose_queries"), None)
-    queries = [x for x in ((use or {}).get("input") or {}).get("queries") or [] if isinstance(x, dict)][:q]
+    uses = [b for b in response["content"] if b.get("type") == "tool_use"]
+    proposals = [b for b in uses if b.get("name") == "propose_queries"]
+    queries = [x for b in proposals for x in ((b.get("input") or {}).get("queries") or []) if isinstance(x, dict)][:q]
+    db_path = _index(snapshot, cache_root)  # opened once; a failure here is an error, never "0 records found"
     found: dict[str, tuple] = {}
-    for x in queries:
-        try:
-            rows = _rows(snapshot, cache_root, str(x.get("text") or ""), k=k, service=x.get("service"),
-                         t0=x.get("t0"), t1=x.get("t1"))
-        except (sqlite3.Error, TypeError, ValueError):
-            rows = []
-        for i, t, line in rows:
+    skipped, ran = [], 0
+    for n, x in enumerate(queries, start=1):
+        bounds = [x.get(b) for b in ("t0", "t1") if x.get(b) is not None]
+        if not isinstance(x.get("text"), str) or len(x["text"]) > MAX_TEXT or not all(
+                isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) <= MAX_SECONDS
+                for v in bounds) or not (x.get("service") is None or isinstance(x["service"], str)):
+            skipped.append(f"query {n} skipped: text must be a string of at most {MAX_TEXT} characters and t0 / t1 seconds "
+                           "since the start of the window")
+            continue
+        ran += 1
+        for i, t, line in _rows(snapshot, cache_root, x["text"], k=k, service=x.get("service"), t0=x.get("t0"),
+                                t1=x.get("t1"), db_path=db_path):
             found.setdefault(i, (t or 0, line))
     order = sorted(found, key=lambda i: (found[i][0], i))
     lines = [found[i][1] for i in order]
-    results = f"{len(lines)} records found by {len(queries)} queries, in time order:\n" + "\n".join(lines)
-    reply = ([{"type": "tool_result", "tool_use_id": use["id"], "content": results}] if use
-             else [{"type": "text", "text": results}])
+    results = "\n".join([*skipped, f"{len(lines)} records found by {ran} queries, in time order:", *lines])
+    reply = []
+    for b in uses:  # every tool_use gets a tool_result
+        if b is (proposals[0] if proposals else None):
+            reply.append({"type": "tool_result", "tool_use_id": b["id"], "content": results})
+        elif b.get("name") == "propose_queries":
+            reply.append({"type": "tool_result", "tool_use_id": b["id"], "content": "merged into the first result"})
+        else:
+            reply.append({"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
+                          "content": "error: only propose_queries is available now"})
+    if not proposals:
+        reply.append({"type": "text", "text": results})
     messages.append({"role": "user", "content": reply + [{"type": "text", "text": "Now call submit_diagnosis."}]})
     pred, stop = submit_round(model, SYSTEM, messages, snapshot, incident_id, method, tokens)
     pred = finish(pred, incident_id, method, tokens, proxy=proxy_tokens(view) + proxy_tokens(results), tool_calls=0,
-                  retrievals=len(queries), t_start=t_start, price_per_mtok=price_per_mtok)
+                  retrievals=ran, t_start=t_start, price_per_mtok=price_per_mtok)
     return pred, {"incident_id": incident_id, "method": dict(method), "stop_reason": stop, "messages": messages,
                   "exposure": ["stats:*", *order], "usage": pred["usage"], "queries": queries}
