@@ -1,0 +1,25 @@
+{
+  "upstream": {
+    "repo": "https://github.com/open-telemetry/opentelemetry-demo",
+    "tag": "3.1.0",
+    "commit": "dedc0178918e260823323b8d95005a8cb924b007",
+    "demo_image_repo": "ghcr.io/open-telemetry/demo"
+  },
+  "project_name": "ii-otel-demo",
+  "compose_files": [
+    ["upstream", "compose.yaml"],
+    ["upstream", "compose.full.yaml"],
+    ["upstream", "compose.observability.yaml"]
+  ],
+  "env_files": [
+    ["upstream", ".env"],
+    ["project", "env/otel-demo.overrides.env"]
+  ],
+  "pinned_override": "env/compose.pinned.yaml",
+  "up_args": ["up", "--detach", "--no-build", "--pull", "missing", "--remove-orphans", "--force-recreate", "--renew-anon-volumes"],
+  "required_platforms": ["linux/arm64", "linux/amd64"],
+  "notes": [
+    "Human-edited input. `python -m env resolve` turns it into env/otel-demo.lock.json + env/compose.pinned.yaml.",
+    "See docs/decisions/001-pin-otel-demo-3.1.0.md for why this tag and compose file set."
+  ]
+}

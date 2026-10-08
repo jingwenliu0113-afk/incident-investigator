@@ -1,0 +1,71 @@
+{
+  "Name": "/product-catalog",
+  "Image": "sha256:7578cbf65fa4f0fc68e077e4f299ecccaa31d9778d407e41ab5973d247fd4b8e",
+  "RestartCount": 1,
+  "Config": {
+    "Image": "ghcr.io/open-telemetry/demo:3.1.0-product-catalog@sha256:7578cbf65fa4f0fc68e077e4f299ecccaa31d9778d407e41ab5973d247fd4b8e",
+    "Labels": {
+      "com.docker.compose.project": "ii-otel-demo",
+      "com.docker.compose.service": "product-catalog"
+    },
+    "Healthcheck": {
+      "Test": [
+        "CMD",
+        "/bin/grpc_health_probe",
+        "-addr=:3550"
+      ],
+      "Interval": 5000000000,
+      "Timeout": 5000000000,
+      "StartPeriod": 10000000000,
+      "Retries": 20
+    }
+  },
+  "ImageManifestDescriptor": {
+    "mediaType": "application/vnd.oci.image.manifest.v1+json",
+    "digest": "sha256:1093aefb2f54204ae49f2656a986d3be0756626d8fee74cf2fad9abcc5bfbdcc",
+    "size": 3127,
+    "platform": {
+      "architecture": "arm64",
+      "os": "linux"
+    }
+  },
+  "State": {
+    "Status": "running",
+    "Health": {
+      "Status": "healthy",
+      "FailingStreak": 10,
+      "Log": [
+        {
+          "Start": "2026-10-08T08:16:23.648587089Z",
+          "End": "2026-10-08T08:16:25.288479715Z",
+          "ExitCode": 2,
+          "Output": "timeout: failed to connect service \":3550\" within 1s\n"
+        },
+        {
+          "Start": "2026-10-08T08:16:30.290122842Z",
+          "End": "2026-10-08T08:16:32.680396469Z",
+          "ExitCode": 3,
+          "Output": "timeout: health rpc did not complete within 1s\n"
+        },
+        {
+          "Start": "2026-10-08T08:16:37.692732804Z",
+          "End": "2026-10-08T08:16:42.895564876Z",
+          "ExitCode": -1,
+          "Output": "Health check exceeded timeout (5s)"
+        },
+        {
+          "Start": "2026-10-08T08:16:47.906482211Z",
+          "End": "2026-10-08T08:16:53.673134214Z",
+          "ExitCode": -1,
+          "Output": "Health check exceeded timeout (5s)"
+        },
+        {
+          "Start": "2026-10-08T08:16:58.681638175Z",
+          "End": "2026-10-08T08:17:04.118731677Z",
+          "ExitCode": -1,
+          "Output": "Health check exceeded timeout (5s)"
+        }
+      ]
+    }
+  }
+}

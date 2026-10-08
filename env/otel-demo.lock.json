@@ -1,0 +1,587 @@
+{
+  "lock_version": 1,
+  "generated_at": "2026-10-08T04:08:12Z",
+  "upstream": {
+    "repo": "https://github.com/open-telemetry/opentelemetry-demo",
+    "tag": "3.1.0",
+    "commit": "dedc0178918e260823323b8d95005a8cb924b007",
+    "demo_image_repo": "ghcr.io/open-telemetry/demo"
+  },
+  "startup": {
+    "project_name": "ii-otel-demo",
+    "compose_files": [
+      {
+        "root": "upstream",
+        "path": "compose.yaml",
+        "sha256": "sha256:2d968d4a19e0d2634159c5c6bb4ee5079ae73ea9abb979e9dcd30b56e2a94633"
+      },
+      {
+        "root": "upstream",
+        "path": "compose.full.yaml",
+        "sha256": "sha256:a9d53f12e95e5e9572c219da815ed3489b5d71e8690f81078e157161645d87f2"
+      },
+      {
+        "root": "upstream",
+        "path": "compose.observability.yaml",
+        "sha256": "sha256:6950efc2c5d344282226627041524dc2568e1dbdf77391cc2a4a7ab6f957b559"
+      },
+      {
+        "root": "project",
+        "path": "env/compose.pinned.yaml",
+        "sha256": null,
+        "generated": true
+      }
+    ],
+    "env_files": [
+      {
+        "root": "upstream",
+        "path": ".env",
+        "sha256": "sha256:97afc7af4b60493d7051d6564191dcc14dd0bc2643a2ced8fa6d704dd668ac96"
+      },
+      {
+        "root": "project",
+        "path": "env/otel-demo.overrides.env",
+        "sha256": "sha256:5283dacdcbc3db1fba74cd41aacb3ba87c18222baf94846ede18f5f112b09eb0"
+      }
+    ],
+    "up_args": [
+      "up",
+      "--detach",
+      "--no-build",
+      "--pull",
+      "missing",
+      "--remove-orphans",
+      "--force-recreate",
+      "--renew-anon-volumes"
+    ]
+  },
+  "required_platforms": [
+    "linux/arm64",
+    "linux/amd64"
+  ],
+  "images": [
+    {
+      "ref": "ghcr.io/open-feature/flagd:v0.16.0",
+      "services": [
+        "flagd"
+      ],
+      "index_digest": "sha256:32234e63c1d0634883aabd31cbd46802934aaaef0153dfd653b5d1017940bb4e",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:128e5f6a0d34dc3224c762167997db767b034c0bd660db15a42fc487b5df0541",
+        "linux/arm64": "sha256:5115fd9352d58fd41c7be775b33336f5e4b2cef8056bf5982f5c704d13ec590e"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-accounting",
+      "services": [
+        "accounting"
+      ],
+      "index_digest": "sha256:bfd9d13ac58a4eb5eb5130aa9ac1920686e2214030f4f2ab8bf178121879fcd9",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:24c7a4d180d510179e5f9cbc8cc962804ff5472ada52b9ce6536878d16442f99",
+        "linux/arm64": "sha256:ac3bc9b43271dabf32590f711d1f7410e218f5a3e770f6fbe3e8724a519b8ea4"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-ad",
+      "services": [
+        "ad"
+      ],
+      "index_digest": "sha256:dfd7a4697116d7f961f2c6e8be1bd187f2af7555d6d4138c016097921d7c7ed0",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:332aaa9e44ab4f46b328ffbdcc7afb8f8a637c49d0d45948328439594ddb0d92",
+        "linux/arm64": "sha256:08a28d1cb4245024639942f5239fc0ac86e0d9bb6091c915c4991ee957c8463f"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-cart",
+      "services": [
+        "cart"
+      ],
+      "index_digest": "sha256:17c881cf29af5032e47d3dbd677afb132cbde66aad6355c7c2af8a6dbfc80581",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:4b1ecc263cd8b0d63ce7cd6e99012d4cac73a2d39721aad812f2608d1730e846",
+        "linux/arm64": "sha256:4bcf680b19dd6e7e6ab482ea9d7cfd4973f67370ed547dd77bdd0049b4da82cc"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-checkout",
+      "services": [
+        "checkout"
+      ],
+      "index_digest": "sha256:d4448ff541290fc57cca71d4bfd35d522959edf62a8bb55158467583f9fad4e2",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:5835cc2c382533bc5532c4958f9fbbc93ae38a4090dd66d7ddafdf00a5b359be",
+        "linux/arm64": "sha256:fc6ee0970c972e11ba4223589ea51319fb884677a6c645f955cc9b1fb4e54239"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-currency",
+      "services": [
+        "currency"
+      ],
+      "index_digest": "sha256:ba65e72d5841f909e0ee09498572092923f59e249ae4bf084ab63a82b33811c1",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:6bfc08ad09cca353e211ef478b150ebd9c9d360385fe86f4c432a816692eb8ce",
+        "linux/arm64": "sha256:766ec198b5af3a1c03080e4f031f752e2c70636159320446f95453f48b6cf780"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-email",
+      "services": [
+        "email"
+      ],
+      "index_digest": "sha256:bd7754c1e0986f892b86ed6ab9067a372640d342ff8eee2074bedb61c649ce71",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:c69d721733f5c99fb259b5739cb71639a1a308903f58f42bfeea25820eb14fab",
+        "linux/arm64": "sha256:dfc239981b5945b37739718d3587c204fa175d5ed40c8eca2a13aef132573205"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-flagd-ui",
+      "services": [
+        "flagd-ui"
+      ],
+      "index_digest": "sha256:97a3d37e709f80e2018cdc0d45ea12d5b59092693e0e003d65089da966107062",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:60695b26795bc450cbeb9ed653814736657983e31d3697c1c6cfc4a11c0bd67f",
+        "linux/arm64": "sha256:0dd3e50d64a6cdcbae601640e0754ed6ffcf76cfb27c589902293ee86adf4217"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-fraud-detection",
+      "services": [
+        "fraud-detection"
+      ],
+      "index_digest": "sha256:a07ee694304b23e3e4e1ca9bdaa7a02e3eb30d1805d87dfe95e7ea31cd3aa703",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:61bf737e44b903822c5407019966136603680040aaa8c18e117a4686e7c95d1f",
+        "linux/arm64": "sha256:286500afdd2b9208c00d07e984ef75d4e503c45314d0ec9343ec3dee272d00f3"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-frontend",
+      "services": [
+        "frontend"
+      ],
+      "index_digest": "sha256:28358db4620686eda30dfabfc770b9ff0db73819ebac0895064271b446110289",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:71b72225519231dc29a31869bf01048ce03520706faca2e16e5e04e714e51bfd",
+        "linux/arm64": "sha256:85ff5566cedeca624f8a33b48c89bfe4c8e440339198bce7ca95af51b3a20dcd"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-frontend-proxy",
+      "services": [
+        "frontend-proxy"
+      ],
+      "index_digest": "sha256:fd4da88bfeaadd9437a4ee00f708e129a9eedb9c48874cea8e94b034983280a1",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:42adc05d23f4b71caf54302b371c6405786847827119f484061437b42993756e",
+        "linux/arm64": "sha256:6017eb21297242fe032c6000cd8d1b2d4ca81752cfc89a55129ebb96c3be6bfa"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-image-provider",
+      "services": [
+        "image-provider"
+      ],
+      "index_digest": "sha256:46d1a7e95109c0064122ca0bfb49cd05191fb90a6264b6be508e0d98f2c963f1",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:2355642abcf7e3df3d6606ffa6dd8b54fe3aa89747dcf0ac86206bb49d047e9e",
+        "linux/arm64": "sha256:97be6d30d823da911bc5108a03224ba6d9ee153341e32904ad4fe86c98176108"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-kafka",
+      "services": [
+        "kafka"
+      ],
+      "index_digest": "sha256:4402ba7fd54470782a445f07c67e1d3f44d88ac8c5c0abf5d8298190a3f7a6ee",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:626584c8e41a5f93cb74c82554d137809b0304a74272c0a9724fdfec7d76c9c2",
+        "linux/arm64": "sha256:4cff302ab3dc26900e0b0d2cbda7ce70234bc29809e87fd604992eab0fffeb2e"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-load-generator",
+      "services": [
+        "load-generator"
+      ],
+      "index_digest": "sha256:b130d6cee6cb36a2799787a553168811e3ccc5408fe5dad0bc4b4d8302c7a63c",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:1bbf166d93104465fc8286e7bde9b9e6acbcb2e26f0dd3751758432ed82f3df5",
+        "linux/arm64": "sha256:5b473ee3e19c50c767913d3bac8f6c97d7200c2ff491cae961cc9868b302199f"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-opamp-server",
+      "services": [
+        "opamp-server"
+      ],
+      "index_digest": "sha256:3b6c6220bf9c7d8e6fdb8d1966316e80c5ac2004db6ae29c46681009d50e2093",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:84e7b95d756595e4c63f2d79502bf2ef9aa66a248ca5d958aa12ac3e06322c14",
+        "linux/arm64": "sha256:38e4107e3c6a812e64ac521f64bf35cf35a871f0be52b29917f13a6ea9874942"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-opensearch",
+      "services": [
+        "opensearch"
+      ],
+      "index_digest": "sha256:0a8401e9db8f7638b189a822a1a56a54dd4598cc42891ef59e3d003b2768b4ad",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:1e5218aabcc0f3bf1d1dc312ba4fd8d16f70187ba1e6218d2d36f6466f07a625",
+        "linux/arm64": "sha256:4c1b47a9c82328e20d8dd95b8e2ec4a376b6445d6af9f3f0a4741b1d6df95114"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-payment",
+      "services": [
+        "payment"
+      ],
+      "index_digest": "sha256:10d6bd20d8a00abe7705d553ab23a4f35e29b2816ab021049e63e89d07cc9192",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:3f9e0b47920817c98f950a02f7deedd4b32917e9bc5dd82bd49b2b6b2dba7751",
+        "linux/arm64": "sha256:db3864cdb64742b7ec7ad563c34b8db12acb49dc9fc635db907146a1e4dafe60"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-product-catalog",
+      "services": [
+        "product-catalog"
+      ],
+      "index_digest": "sha256:7578cbf65fa4f0fc68e077e4f299ecccaa31d9778d407e41ab5973d247fd4b8e",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:ab877a13a0496a616b0dfe5bd5979c0afcb297d85811be7264e1c0b950f608d2",
+        "linux/arm64": "sha256:1093aefb2f54204ae49f2656a986d3be0756626d8fee74cf2fad9abcc5bfbdcc"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-quote",
+      "services": [
+        "quote"
+      ],
+      "index_digest": "sha256:e0b1ab3784fdbf0112521d3c5c733643f1cefa4eef5f592f845977465400181e",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:b6ab106c25defd5072bcad7d22cdb7895bc7cf5a8fd9dd9f2c5c94d65b6bf5b5",
+        "linux/arm64": "sha256:21122d46bb6473c9fd318a73c14135a6838e845da54760e2e1982322ea15052f"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-recommendation",
+      "services": [
+        "recommendation"
+      ],
+      "index_digest": "sha256:9dd7d7c320d2794a87c78cf534892519dace661a9022eb2cad5de1b75d994c18",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:011271d30c9c50af5cd74f48ac76a9b621b85c546ce79973e7120e6dae7e5f1c",
+        "linux/arm64": "sha256:12fc46855e2a8605a4cb8054726c2536855084f819641e0342bc86b7d8357cc8"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-shipping",
+      "services": [
+        "shipping"
+      ],
+      "index_digest": "sha256:7130dba0e77e90575b3f04fa8be39182cffe05f39df586a6620e9d221ee31e77",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:9ac833f24c4976202be61308d7d53038882c13b793029a8fd59d39bb9fadd674",
+        "linux/arm64": "sha256:db5f3458f07a1d350a63272fcee49d6269c8848292cdc398e6afbf3ee974e932"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/demo:3.1.0-telemetry-docs",
+      "services": [
+        "telemetry-docs"
+      ],
+      "index_digest": "sha256:3f257a843222df2462d903fd57b12af5f31dc99a0f174b45136a4f3ba5c71203",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:60959c316aa7264109ebe6a68c7da51b294a81819e001b66edbd2b631f8ef822",
+        "linux/arm64": "sha256:9eb28561536cd3924b9eb8665bc8d78134e58045017a37279bc9b0b188f0aaa5"
+      }
+    },
+    {
+      "ref": "ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector-contrib:0.159.0",
+      "services": [
+        "otel-collector"
+      ],
+      "index_digest": "sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": {
+        "linux/386": "sha256:110f4ad8974faa402ba1700950ddfc0b711ea25ae281a8358b98eb58de082765",
+        "linux/amd64": "sha256:4f4276c07cee9055f2ab630a86330243f85e208c388ee697bea2a44dab896c3f",
+        "linux/arm/v7": "sha256:1633dac2ff59711904d374fc43df1679bed81da8c5cdfe4e7556440a7e1b2a30",
+        "linux/arm64": "sha256:64c13b48dd3c4bab8b54b0acf8af0d92b5d80a3b4558b8aeb1d1f11f7fdc9970",
+        "linux/ppc64le": "sha256:92c5289208435723193d866016a6032341810b3ecf71631904419bd120879e8a",
+        "linux/riscv64": "sha256:b07799b6dfa0124355a95d003184c07afbb66e3f4971a4ac82dd2579360937fd",
+        "linux/s390x": "sha256:50f2750d2ed0f858c9ad1158fc946c8ffc0d00f2ac4ad3b8625d5ed054071136"
+      }
+    },
+    {
+      "ref": "ghcr.io/valkey-io/valkey:9.0.4-alpine3.23",
+      "services": [
+        "valkey-cart"
+      ],
+      "index_digest": "sha256:107b203169a20ef7c87548c157f4e4a833dbbbd20fefd3a26740b7f98ac80216",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": {
+        "linux/amd64": "sha256:b559f9babc64e52c9eefc8734e392707cebf4264be7acf5f7b69ba484e053367",
+        "linux/arm/v7": "sha256:51c21eb70366b9cd2b298be918be73d3d01e2e53e845b01b193b1f8fb07ac1f0",
+        "linux/arm64": "sha256:bb8b48198974cb792b8bfc09d7e3c5f0d6e07508cb33e06817e2f24805778be5",
+        "linux/ppc64le": "sha256:def49f6a52d01b05745800315609195ab669c0932dd8e2e04489489cec0dada2"
+      }
+    },
+    {
+      "ref": "grafana/grafana:13.1.0",
+      "services": [
+        "grafana"
+      ],
+      "index_digest": "sha256:121a7a9ece6dc10b969f1f96eed64b4f07dfac0d0b8abc070f7cb83bbde86f63",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": {
+        "linux/amd64": "sha256:6ea068891652aa6a65ca9065c26b89de939653803c836426970305c11fd00534",
+        "linux/arm/v7": "sha256:49535a4cb13c695133a49c3e1edb9a56857f902f3e3263487b266c18d739f5fb",
+        "linux/arm64": "sha256:55f41cacf3e8334ea89d76ada9cc546c09473650ab48a7861743bcbd83f5ef38"
+      }
+    },
+    {
+      "ref": "postgres:18.4",
+      "services": [
+        "astronomy-db"
+      ],
+      "index_digest": "sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/386": "sha256:42efb85711da35711de35b9a4e4c918f94751656e64c199a638f90d5b8085a8d",
+        "linux/amd64": "sha256:4cc13dede823cab4e05290c7fb3350fb4e599ecabd9b07e6706b5d5e8f5bc929",
+        "linux/arm/v5": "sha256:1464d11a6f842657624811ea9edb070d105be0bf28a2aa6903021b396def5e5a",
+        "linux/arm/v7": "sha256:83fec4f39aa9f363fe24c71ab1ba9e0774df4fcb9295c8ff073ba2d6f6f7340e",
+        "linux/arm64": "sha256:0826e5f2996099babb925e09fb72bf2c6eb5d187cfcae20aa9291af1612307e4",
+        "linux/ppc64le": "sha256:46421b6efacd33e4ba67e32bf4d2073aa95657bb911f1c64130354584d762a90",
+        "linux/riscv64": "sha256:33d4ee98282fbc3aeab17197d18339189490dfaa1870cbd332d104ade7c77a25",
+        "linux/s390x": "sha256:d2d09b9d0511c6db7f6fb3f0399668781d86dcb43049db0081ef7ba4f3374153"
+      }
+    },
+    {
+      "ref": "quay.io/jaegertracing/jaeger:2.19.0",
+      "services": [
+        "jaeger"
+      ],
+      "index_digest": "sha256:ede4864215be4cd85bd8c3129a2fea6c5713c5653c7282c429dba123014bc68b",
+      "media_type": "application/vnd.oci.image.index.v1+json",
+      "platforms": {
+        "linux/amd64": "sha256:ad8ea2c1d91fa1a788641717b96a50aed9ba12a10cf937685fd07095c81246fa",
+        "linux/arm64": "sha256:476f9d88b6660cf93b47aac9b50de842855cb5cb50a35eef0108e7bde58a6985",
+        "linux/ppc64le": "sha256:9ef8e7c0befb8866d398514cec7b28070a3359c4aa1e8aeaeb4538a88cc9250d",
+        "linux/s390x": "sha256:cbf85772ef950dae09f46ce8dadda134e64c68a607991cb4955f723900b5e390"
+      }
+    },
+    {
+      "ref": "quay.io/prometheus/prometheus:v3.13.1",
+      "services": [
+        "prometheus"
+      ],
+      "index_digest": "sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893",
+      "media_type": "application/vnd.docker.distribution.manifest.list.v2+json",
+      "platforms": {
+        "linux/amd64": "sha256:bd2dcadfb0d1096e2a4c21817ac7af918e2f19ff628e4bf25fd67a924c13dd80",
+        "linux/arm/v7": "sha256:32d33c5f883cf49000e414e478e91946925446e8f21ffec5603e35e969240530",
+        "linux/arm64": "sha256:2d61f37ba9f2185195dfad94ee500d7ac1986560bac79a77d0a6de182a5bf814",
+        "linux/ppc64le": "sha256:804c8997c2086783318b0fda9253ac10c02c09657e185e43975f2a94e4621f3e",
+        "linux/riscv64": "sha256:0cb0636137c6622a11d1e2adcbb447e5b5415394d89059394a9adc0bbf033f4b",
+        "linux/s390x": "sha256:dd350357e3e1ee132c1c8bee51ecf5e741e9c8bc2a7c526e3c8e9359b71a24c2"
+      }
+    }
+  ],
+  "bind_mounts": [
+    {
+      "service": "astronomy-db",
+      "target": "/docker-entrypoint-initdb.d/init.sql",
+      "source": {
+        "root": "upstream",
+        "path": "src/postgresql/init.sql"
+      },
+      "kind": "file",
+      "sha256": "sha256:10ac57f3966abec260682152a7ce7bb47c179ab49d969a05cd331c96e9ceb536",
+      "read_only": false
+    },
+    {
+      "service": "flagd",
+      "target": "/etc/flagd",
+      "source": {
+        "root": "upstream",
+        "path": "src/flagd"
+      },
+      "kind": "dir",
+      "sha256": "sha256:936a942963fb95240bf8cb2a9a84fdadc2cbeeff9fa04b8c4507c89457538d0a",
+      "read_only": false
+    },
+    {
+      "service": "flagd-ui",
+      "target": "/app/data",
+      "source": {
+        "root": "upstream",
+        "path": "src/flagd"
+      },
+      "kind": "dir",
+      "sha256": "sha256:936a942963fb95240bf8cb2a9a84fdadc2cbeeff9fa04b8c4507c89457538d0a",
+      "read_only": false
+    },
+    {
+      "service": "grafana",
+      "target": "/etc/grafana/grafana.ini",
+      "source": {
+        "root": "upstream",
+        "path": "src/grafana/grafana.ini"
+      },
+      "kind": "file",
+      "sha256": "sha256:1c9b921fd1b0797bb7e816e4fdfb4f1b7e6fa92e79782471ba6a92fa1b21b5cb",
+      "read_only": false
+    },
+    {
+      "service": "grafana",
+      "target": "/etc/grafana/provisioning",
+      "source": {
+        "root": "upstream",
+        "path": "src/grafana/provisioning"
+      },
+      "kind": "dir",
+      "sha256": "sha256:b280c13ddc3dcad465a74b300927915004ac9e4a342ae6dcd69e026e49eb947a",
+      "read_only": false
+    },
+    {
+      "service": "jaeger",
+      "target": "/etc/jaeger/config.yml",
+      "source": {
+        "root": "upstream",
+        "path": "src/jaeger/config.yml"
+      },
+      "kind": "file",
+      "sha256": "sha256:376236e6ee50aeb4593d1878b857c9368e36a5223c59597f0e59b56d3091013f",
+      "read_only": false
+    },
+    {
+      "service": "jaeger",
+      "target": "/etc/jaeger/ui-config.json",
+      "source": {
+        "root": "upstream",
+        "path": "src/jaeger/ui-config.json"
+      },
+      "kind": "file",
+      "sha256": "sha256:8347830f59e705e09d862d5f3ab148dfd6b4ea36869c84b060fd04df533aa7b6",
+      "read_only": false
+    },
+    {
+      "service": "otel-collector",
+      "target": "/etc/otelcol-config-extras.yml",
+      "source": {
+        "root": "upstream",
+        "path": "src/otel-collector/otelcol-config-extras.yml"
+      },
+      "kind": "file",
+      "sha256": "sha256:4b343286290788a7dd246e9c19229bfeb27028d55130070531bf47634757823a",
+      "read_only": false
+    },
+    {
+      "service": "otel-collector",
+      "target": "/etc/otelcol-config-full.yml",
+      "source": {
+        "root": "upstream",
+        "path": "src/otel-collector/otelcol-config-full.yml"
+      },
+      "kind": "file",
+      "sha256": "sha256:78bf039fd12910d171cd5e6cb760107d975b1fbbc1e4a74c787b1e69e1f4ab96",
+      "read_only": false
+    },
+    {
+      "service": "otel-collector",
+      "target": "/etc/otelcol-config-observability.yml",
+      "source": {
+        "root": "upstream",
+        "path": "src/otel-collector/otelcol-config-observability.yml"
+      },
+      "kind": "file",
+      "sha256": "sha256:120c91500c748a87a1fe45971a50c212aa00d1a485f8b8e3cb90d1b50986b108",
+      "read_only": false
+    },
+    {
+      "service": "otel-collector",
+      "target": "/etc/otelcol-config.yml",
+      "source": {
+        "root": "upstream",
+        "path": "src/otel-collector/otelcol-config.yml"
+      },
+      "kind": "file",
+      "sha256": "sha256:5c6a048e000b1871a8ac28129973136ebc1629f30049452fdc98251d9fcccf78",
+      "read_only": false
+    },
+    {
+      "service": "otel-collector",
+      "target": "/hostfs",
+      "source": {
+        "root": "host",
+        "path": "/"
+      },
+      "kind": "host",
+      "sha256": null,
+      "read_only": true
+    },
+    {
+      "service": "otel-collector",
+      "target": "/var/run/docker.sock",
+      "source": {
+        "root": "host",
+        "path": "/var/run/docker.sock"
+      },
+      "kind": "host",
+      "sha256": null,
+      "read_only": true
+    },
+    {
+      "service": "product-catalog",
+      "target": "/otel-config.yml",
+      "source": {
+        "root": "upstream",
+        "path": "otel-config.yml"
+      },
+      "kind": "file",
+      "sha256": "sha256:761c5e451e2a66e2a2fda83f1f8d450fa6ab4a63db3c4fc4999a8e308efa1ea7",
+      "read_only": false
+    },
+    {
+      "service": "prometheus",
+      "target": "/etc/prometheus/prometheus-config.yaml",
+      "source": {
+        "root": "upstream",
+        "path": "src/prometheus/prometheus-config.yaml"
+      },
+      "kind": "file",
+      "sha256": "sha256:78682b637bb69ec59f8d56977edd50d457ddf11c273518ea6cb66345a1728eaa",
+      "read_only": false
+    }
+  ]
+}

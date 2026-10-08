@@ -1,0 +1,28 @@
+# Full telemetry, snapshots, ground truth and smoke-test dumps never go into git (SPEC Core §2).
+# Small shareable samples belong in data/samples/. tests/test_repo_hygiene.py guards this file.
+data/external/
+
+# Upstream OTel Demo checkout used to run the pinned environment (re-fetched from the lock)
+env/upstream/
+
+# Docker artifacts: image / snapshot archives, local compose overrides
+*.tar
+*.tar.gz
+*.tgz
+*.tar.zst
+compose.override.yaml
+compose.override.yml
+docker-compose.override.yaml
+docker-compose.override.yml
+
+# Logs
+*.log
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# macOS
+.DS_Store

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://incident-investigator.local/schemas/fault_injection.schema.json",
+  "title": "Fault injection record (GROUND TRUTH — never agent-readable)",
+  "description": "Stored at data/external/ground_truth/run_groups/<run_group_id>/injection.json. Factual log of what fault was injected and when, for one fault execution (run group). Incidents are telemetry windows cut from a run group; all of them stay in the same split. Curated labels (fault_family, origin_service, affected_services, user_symptom) are a separate document (Core §3).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "injection_version",
+    "run_group_id",
+    "incident_ids",
+    "seed",
+    "fault",
+    "schedule",
+    "controller",
+    "flag_file"
+  ],
+  "properties": {
+    "injection_version": {
+      "const": 1
+    },
+    "run_group_id": {
+      "type": "string",
+      "pattern": "^RG-[0-9]{3,}(?!\\n)$"
+    },
+    "incident_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^INC-[0-9]{3,}(?!\\n)$"
+      }
+    },
+    "seed": {
+      "type": "integer"
+    },
+    "fault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mechanism",
+        "flag",
+        "variant"
+      ],
+      "properties": {
+        "mechanism": {
+          "const": "flagd"
+        },
+        "flag": {
+          "type": "string",
+          "description": "flag key in the pinned upstream src/flagd/demo.flagd.json"
+        },
+        "variant": {
+          "type": "string",
+          "description": "variant served while the fault is on (via defaultVariant or, for flags with a targeting rule such as productCatalogFailure, via the rule; see flag_file)"
+        }
+      }
+    },
+    "schedule": {
+      "description": "Actual UTC times the controller applied each phase: normal_start < fault_on < fault_off <= end.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "normal_start",
+        "fault_on",
+        "fault_off",
+        "end"
+      ],
+      "properties": {
+        "normal_start": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "fault_on": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "fault_off": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "end": {
+          "$ref": "#/$defs/utc_timestamp"
+        }
+      }
+    },
+    "controller": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "flagd-file",
+            "flagd-ui-api"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "flag_file": {
+      "description": "Canonical-JSON sha256 (collect.records.canonical_json_sha256: sorted keys, compact) of the flagd file served before the fault (pinned upstream baseline) and while it is on. Records HOW the variant was applied (defaultVariant vs targeting rule, e.g. productCatalogFailure).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_sha256",
+        "injected_sha256"
+      ],
+      "properties": {
+        "baseline_sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "injected_sha256": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z(?!\\n)$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+    }
+  }
+}

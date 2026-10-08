@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://incident-investigator.local/schemas/run_manifest.schema.json",
+  "title": "Incident manifest (provenance only)",
+  "description": "Stored at data/external/incidents/<incident_id>/manifest.json, next to the snapshot. Records WHERE and HOW the telemetry was produced. It must never contain ground truth (fault flag, fault timing, origin service, run group): those live under data/external/ground_truth/. additionalProperties=false enforces that at the top level.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifest_version",
+    "incident_id",
+    "created_at",
+    "project",
+    "env_lock",
+    "machine",
+    "startup",
+    "traffic",
+    "seed",
+    "window",
+    "files"
+  ],
+  "properties": {
+    "manifest_version": {
+      "const": 1
+    },
+    "incident_id": {
+      "$ref": "#/$defs/incident_id"
+    },
+    "created_at": {
+      "$ref": "#/$defs/utc_timestamp"
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "commit",
+        "dirty"
+      ],
+      "properties": {
+        "commit": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}(?!\\n)$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dirty": {
+          "type": "boolean"
+        }
+      }
+    },
+    "env_lock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "upstream_tag",
+        "upstream_commit"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "sha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "upstream_tag": {
+          "type": "string"
+        },
+        "upstream_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}(?!\\n)$"
+        }
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "os",
+        "arch",
+        "cpu_model",
+        "cpu_count",
+        "memory_bytes",
+        "docker"
+      ],
+      "properties": {
+        "role": {
+          "enum": [
+            "mac",
+            "gpu-server"
+          ]
+        },
+        "os": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "cpu_model": {
+          "type": "string"
+        },
+        "cpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "memory_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "docker": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "server_version",
+                "platform",
+                "operating_system",
+                "cpus",
+                "memory_bytes"
+              ],
+              "properties": {
+                "server_version": {
+                  "type": "string"
+                },
+                "platform": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9]+/[a-z0-9_]+(/[a-z0-9]+)?(?!\\n)$"
+                },
+                "operating_system": {
+                  "type": "string"
+                },
+                "cpus": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "memory_bytes": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "startup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compose_command",
+        "started_at"
+      ],
+      "properties": {
+        "compose_command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "started_at": {
+          "$ref": "#/$defs/utc_timestamp"
+        }
+      }
+    },
+    "traffic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generator_service",
+        "settings",
+        "seed",
+        "seed_applied"
+      ],
+      "properties": {
+        "generator_service": {
+          "type": "string"
+        },
+        "settings": {
+          "description": "Environment actually set on the traffic generator container (string values).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "seed": {
+          "oneOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "seed_applied": {
+          "description": "true only if the generator really consumed the seed; upstream 3.1.0 locust has no seed hook.",
+          "type": "boolean"
+        }
+      }
+    },
+    "seed": {
+      "description": "Master seed of the collection run (orchestrator randomness).",
+      "type": "integer"
+    },
+    "window": {
+      "description": "Telemetry collection window of this incident (UTC). Fault timing is ground truth and is NOT here.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/utc_timestamp"
+        },
+        "end": {
+          "$ref": "#/$defs/utc_timestamp"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "bytes"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+(?!\\n)$"
+          },
+          "sha256": {
+            "$ref": "#/$defs/digest"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "incident_id": {
+      "type": "string",
+      "pattern": "^INC-[0-9]{3,}(?!\\n)$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z(?!\\n)$"
+    }
+  }
+}

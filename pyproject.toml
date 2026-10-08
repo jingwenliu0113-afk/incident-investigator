@@ -1,0 +1,25 @@
+[project]
+name = "incident-investigator"
+version = "0.0.0"
+description = "Can an LLM agent reliably do production root-cause analysis on frozen OTel Demo incident snapshots?"
+requires-python = ">=3.12"
+dependencies = [
+    "jsonschema>=4.23",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "network: talks to public container registries / GitHub (deselect with -m 'not network')",
+    "docker_cli: needs the docker CLI (daemon not required)",
+]
