@@ -142,4 +142,12 @@
    （summary 的 sum 與 quantile、zero_threshold）被 OTLP JSON 省略時是 0，不是 null。schema 補上這些欄位的型別，check_snapshot 會擋下裸字串。
    soak #3 的 raw 只有 explicit-bucket histogram 且都是有限值，既有輸出不受影響。
 
+5. **G0 與 provenance**：`normalize_incident` 拒絕和釘選 sha 不同的 policy（不只看 `frozen`），拒絕在 dirty / 沒有 commit 的 checkout 上跑，
+   並把 normalizer 的 commit 記進 report；formal manifest 檢查移到 write-once snapshot 發布**之前**（原本失敗會留下孤兒 snapshot、無法重試）；
+   `collect run` 的 preflight 在 35–50 分鐘的 run 開始前就拒絕 dirty tree。
+6. **normalize report 補齊並固定格式**（`schemas/normalize_report.schema.json`，寫出前驗證）：每個移除都依 rule × signal × service × minute 計數，
+   包括原本只按 signal 計的 X5_attribute、X5_event、X7_event、X8（`X8_token`、`X8_key`）與原本完全沒計的 X9（`X9_delete` / `X9_hash` / `X9_mask`）；
+   `attribute_keys` 列出保留 record 的原始 attribute key（依 `signal/service`）；policy 帶 `attribute_key_inventory` 時，`new_attribute_keys` 列出
+   inventory 沒見過的 key，給 Core §6 的稽核用（deny-list 的補強）。inventory 在凍結時由沒有 fault 的 soak 的 `attribute_keys` 產生，放進 policy 檔，受同一個 sha 保護。
+
 policy 檔的 sha 隨 FA-11 重新釘選（狀態仍是 `calibrating`）。

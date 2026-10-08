@@ -11,7 +11,7 @@ import pytest
 
 from collect.layout import DataLayout
 from collect.normalize import NormalizeError, NormalizeInputs, check_snapshot, normalize
-from collect.policy import load_policy
+from collect.policy import Policy, load_policy
 from collect.rawfile import scan_raw_file
 from normalize_fixtures import (HOST_END, HOST_START, OFFSETS, S, T0, gauge_line, kv, log, logs_line, raw_lines, res,
                                 span, traces_line, write_raw)
@@ -202,7 +202,7 @@ import sys; sys.path[:0] = [{str(Path(__file__).resolve().parent.parent)!r}, {st
 from pathlib import Path
 from collect.layout import DataLayout
 from collect.normalize import NormalizeInputs, normalize
-from collect.policy import load_policy
+from collect.policy import Policy, load_policy
 lay = DataLayout(Path({str(tmp_path / 'seeded')!r}))
 inputs = NormalizeInputs(raw_dir=Path({str(inputs.raw_dir)!r}), raw_sha256={inputs.raw_sha256!r},
                          raw_duplicates={inputs.raw_duplicates!r}, window_host={inputs.window_host!r},
@@ -305,3 +305,41 @@ def test_point_values_encode_non_finite_doubles_and_proto3_zero_defaults():
     assert not list(v.iter_errors({**base, "kind": "summary", **sm}))
     assert list(v.iter_errors({**base, "kind": "histogram", **h, "sum": "NaN"}))  # a bare string is not a double
     assert list(v.iter_errors({**base, "kind": "summary", **sm, "sum": None}))  # a summary always has a sum
+
+
+def test_every_removal_is_counted_by_rule_signal_service_and_minute(setup):
+    # decision 011 §3: rule x signal x service x minute, including attribute-level removals and privacy
+    _, report = run(setup)
+    detail = report["removed_detail"]
+    assert report["removed"]["X9_hash"]["traces"] == 1  # user.email -> user.hash on the checkout span
+    assert detail["X9_hash"]["traces"]["by_service"] == {"checkout": 1}
+    assert detail["X5_attribute"]["traces"]["by_service"]["checkout"] >= 1
+    assert detail["X5_event"]["traces"]["by_service"] == {"checkout": 1}
+    assert sum(detail["X8_token"]["logs"]["by_minute"].values()) == report["tokens_deleted"]["logs"] == 1
+    assert "untimed" not in detail["X5_attribute"]["traces"]["by_minute"]
+
+
+def test_report_lists_attribute_keys_and_the_ones_the_soak_inventory_never_saw(setup):
+    # decision 011 §3: a deny-list keeps unknown keys; new keys are listed on the ground-truth side for the audit
+    _, report = run(setup)
+    assert "rpc.service" in report["attribute_keys"]["traces/checkout"]
+    assert report["new_attribute_keys"] is None  # the policy has no inventory yet (calibrating)
+    layout, inputs = setup
+    p = load_policy()
+    inventory = {k: [x for x in v if x != "rpc.service"] for k, v in report["attribute_keys"].items()}
+    with_inventory = Policy({**p.raw, "attribute_key_inventory": inventory}, p.sha256)
+    out = normalize(inputs, with_inventory, incident_dir=layout.incident_dir("INC-009"),
+                    report_path=layout.normalize_report_path("INC-009"), staging_dir=layout.root / "staging" / "n9")
+    assert out["new_attribute_keys"] == {"traces/checkout": ["rpc.service"]}
+
+
+def test_the_report_has_a_pinned_shape(setup):
+    from jsonschema import Draft202012Validator
+
+    layout, _ = setup
+    _, report = run(setup)
+    schema = json.loads((Path(__file__).resolve().parent.parent / "schemas/normalize_report.schema.json").read_text())
+    assert list(Draft202012Validator(schema).iter_errors(report)) == []
+    on_disk = json.loads(layout.normalize_report_path("INC-001").read_text())
+    assert list(Draft202012Validator(schema).iter_errors(on_disk)) == []
+    assert list(Draft202012Validator(schema).iter_errors({**report, "removed": {"X5": {"traces": -1}}}))

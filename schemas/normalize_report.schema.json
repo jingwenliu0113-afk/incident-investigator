@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "normalize_report.schema.json",
+  "title": "normalize report (decision 011 \u00a73; ground-truth side)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "report_version",
+    "policy",
+    "code",
+    "raw_sha256",
+    "window",
+    "signals",
+    "removed",
+    "removed_detail",
+    "tokens_deleted",
+    "value_fixes",
+    "unknown_services",
+    "attribute_keys",
+    "new_attribute_keys",
+    "outputs",
+    "content_sha256"
+  ],
+  "properties": {
+    "report_version": {
+      "const": 1
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "sha256"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+        }
+      }
+    },
+    "code": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "commit",
+            "dirty"
+          ],
+          "properties": {
+            "commit": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dirty": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "raw_sha256": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traces",
+        "metrics",
+        "logs"
+      ],
+      "properties": {
+        "traces": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+        },
+        "metrics": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+        },
+        "logs": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+        }
+      }
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host",
+        "clock_offsets",
+        "data_ns"
+      ],
+      "properties": {
+        "host": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "clock_offsets": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "data_ns": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "traces",
+        "metrics",
+        "logs"
+      ],
+      "properties": {
+        "traces": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "logs": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "removed": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^X[0-9]+(_[a-z_]+)?(?!\\n)$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "enum": [
+            "traces",
+            "metrics",
+            "logs",
+            "resources"
+          ]
+        },
+        "additionalProperties": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "removed_detail": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^X[0-9]+(_[a-z_]+)?(?!\\n)$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "propertyNames": {
+          "enum": [
+            "traces",
+            "metrics",
+            "logs",
+            "resources"
+          ]
+        },
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "by_service",
+            "by_minute"
+          ],
+          "properties": {
+            "by_service": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "by_minute": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "tokens_deleted": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "traces",
+          "metrics",
+          "logs",
+          "resources"
+        ]
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "value_fixes": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "unknown_services": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "attribute_keys": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(traces|metrics|logs|resources)/"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "new_attribute_keys": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^(traces|metrics|logs|resources)/"
+          },
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "bytes",
+          "records",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "records": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+          }
+        }
+      }
+    },
+    "content_sha256": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+    }
+  }
+}

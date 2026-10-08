@@ -81,6 +81,8 @@ class _Run:
         self.resources: dict[str, str] = {}
         self._rid_by_raw: dict[str, str] = {}
         self.signal = ""
+        self.ctx: tuple[str | None, int | None] = (None, None)  # service and time of the record being built
+        self.keys_seen: dict[str, set[str]] = defaultdict(set)  # "signal/service" -> raw attribute keys of kept records
 
     # ------------------------------------------------------------ counting
     def drop(self, rule: str, service: str | None, ns: int | None, n: int = 1) -> None:
@@ -88,6 +90,10 @@ class _Run:
         d = self.detail[rule][self.signal]
         d["by_service"][service or "?"] += n
         d["by_minute"][_minute(ns)] += n
+
+    def count(self, rule: str, n: int = 1) -> None:
+        """A removal inside a kept record (attribute, event, token), attributed to that record's service and minute."""
+        self.drop(rule, *self.ctx, n=n)
 
     def rid(self, kind: str, key: tuple) -> str:
         h = hashlib.blake2b(repr(key).encode(), digest_size=8, key=self.key, person=f"ctel1-{kind}".encode())
@@ -98,7 +104,9 @@ class _Run:
         """X8 on every visible string: values, map keys and text inside bytes values."""
         if isinstance(value, str):
             out, n = self.policy.scrub(value)
-            self.tokens[self.signal] += n
+            if n:
+                self.tokens[self.signal] += n
+                self.count("X8_token", n)
             return out
         if isinstance(value, list):
             return [self.scrub(v) for v in value]
@@ -113,7 +121,7 @@ class _Run:
         for k, v in value.items():
             k2 = self.scrub(k)
             if not k2 or k2 in out:  # the key was only a token, or scrubbing made two keys equal
-                self.removed["X8_key"][self.signal] += 1
+                self.count("X8_key")
                 continue
             out[k2] = self.scrub(v)
         return out
@@ -127,6 +135,7 @@ class _Run:
         if not n:
             return value
         self.tokens[self.signal] += n
+        self.count("X8_token", n)
         return {"$bytes": base64.b64encode(out.encode()).decode()}
 
     def attrs(self, kvs) -> dict:
@@ -134,19 +143,23 @@ class _Run:
         out = {}
         for k, v in attributes(kvs, self.fixes).items():
             if self.policy.is_flag_key(k):
-                self.removed["X5_attribute"][self.signal] += 1
+                self.count("X5_attribute")
                 continue
+            self.keys_seen[f"{self.signal}/{self.ctx[0]}"].add(k)
             if k in priv["delete_keys"] or any(re.search(p, k) for p in priv["delete_key_patterns"]):
+                self.count("X9_delete")
                 continue
             if k in priv["hash_keys"]:
+                self.count("X9_hash")
                 out[priv["hash_keys"][k]] = hashlib.sha256(str(v).encode()).hexdigest()
                 continue
             if k in priv["mask_last4_keys"] and isinstance(v, str):
+                self.count("X9_mask")
                 out[k] = "****-****-****-" + "".join(c for c in v if c.isdigit())[-4:]
                 continue
             k2 = self.scrub(k)
             if not k2 or k2 in out:
-                self.removed["X8_key"][self.signal] += 1
+                self.count("X8_key")
                 continue
             out[k2] = self.scrub(v)
         return out
@@ -289,6 +302,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
         if (tid, sid) in closure:
             continue
         item = json.loads(raw)
+        run.ctx = (svc, start)
         rid = run.resource_id(item["resource"])
         record = dumps(_span_record(run, item["span"], tid, sid, parent, start, rid, item["scope"], svc))
         db.execute("UPDATE spans SET rid = ?, record = ? WHERE trace_id = ? AND span_id = ?", (rid, record, tid, sid))
@@ -326,6 +340,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                     if rule:
                         run.drop(rule, svc, t)
                         continue
+                    run.ctx = (svc, t)
                     rid = run.resource_id(resource)
                     record = {"id": "l-" + run.rid("log", k), "time_unix_nano": nanos(r.get("timeUnixNano")),
                               "observed_time_unix_nano": nanos(r.get("observedTimeUnixNano")),
@@ -376,6 +391,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                             if rule:
                                 run.drop(rule, svc, t)
                                 continue
+                            run.ctx = (svc, t)
                             sk = series_key(resource, scope, name, p)
                             series_id = "m-" + run.rid("series", sk)
                             if not db.execute("SELECT 1 FROM series WHERE id = ?", (series_id,)).fetchone():
@@ -463,12 +479,31 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
         "tokens_deleted": dict(run.tokens),
         "value_fixes": dict(run.fixes),
         "unknown_services": dict(run.unknown_services),
+        "attribute_keys": {k: sorted(v) for k, v in sorted(run.keys_seen.items())},
+        "new_attribute_keys": _new_keys(run.keys_seen, policy.raw.get("attribute_key_inventory")),
         "outputs": files,
         "content_sha256": snapshot["content_sha256"],
     }
+    if problems := [e.message[:200] for e in _report_validator().iter_errors(report)]:
+        raise NormalizeError(f"normalize report does not match schemas/normalize_report.schema.json: {problems[:5]}")
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report
+
+
+def _new_keys(seen: dict[str, set[str]], inventory: dict[str, list[str]] | None) -> dict[str, list[str]] | None:
+    """Attribute keys the frozen soak inventory never saw for that signal / service (decision 011 §3, for the audit)."""
+    if inventory is None:
+        return None
+    new = {k: sorted(v - set(inventory.get(k, ()))) for k, v in sorted(seen.items())}
+    return {k: v for k, v in new.items() if v}
+
+
+def _report_validator():
+    from jsonschema import Draft202012Validator
+
+    return Draft202012Validator(json.loads(
+        (Path(__file__).resolve().parent.parent / "schemas/normalize_report.schema.json").read_text()))
 
 
 def _span_record(run: _Run, s: dict, tid: str, sid: str, parent: str | None, start: int, rid: str, scope: dict,
@@ -478,10 +513,10 @@ def _span_record(run: _Run, s: dict, tid: str, sid: str, parent: str | None, sta
     for e in s.get("events") or []:
         name = e.get("name", "")
         if run.policy.is_flag_key(name):
-            run.removed["X5_event"]["traces"] += 1
+            run.count("X5_event")
             continue
         if run.policy.is_fault_artifact(name):
-            run.removed["X7_event"]["traces"] += 1
+            run.count("X7_event")
             continue
         events.append({"time_unix_nano": nanos(e.get("timeUnixNano")), "name": run.scrub(name),
                        "attributes": run.attrs(e.get("attributes")),
