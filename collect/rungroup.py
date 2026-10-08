@@ -29,7 +29,8 @@ class Plan:
     flag: str
     variant: str
     fault_minutes: float
-    recovery_minutes: float = 5
+    recovery_base_minutes: float = 5
+    recovery_jitter_minutes: float = 5
     warmup_minutes: float = 5
     gate_extra_minutes: float = 10
     normal_base_minutes: float = 10
@@ -39,9 +40,22 @@ class Plan:
     confirm_timeout: float = 10  # seconds for flagd to serve the new variant
 
 
+MAX_CLOCK_DRIFT = 1.0  # seconds the host <-> VM offset may move during a run (decision 009, amended)
+
+
+def _draws(plan: Plan) -> tuple[float, float]:
+    rng = random.Random(plan.seed)
+    return rng.uniform(0, plan.normal_jitter_minutes), rng.uniform(0, plan.recovery_jitter_minutes)
+
+
 def normal_minutes(plan: Plan) -> float:
     """decision 002 / 009: a fixed normal period would leak fault_on through the window length."""
-    return plan.normal_base_minutes + random.Random(plan.seed).uniform(0, plan.normal_jitter_minutes)
+    return plan.normal_base_minutes + _draws(plan)[0]
+
+
+def recovery_minutes(plan: Plan) -> float:
+    """decision 009 (amended): a fixed recovery would put fault_off at a fixed distance from the window end."""
+    return plan.recovery_base_minutes + _draws(plan)[1]
 
 
 class Clock(Protocol):
@@ -87,7 +101,8 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
 
     record: dict = {
         "run_group_id": plan.run_group_id,
-        "plan": {**asdict(plan), "normal_minutes": round(normal_minutes(plan), 3)},
+        "plan": {**asdict(plan), "normal_minutes": round(normal_minutes(plan), 3),
+                 "recovery_minutes": round(recovery_minutes(plan), 3)},
         "status": None,
         "reasons": [],
         "flag": {"path": flag_path.name, "baseline_sha256": _sha(original, work_dir / ".flag.json"),
@@ -177,7 +192,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             times["fault_off"], _, off_ok = switch(original, _serving(baseline, plan.flag), "off")
             if not off_ok:
                 record["reasons"].append("flag_unconfirmed")
-            run_until(clock.monotonic() + plan.recovery_minutes * 60)
+            run_until(clock.monotonic() + recovery_minutes(plan) * 60)
         take(("state", "locust"))
         times["end"] = clock.now()
         record["clock_offset_seconds"].append(offset())
@@ -213,6 +228,9 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             record["reasons"].append("event_stream_missing")
     if raw is None or raw_flags(raw["collector"], raw["files"]):
         record["reasons"].append("raw_incomplete")
+    offsets = record["clock_offset_seconds"]
+    if len(offsets) == 2 and abs(offsets[1] - offsets[0]) > MAX_CLOCK_DRIFT:
+        record["reasons"].append("clock_drift")  # the window cannot be mapped onto the data clock reliably
     if errors := [s for s in samples if s["kind"] == "error"]:
         record["sampling_errors"] = errors[:20]
         record["reasons"].append("sampling_errors")  # a period we could not observe cannot be vouched for

@@ -73,6 +73,19 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 - `raw/<RG>/raw_export.json`：decision 008 §6。
 - `incidents/<INC>/manifest.json`：只有 provenance（decision 002），不含 run group、fault 時間、raw sha。
 
+## 修訂（2026-10-08，任何 incident 收集之前；依 Core §4 設計評審的發現）
+
+時間窗本身會洩漏答案，在收集第一個 incident 前補強：
+
+1. **recovery 長度改為 `5 分鐘 + U(0, 5) 分鐘`**，與 normal period 用同一個 seed 的第二次抽樣（`collect.rungroup.recovery_minutes`）。
+   原本固定 5 分鐘時，incident window = `[normal_start, end]`，fault_off 一定剛好在窗結束前 5 分鐘。
+2. **Pilot 的所有 fault 一律持續 10 分鐘**（`python -m collect run` 不再接受 `--fault-minutes`）。每種 fault 長度不同時，窗長會透露 fault 類型。
+   日後若需要不同的持續時間，另寫 decision log。
+3. **時鐘漂移**：normal_start 前與 end 後各量一次 host ↔ VM 時鐘差；兩次相差超過 1 s，該 run **無效**（`clock_drift`）。
+   normalize 用這兩個值把 host 時間的窗邊界換算到資料時鐘（decision 011），漂移太大就無法可靠換算。
+4. 窗長因此是 `normal（10–15）+ 10 + recovery（5–10）= 25–35 分鐘`，對所有 fault 的分布相同。
+   殘留的風險（fault_on 落在窗起點後 10–15 分鐘）只對「知道協定的人」有用；Agent 與 baseline 的 prompt / 工具說明不得描述收集協定（decision 011）。
+
 ## 放棄的替代方案
 
 - **固定暖機時間，不做閘門**：smoke run 1 證明冷啟動的不穩定會超過「前幾分鐘」。

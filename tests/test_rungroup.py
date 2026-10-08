@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from collect.rungroup import Plan, normal_minutes, run_group
+from collect.rungroup import Plan, normal_minutes, recovery_minutes, run_group
 
 T0 = datetime(2026, 10, 8, 12, 0, 0, tzinfo=UTC)
 E504 = "/api/x | HTTPError('504 Server Error: Gateway Timeout for url: /api/x')"
@@ -113,10 +113,25 @@ def go(stack, clock, flag_path, tmp_path, **over):
     return run_group(plan(**over), stack, clock, flag_path=flag_path, work_dir=tmp_path / "work")
 
 
-def test_normal_period_length_is_seeded_and_jittered():
+def test_normal_and_recovery_lengths_are_seeded_and_jittered():
+    # decision 009 (amended): with a fixed recovery, fault_off would sit exactly 5 min before the window end
     assert normal_minutes(plan(seed=7)) == normal_minutes(plan(seed=7))
     assert normal_minutes(plan(seed=7)) != normal_minutes(plan(seed=8))
     assert all(10 <= normal_minutes(plan(seed=s)) <= 15 for s in range(50))
+    assert recovery_minutes(plan(seed=7)) == recovery_minutes(plan(seed=7))
+    assert all(5 <= recovery_minutes(plan(seed=s)) <= 10 for s in range(50))
+    assert len({round(recovery_minutes(plan(seed=s)), 3) for s in range(50)}) > 40
+    # the two draws are not the same number
+    assert any(normal_minutes(plan(seed=s)) - 10 != recovery_minutes(plan(seed=s)) - 5 for s in range(5))
+
+
+def test_clock_drift_over_one_second_invalidates_the_run(tmp_path, flag_path):
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    drift = iter([0.25, 1.6])  # VM clock moved 1.35 s relative to the host during the run
+    stack.vm_time = lambda: clock.time() + next(drift)
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and "clock_drift" in rec["reasons"]
 
 
 def test_valid_run_follows_the_protocol_and_restores_the_flag_file(tmp_path, flag_path):
@@ -129,6 +144,8 @@ def test_valid_run_follows_the_protocol_and_restores_the_flag_file(tmp_path, fla
     assert s["normal_start"] < s["fault_on"] < s["fault_off"] < s["end"]
     on, off = (datetime.fromisoformat(s[k]) for k in ("fault_on", "fault_off"))
     assert off - on == timedelta(minutes=10)
+    end = datetime.fromisoformat(s["end"])
+    assert abs((end - off).total_seconds() - recovery_minutes(plan()) * 60) <= 1  # timestamps are whole seconds
     assert rec["gate"]["pass"] is True
     assert rec["flag"]["on"]["confirmed"] and rec["flag"]["off"]["confirmed"]
     assert rec["flag"]["baseline_sha256"] != rec["flag"]["injected_sha256"]

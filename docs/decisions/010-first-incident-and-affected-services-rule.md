@@ -13,7 +13,7 @@
 
 ## 決策
 
-1. **第一個 incident 用 `paymentFailure` = `100%`，fault 10 分鐘、recovery 5 分鐘**（decision 009 的結構）。
+1. **第一個 incident 用 `paymentFailure` = `100%`**，fault 10 分鐘、recovery 5 + U(0,5) 分鐘（decision 009 與其修訂）。
    - 理由：答案最不模糊（origin 只有一個、每一筆下單都失敗），最適合驗證 pipeline；`fault_type = error_response`，`fault_family = error`。
    - payment 失敗時會把 `demo.user_context.loyalty_level` 標成 `gold`（研究筆記 §2），這是 upstream 原本就有的誤導性相關，保留不處理。
    - 這個 incident 屬於 **Pilot Set**，永遠不進 final held-out test（SPEC §5）。它只用來驗證 pipeline 與 label，不代表 Pilot 的 fault 分布。
@@ -36,4 +36,4 @@
 ## 對實驗的影響
 
 - decision 006 的 `affected_services` 從此依規則 3 判定；在任何 label 寫成之前定案，之後不得依結果修改。
-- 第一個 run group 用 `./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100% --fault-minutes 10`。
+- 第一個 run group 用 `./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`。

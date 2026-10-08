@@ -1,6 +1,6 @@
 """python -m collect run — collect one run group under the Mac heavy lock (decision 009).
 
-    ./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100% --fault-minutes 10
+    ./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from env.lock import PROJECT_DIR
 
 UPSTREAM_DIR = PROJECT_DIR / "env/upstream/opentelemetry-demo"
 FLAG_FILE = UPSTREAM_DIR / "src/flagd/demo.flagd.json"
-MIN_FAULT_MINUTES = MIN_RECOVERY_MINUTES = 5  # decision 009 §1
+PILOT_FAULT_MINUTES = 10  # decision 009 (amended): every Pilot fault lasts the same, so window length tells nothing
 
 
 class UsageError(Exception):
@@ -27,8 +27,6 @@ class UsageError(Exception):
 
 
 def _check_args(ns: argparse.Namespace) -> None:
-    if ns.fault_minutes < MIN_FAULT_MINUTES or ns.recovery_minutes < MIN_RECOVERY_MINUTES:
-        raise UsageError("fault and recovery must each last at least 5 minutes (decision 009 §1)")
     if ns.flag not in FLAG_FAULT_TYPES:
         raise UsageError(f"flag {ns.flag!r} is not a Core fault (decision 006)")
     catalog = load_flag_catalog(FLAG_FILE)
@@ -43,8 +41,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     run = sub.add_parser("run", help="collect one run group (needs the Mac heavy lock)")
     run.add_argument("--flag", required=True)
     run.add_argument("--variant", required=True)
-    run.add_argument("--fault-minutes", type=float, required=True)
-    run.add_argument("--recovery-minutes", type=float, default=5)
     run.add_argument("--seed", type=int, help="default: a fresh random seed (recorded)")
     ns = parser.parse_args(argv)
 
@@ -60,8 +56,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     layout = DataLayout(PROJECT_DIR / "data/external")
     rg = next_id(layout, "RG")
     seed = ns.seed if ns.seed is not None else random.SystemRandom().randrange(2**31)
-    plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=ns.fault_minutes,
-                recovery_minutes=ns.recovery_minutes)
+    plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=PILOT_FAULT_MINUTES)
     stack = LiveStack(PROJECT_DIR, UPSTREAM_DIR, layout.root)
     work = layout.root / "staging" / rg
     try:
