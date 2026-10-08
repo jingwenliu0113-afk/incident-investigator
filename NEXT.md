@@ -82,6 +82,7 @@
 2. ✅ 校準：soak #3 與 soak #5 在 commit `131446d` 上 F1–F6 全過。
 3. ✅ **policy v1 已凍結**：`sha256:95bc4b07…`（decision 011「凍結紀錄」）。之後任何改動都是 v2。
 4. **Day 1 #5**：`./tools/with-mac-lock uv run python -m collect run --flag paymentFailure --variant 100%`（preflight 擋 dirty tree 與沒通過 soak 的 lock）。
+   RG-001（15:21Z）aborted_unstable：暖機中 grafana exit 1 重啟、payment healthcheck 連續失敗（payment 140/140 MiB）→ 依規則重收（decision 009「收集結果」）。
    run group 無效（例如 `container_metrics_missing`）→ 記錄原因、換新 seed 重收（decision 009 §4）。
 5. **normalize + Day 1 #6**：`uv run python -m collect normalize --incident INC-001`，然後 `uv run python -m collect replay --incident INC-001`。
 6. **INC-001 的 a priori label**：`uv run python -m collect label --incident INC-001 --origin payment --affected payment,checkout,frontend,frontend-proxy

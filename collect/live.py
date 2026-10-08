@@ -132,6 +132,17 @@ class LiveStack:
     def rescan_containers(self) -> dict:
         return soak.rescan_container_metrics(self.lock, self.env)
 
+    def save_logs(self, services: list[str], out_dir: Path) -> list[str]:
+        """The last lines of each container's log (stdout and stderr), saved before `down` removes them."""
+        ids = {svc: cid for cid, svc in soak.project_container_ids(self.lock, self.env).items()}
+        out_dir.mkdir(parents=True, exist_ok=True)
+        saved = []
+        for svc in services:
+            if svc in ids:
+                (out_dir / f"{svc}.log").write_text(soak.container_log(ids[svc], self.env))
+                saved.append(svc)
+        return saved
+
     def sample(self, kind: str) -> dict:
         try:
             return getattr(self.sampler, kind)()

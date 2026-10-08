@@ -26,6 +26,8 @@ def finished(tmp_path, status="valid"):
     (work / "samples.jsonl").write_text("{}\n")
     (work / "docker-events.jsonl").write_text("")
     (work / "otel-collector-shutdown.log").write_text("Shutdown complete.\n")
+    (work / "container-logs").mkdir()
+    (work / "container-logs" / "grafana.log").write_text("exit 1\n")
     from collect.rawfile import scan_raw_file
     rec = {
         "run_group_id": "RG-001", "status": status, "reasons": [] if status == "valid" else ["normal_period_not_clean"],
@@ -71,6 +73,7 @@ def test_valid_run_gets_an_incident_and_records_on_the_right_sides(tmp_path, cat
     assert run["status"] == "valid" and run["incident_ids"] == ["INC-001"] and run["raw_dir"] == "raw/RG-001"
     assert (truth / "harness" / "samples.jsonl").exists()  # sampled timings reveal the fault: ground-truth side
     assert (truth / "harness" / "otel-collector-shutdown.log").exists()  # R7 evidence (decision 008 revision)
+    assert (truth / "harness" / "container-logs" / "grafana.log").exists()  # logs of restarted containers: truth side
     # nothing about the run group or the fault lands on the agent-readable side
     assert not layout.incidents_root.exists() or not any(layout.incidents_root.rglob("*"))
     assert not work.exists()

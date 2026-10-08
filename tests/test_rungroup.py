@@ -80,6 +80,13 @@ class Stack:
         self.calls.append("rescan")
         return {"updated": 28, "failed": []}
 
+    def save_logs(self, services, out_dir):
+        self.calls.append(("save_logs", tuple(services)))
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for svc in services:
+            (out_dir / f"{svc}.log").write_text("level=error msg=boom\n")
+        return sorted(services)
+
     def sample(self, kind):
         ts = self.clock.now()
         if kind == "state":
@@ -422,3 +429,21 @@ def test_a_crash_while_judging_the_run_keeps_the_record(tmp_path, flag_path, mon
     rec = info.value.run_record
     assert rec["status"] == "aborted_error" and "unexpected counter shape" in rec["reasons"][-1]
     assert stack.calls[-1] == ["down", "--volumes"]
+
+
+def test_logs_of_containers_that_restarted_are_kept_before_down(tmp_path, flag_path):
+    # RG-001 (2026-10-08): grafana exited 1 during warm-up and nothing showed why once the stack was down
+    clock = Clock()
+    stack = Stack(clock, flag_path, restart_at=3)  # checkout restarts in the warm-up
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "aborted_unstable" and rec["restarted_logs"] == ["checkout"]
+    assert stack.calls.index(("save_logs", ("checkout",))) < stack.calls.index(["down", "--volumes"])
+    assert (tmp_path / "work" / "container-logs" / "checkout.log").exists()
+
+
+def test_a_clean_run_saves_no_container_logs(tmp_path, flag_path):
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "valid" and "restarted_logs" not in rec
+    assert not any(isinstance(c, tuple) and c[0] == "save_logs" for c in stack.calls)

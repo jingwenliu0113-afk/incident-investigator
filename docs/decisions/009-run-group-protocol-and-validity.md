@@ -116,3 +116,15 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 5. （同日 review 修正）收尾的每一步（還原 flag 檔、關 samples、停 event watch、複製 raw）各自執行，任何一步失敗只記在 `teardown_errors`，
    後面的步驟（特別是複製 raw）與 `down` 照常執行；失敗的 run 記為 `aborted_error` 並保留 run record。判定有效性時出錯也一樣保留 record。
 
+## 收集結果
+
+### RG-001（2026-10-08 15:21Z，paymentFailure 100%，**aborted_unstable**，沒有注入 fault、沒有 incident id）
+
+- 暖機結束後第一次閘門：G1 失敗（grafana 15:25:44Z `die` exit 1，被 restart policy 拉起），G2 失敗（payment 的 healthcheck 從 15:22:17Z 起連續失敗，
+  docker 仍顯示 healthy，15:25:21Z 自行恢復）。G1 失敗是永久的，所以直接中止，照常收尾（raw 已複製、`down` exit 0、verify 乾淨）。
+- 當時 payment 的 memory.current 達 139.8 / 140 MiB、grafana 174.9 / 175 MiB（upstream 的 limit）。soak #3、#4 也觀察到 payment、cart、email、grafana
+  貼著 upstream limit（memory.current 含 page cache），soak #2、#5 則低很多；R6 只判 overlay 調整過的服務，這些不在判定內。
+- 補送 update（decision 012）沒有改動任何 cgroup 限制（memcg 取樣的 `memory.max` 前後相同）。grafana exit 1 的原因無法得知（container 已 `down`）。
+- 處理：依 §4 以新的 run group、新的 seed 重收；規則不變。**新增診斷**：收尾時，任何重啟過或出現 die / oom event 的 container，
+  在 `down` 之前保存 `docker logs`（ground-truth 側 `harness/container-logs/`）。
+

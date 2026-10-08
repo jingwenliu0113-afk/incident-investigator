@@ -76,6 +76,7 @@ class Stack(Protocol):
     def watch(self, path: Path): ...  # .seen() / .stop() like env.soak.EventWatch
     def verify_running(self, wait: float) -> list[str]: ...
     def rescan_containers(self) -> dict: ...  # env.soak.rescan_container_metrics (decision 012)
+    def save_logs(self, services: list[str], out_dir: Path) -> list[str]: ...  # `docker logs` of those containers
     def sample(self, kind: str) -> dict: ...  # "state" | "locust" | "memcg", shaped like env.soak.Sampler
     def ofrep(self, flag: str, context: dict) -> tuple[str, object]: ...
     def vm_time(self) -> float: ...
@@ -259,6 +260,14 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
                 stopped = watch.stop()
                 events = events if events is not None else stopped
 
+        def keep_restarted_logs() -> None:
+            """Containers that restarted or died lose their logs at `down`: keep them for the diagnosis (truth side)."""
+            last = next((x for x in reversed(samples) if x["kind"] == "state"), None)
+            restarted = {svc for svc, c in (last or {}).get("containers", {}).items() if c.get("restarts")}
+            restarted |= {e["service"] for e in events or [] if e.get("action") in ("die", "oom")}
+            if up_started and restarted:
+                record["restarted_logs"] = stack.save_logs(sorted(restarted), work_dir / "container-logs")
+
         def copy_raw() -> None:
             nonlocal raw
             if up_started and raw is None:
@@ -268,6 +277,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             step("restore flag file", restore_flag)
             step("close samples", samples_file.close)
             step("stop event watch", stop_watch)
+            step("keep logs of restarted containers", keep_restarted_logs)
             step("copy raw", copy_raw)
             record["raw"], record["events"] = raw, events
         finally:
@@ -370,7 +380,7 @@ def store_run_group(record: dict, work_dir: Path, layout: DataLayout, *, lock_sh
     truth.mkdir(parents=True)
     harness = truth / "harness"
     harness.mkdir()
-    for name in ("samples.jsonl", "docker-events.jsonl", "otel-collector-shutdown.log"):
+    for name in ("samples.jsonl", "docker-events.jsonl", "otel-collector-shutdown.log", "container-logs"):
         if (work_dir / name).exists():
             shutil.move(work_dir / name, harness / name)
     if incident_ids:
