@@ -71,6 +71,12 @@ uv run pytest -q -m "not network and not docker_daemon"
 ```
 
 ```bash
+uv run python -m collect pilot-loop --labeler agent:claude-code
+```
+
+（整個 Pilot：每個 fault 一個 run，只在 run 期間持有 Mac heavy lock，之後 normalize → replay → label；收齊後 leakage audit 與統計 baseline。）單步：
+
+```bash
 uv run python -m collect next --set pilot
 ```
 

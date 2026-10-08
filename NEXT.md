@@ -2,7 +2,7 @@
 
 ## 目前位置（2026-10-08 18:45Z，台北 10-09 02:45）
 
-**Core 的工具鏈都已完成並測試（608 passed），還沒有任何正式資料結果。**
+**Core 的工具鏈都已完成並測試（613 passed），還沒有任何正式資料結果。**
 - **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
 - **LLM 方法**：dump-all、retrieval、agent 的程式已就緒，等使用者批准模型、預算與成本。
 - **已完成的 Core 範圍**：
@@ -50,6 +50,8 @@
 - **decision 024（SPEC §7 報告）**：每次 `eval run` 把預算、model、可見資料範圍寫進 `run_config.json`；評分表新增「Budgets, usage and visible data」
   （usage 各欄的 n / mean / median / max、總成本、停止原因、實際看過的 record 與概覽比例）。只報告、不計分。
   另加測試：dump-all / retrieval 送給模型的所有文字都通過詞彙檢查、不描述收集協定（decision 015 §6）。測試 604 passed。
+- **`collect pilot-loop`**（SPEC Week 1「自動化 collect → normalize → label」）：next → 一個 run（只在 run 期間持有 lock）→ process，重複到收齊或需要人；
+  之後自動 leakage → stat-anomaly。只是把既有步驟串起來，不改任何協定。測試 613 passed。**今晚不執行**（電力模式，A7）。
 - **decision 025**：run record 與 manifest 記錄收集開始時的電源與 `pmset` 電力設定（唯讀，不改任何設定）；`collect status` 列出每個有效 run 的模式。
   要用哪一種模式收集是使用者的決定（A5）。測試 608 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
@@ -157,7 +159,11 @@
 1. ✅ **soak #5 PASSED**（`data/external/soak/20261008T143533Z/`）：這個 lock 可以收集（decision 008「結果」）。
 2. ✅ 校準：soak #3 與 soak #5 在 commit `131446d` 上 F1–F6 全過。
 3. ✅ **policy v1 已凍結**：`sha256:95bc4b07…`（decision 011「凍結紀錄」）。之後任何改動都是 v2。
-4. **每個 Pilot fault 的流程**（decision 016 的順序；`uv run python -m collect status --set pilot` 看進度）：
+4. **每個 Pilot fault 的流程**（decision 016 的順序；`uv run python -m collect status --set pilot` 看進度）。
+   **一次跑完整個 Pilot**：`uv run python -m collect pilot-loop --labeler agent:claude-code`（**不要**包 with-mac-lock：迴圈只在每個 `collect run` 期間持有 lock，
+   run 之間釋放；lock 被占用時每 5 分鐘重試、最多 4 小時，不搶；需要人看的 fault、run 被拒、process 失敗都會停下；全部收齊後自動 leakage → stat-anomaly run / score；
+   每一步的輸出在 `data/external/logs/pilot-loop/`；exit 0 完成、3 需要人、75 lock 一直被占用）。開始前會印出目前的電力模式（decision 025）。
+   手動的單步流程：
    1. `uv run python -m collect next --set pilot` → 印出下一個 `--flag F --variant V`（全部收齊時不印；exit 3 = 某個 fault 需要人看：
       連續 3 個 run group 無效，或 fault 兩次沒被觸發）。
    2. `./tools/with-mac-lock uv run python -m collect run --set pilot --flag F --variant V`（約 45 分鐘；lock 被占用時 exit 75，不搶）。
@@ -191,7 +197,7 @@
    （例如高效能），我再加上 preflight 檢查；在那之前一個 set 的所有正式 run 應在同一種模式下收集（`collect status` 會列出每個 run 的模式）。
 6. **`data/samples/` 的縮小範例要不要進 git**：SPEC §2 建議放一份可進 git 的縮小範例（README 的 dataset schema / demo 用），
    但 GitHub 規則禁止推 incident snapshot。預設不放；若要放，請指定範圍（例如 Pilot 一個 incident 的約 100 筆 record）。
-7. **告訴我 Mac 已回到正常電力模式**：之後（heavy lock 空出時）從 `collect next --set pilot`（paymentFailure 100%）開始正式 Pilot 收集，10 個 fault 約 8 小時 lock 時間（每個約 45 分鐘，無效的要重收）。
+7. **告訴我 Mac 已回到正常電力模式**：之後用 `collect pilot-loop --labeler agent:claude-code` 開始正式 Pilot 收集（從 paymentFailure 100% 起；lock 被占用時它會等），10 個 fault 約 8 小時 lock 時間（每個約 45 分鐘，無效的要重收）。
 
 ### B. LLM 方法的估算（第 A1 項用）
 

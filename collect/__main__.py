@@ -158,6 +158,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     smk.add_argument("--root", type=Path, required=True, help="scratch data root, outside data/external")
     smk.add_argument("--flag", default="paymentFailure")
     smk.add_argument("--variant", default="100%")
+    lp = sub.add_parser("pilot-loop", help="collect the Pilot set to completion: next -> one run under the Mac heavy lock "
+                                           "-> process, repeated; waits for a busy lock, stops where a person is needed, "
+                                           "then leakage audit and the statistical baseline (run it without with-mac-lock)")
+    lp.add_argument("--labeler", required=True, help="who writes the a priori labels, e.g. agent:claude-code")
+    lp.add_argument("--max-runs", type=int, help="stop after this many run groups")
     sta = sub.add_parser("status", help="decision 016: run groups and incidents of every planned fault of a set")
     sta.add_argument("--set", dest="split", required=True, choices=["pilot"])
     nxt = sub.add_parser("next", help="the next planned fault to collect, as `--flag F --variant V` (nothing when complete)")
@@ -199,6 +204,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if ns.command == "smoke":
         return _smoke(ns)
+    if ns.command == "pilot-loop":
+        from collect.pilot_loop import pilot_loop
+        from collect.provenance import power_facts
+
+        layout = DataLayout(PROJECT_DIR / "data/external")
+        print(json.dumps({"power": power_facts()}), flush=True)  # decision 025: what this collection runs under
+        out = pilot_loop(layout, labeler=ns.labeler, log_dir=layout.root / "logs" / "pilot-loop", max_runs=ns.max_runs)
+        print(json.dumps(out, indent=2))
+        return {"complete": 0, "max_runs": 0, "needs_person": 3, "lock_busy": 75}.get(out["stopped"], 1)
     if ns.command in ("status", "next"):
         from collect.pilot import next_planned, plan_status
 
