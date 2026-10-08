@@ -4,6 +4,7 @@
     python -m eval leakage --set pilot
     python -m eval gold-todo --set pilot          # blind worksheets of citations to judge (decision 017)
     python -m eval gold-add --incident INC-001 --file <worksheet> --annotator human:<name>
+    python -m eval compare --method agent --against stat-anomaly --set pilot   # paired differences (decision 023 §7)
 
 Predictions and scores go to data/external/results/<set>/<method>/ (gitignored); table.md there is the summary.
 Worksheets and gold judgments stay on the ground-truth side next to the label.
@@ -26,15 +27,18 @@ from eval.runner import METHODS, run_method, score_method
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["run", "score", "leakage", "gold-todo", "gold-add"])
+    parser.add_argument("command", choices=["run", "score", "leakage", "gold-todo", "gold-add", "compare"])
     parser.add_argument("--method", choices=sorted(METHODS), help="required for run / score")
     parser.add_argument("--set", dest="split", choices=["pilot", "heldout"], help="required except for gold-add")
+    parser.add_argument("--against", choices=sorted(METHODS), help="compare: the second method (difference = method - against)")
     parser.add_argument("--incident", help="gold-add: the incident whose worksheet is filled")
     parser.add_argument("--file", type=Path, help="gold-add: the filled worksheet")
     parser.add_argument("--annotator", help="gold-add: human:<name> (gold judgments are made by a person)")
     ns = parser.parse_args(argv)
-    if ns.command in ("run", "score") and ns.method is None:
-        parser.error("--method is required for run / score")
+    if ns.command in ("run", "score", "compare") and ns.method is None:
+        parser.error("--method is required for run / score / compare")
+    if ns.command == "compare" and ns.against is None:
+        parser.error("compare needs --against")
     if ns.command == "gold-add" and not (ns.incident and ns.file and ns.annotator):
         parser.error("gold-add needs --incident, --file and --annotator")
     if ns.command != "gold-add" and ns.split is None:
@@ -55,6 +59,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             print(json.dumps(gold_add(layout, ns.incident, ns.file, annotator=ns.annotator,
                                       now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))))
+        elif ns.command == "compare":
+            from eval.runner import compare_methods
+
+            print(json.dumps(compare_methods(ns.split, ns.method, ns.against, out)["paired"], indent=2))
         elif ns.command == "run":
             print(json.dumps({"predictions": [str(p) for p in run_method(layout, ns.method, ns.split, out)]}, indent=2))
         else:

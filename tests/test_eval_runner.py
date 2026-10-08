@@ -254,3 +254,23 @@ def test_the_table_marks_reviews_made_after_seeing_outputs_and_lists_differences
     table = (out / "pilot" / "wrong" / "table.md").read_text()
     for text in ("reviewed after seeing method outputs: INC-001", "INC-001: affected_services", "| INC-001 |", "not_seen"):
         assert text in table, text
+
+
+def test_compare_two_scored_methods_on_the_same_set(tmp_path, monkeypatch):
+    from baselines.statistical import predict
+    from eval.runner import compare_methods
+
+    layout = stored(tmp_path / "data")
+    out = tmp_path / "results"
+    monkeypatch.setitem(METHODS, "wrong", lambda s, i: {**predict(s, i), "origin_candidates": ["cart"]})
+    monkeypatch.setitem(METHODS, "right", lambda s, i: {**predict(s, i), "origin_candidates": ["payment"]})
+    audit_set(layout, "pilot", out)
+    for m in ("wrong", "right"):
+        run_method(layout, m, "pilot", out)
+        score_method(layout, m, "pilot", out)
+    assert score_method(layout, "right", "pilot", out)["incidents"][0]["fault"] == "paymentFailure 100%"
+    result = compare_methods("pilot", "right", "wrong", out, metrics=("origin_top1",), resamples=200)
+    assert result["paired"]["origin_top1"]["mean_diff"] == 1.0 and "paymentFailure 100%" in result["lofo"]["origin_top1"]
+    assert "right - wrong" in (out / "pilot" / "compare-right-vs-wrong.md").read_text()
+    with pytest.raises(LookupError, match="score"):
+        compare_methods("pilot", "right", "missing", out)

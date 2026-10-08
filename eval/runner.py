@@ -151,13 +151,14 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
             "saw_method_outputs": None if review is None else review.get("saw_method_outputs"),
             "run_group_id": rg,
             "difficulty": audit["difficulty"],
+            "fault": f"{label['injected_fault']['flag']} {label['injected_fault']['variant']}",
             "failure": classify(pred, label, scores, transcript, snapshot, clock_offset_s=_clock_offset(layout, inc)),
             "label_reviewed": label["labeling"]["method"] == "catalog+review",
             "evidence_existence": existence(pred["evidence"], snapshot)["rate"],
             "evidence_weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=_clock_offset(layout, inc)),
             "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc))})
     scored = [{k: v for k, v in r.items()
-               if not k.startswith("evidence_") and k not in ("difficulty", "failure", "label_reviewed", "saw_method_outputs")}
+               if not k.startswith("evidence_") and k not in ("difficulty", "fault", "failure", "label_reviewed", "saw_method_outputs")}
               for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
     by_difficulty = {}
@@ -326,3 +327,32 @@ def audit_set(layout: DataLayout, split: str, out_root: Path) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "leakage.md").write_text("\n".join(table) + "\n")
     return {"split": split, "incidents": rows}
+
+
+def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tuple = MAIN_METRICS,
+                    resamples: int = 10_000) -> dict:
+    """Paired differences a - b on the incidents both were scored on (decision 023 §7), with LOFO bounds; written to
+    out_root/<split>/compare-<a>-vs-<b>.json / .md. Reads only the two methods' scores.json."""
+    from eval.compare import lofo, paired
+
+    scored = {}
+    for m in (a, b):
+        path = Path(out_root) / split / m / "scores.json"
+        if not path.exists():
+            raise LookupError(f"{m} has no scores on the {split} set: run `python -m eval score --method {m} --set {split}`")
+        scored[m] = json.loads(path.read_text())["incidents"]
+    result = {"split": split, "a": a, "b": b,
+              "paired": {m: paired(scored[a], scored[b], m, resamples=resamples) for m in metrics},
+              "lofo": {m: lofo(scored[a], scored[b], m, resamples=resamples) for m in metrics}}
+    base = Path(out_root) / split / f"compare-{a}-vs-{b}"
+    base.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
+    lines = [f"# {a} - {b} on the {split} set (decision 023 §7; paired run-group cluster bootstrap)", "",
+             "| metric | n | mean difference | 95% interval |", "|---|---:|---:|---|"]
+    lines += [f"| {m} | {r['n']} | {r['mean_diff']:.3f} | [{r['ci95'][0]:.3f}, {r['ci95'][1]:.3f}] |"
+              for m, r in result["paired"].items()]
+    lines += ["", "Leave one fault out (descriptive): lower bound of the interval without each fault", "",
+              "| metric | fault left out | n | mean difference | lower bound |", "|---|---|---:|---:|---:|"]
+    lines += [f"| {m} | {f} | {r['n']} | " + ("- | - |" if r["mean_diff"] is None else f"{r['mean_diff']:.3f} | {r['ci95'][0]:.3f} |")
+              for m, by in result["lofo"].items() for f, r in by.items()]
+    base.with_suffix(".md").write_text("\n".join(lines) + "\n")
+    return result
