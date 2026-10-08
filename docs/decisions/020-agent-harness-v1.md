@@ -17,6 +17,7 @@
    回合數、工具預算到上限時，送一次「請立即提交」的提示；仍未提交則記為放棄作答（decision 013：算錯，不排除）。
 3. **提交**：`submit_diagnosis` 的參數就是 decision 013 的 prediction 欄位（fault、origin_candidates、affected_services、user_symptom、evidence）；
    evidence 的 `t0` / `t1` 由模型以「相對時間窗起點的秒數」給，harness 換成資料時鐘的 ns（decision 013 的格式）。
+   模型看到的時間是毫秒（renderer 取到 ms），所以 `t0` 換成該毫秒的起點、`t1` 換成該毫秒的終點（+999,999 ns），照畫面上的時間引用一定涵蓋那個點（時鐘稽核）。
    harness 補上 incident_id、method、usage，並用 `check_prediction` 驗證；不合格時把問題回給模型修正，最多 2 次，之後記為放棄作答。
 4. **用量**：input / output tokens（模型回報的數字）、工具呼叫數、工具輸出的 proxy tokens、retrieval 次數（Agent 為 0）、wall-clock latency、
    cost = tokens × 呼叫端提供的單價（沒有單價時 null）。

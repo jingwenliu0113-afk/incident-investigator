@@ -180,3 +180,10 @@ def test_the_call_that_reaches_the_token_budget_is_cut_at_a_line_and_never_excee
 def test_trace_ids_are_part_of_the_exposure_log(session):
     session.call("get_trace", {"trace_id": "b" * 32})
     assert session.exposure[:3] == [hexid("s", 3), "t-" + "b" * 32, hexid("s", 4)]
+
+
+def test_minute_stats_exposure_lists_only_the_minutes_shown(tmp_path):
+    s = ToolSession(Snap(), cache_root=tmp_path / "cache", max_proxy_tokens=40)
+    out = s.call("service_minute_stats", {"service": "payment"})
+    shown = [line.split(" ", 1)[0] for line in out.splitlines() if line.startswith("+")]
+    assert [e for e in s.exposure if e.startswith("stats:")] == [f"stats:payment:{int(m[1:4])}-{int(m[1:4])}" for m in shown]

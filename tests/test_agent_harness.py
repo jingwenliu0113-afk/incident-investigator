@@ -117,3 +117,16 @@ def test_every_tool_use_in_a_turn_gets_its_own_result(tmp_path):
     _, transcript = run(tmp_path, Scripted([tool("submit_diagnosis", ANSWER, "x"), tool("submit_diagnosis", ANSWER, "y")]))
     last = transcript["messages"][-1]["content"]
     assert {b["tool_use_id"] for b in last} == {"x", "y"}
+
+
+def test_a_metric_point_cited_at_the_millisecond_it_was_shown_resolves():
+    # clock audit: the model sees ms (render), resolve compares ns; t1 covers the whole displayed millisecond
+    from agent.harness import _prediction
+
+    start = 10**18
+    pred, problems = _prediction({**ANSWER, "evidence": [{"id": "m-" + "c" * 16, "t0": 724.23, "t1": 724.23}]}, "INC-001",
+                                 {"name": "m", "version": "1"}, start, ["payment", "checkout", "cart"])
+    assert problems == []
+    e = pred["evidence"][0]
+    point = start + 724_230_157_594  # shown as +012:04.230
+    assert e["t0"] <= point <= e["t1"] and e["t1"] - e["t0"] == 999_999

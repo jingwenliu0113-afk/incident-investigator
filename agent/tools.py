@@ -295,5 +295,6 @@ class ToolSession:
                                "WHERE service = ? AND minute >= ? AND minute < ? ORDER BY minute", (service, lo, hi)).fetchall()
         lines = [f"{_rel_minute(m)} spans={n} errors={e} p95_ms={_num(p)} warn_logs={w} cpu_cores={_num(c)} "
                  f"memory_mib={_num(None if mem is None else mem / MiB, '.1f')}" for m, n, e, p, w, c, mem in rows]
-        shown = [(1, f"stats:{service}:{rows[0][0]}-{rows[-1][0]}")] if rows else []  # decision 022: what was looked at
+        # decision 022: what was looked at, one minute per line, so a cut at the token budget keeps only what was shown
+        shown = [(n, f"stats:{service}:{row[0]}-{row[0]}") for n, row in enumerate(rows, start=1)]
         return "\n".join([f"{service} per minute ({len(lines)} minutes)", *lines]), shown

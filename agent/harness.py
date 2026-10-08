@@ -61,7 +61,9 @@ def _prediction(answer: dict, incident_id: str, method: dict, start_ns: int, ser
                     seconds = float(e[k])
                     if not math.isfinite(seconds) or abs(seconds) > MAX_SECONDS:
                         return None, [f"evidence {e['id']}: {k} must be seconds since the start of the window"]
-                    item[k] = start_ns + int(round(seconds * 1e9))
+                    # the model sees milliseconds (the renderer floors to ms): t0 / t1 cover the whole millisecond shown
+                    ms_ns = start_ns + round(seconds * 1000) * 1_000_000
+                    item[k] = ms_ns if k == "t0" else ms_ns + 999_999
             evidence.append(item)
         pred = {**_abstain(incident_id, method), **{k: answer[k] for k in
                 ("fault", "origin_candidates", "affected_services", "user_symptom") if k in answer}, "evidence": evidence}

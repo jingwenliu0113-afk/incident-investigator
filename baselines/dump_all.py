@@ -82,8 +82,8 @@ def pack(snapshot, incident_id: str, *, budget: int) -> tuple[str, dict]:
             break
         i += 1
     sections.append(sample)
-    out, used, records = [], 0, 0
-    for section in sections:
+    out, used, records, packed = [], 0, 0, []
+    for i, section in enumerate(sections):
         for n, line in enumerate(section):
             cost = proxy_tokens(line + "\n")
             if used + cost > budget or (n == 0 and len(section) > 1 and used + cost + proxy_tokens(section[1] + "\n") > budget):
@@ -91,11 +91,14 @@ def pack(snapshot, incident_id: str, *, budget: int) -> tuple[str, dict]:
             out.append(line)
             used += cost
             records += line[:2] in ("s-", "l-")
+            if i == 0 and n > 0:
+                packed.append(line)
         else:
             continue
         break
     text = "\n".join(out)
-    return text, {"proxy_tokens": proxy_tokens(text), "records": records}
+    return text, {"proxy_tokens": proxy_tokens(text), "records": records, "overview_rows": packed,
+                  "overview_complete": len(packed) == len(sections[0]) - 1}
 
 
 def dump_all(snapshot, incident_id: str, model, *, method: dict, budget: int, price_per_mtok: dict | None = None):
@@ -106,6 +109,18 @@ def dump_all(snapshot, incident_id: str, model, *, method: dict, budget: int, pr
     pred, stop = submit_round(model, SYSTEM, messages, snapshot, incident_id, method, tokens)
     pred = finish(pred, incident_id, method, tokens, proxy=stats["proxy_tokens"], tool_calls=0, retrievals=0,
                   t_start=t_start, price_per_mtok=price_per_mtok)
-    exposure = ["stats:*"] + [line.split(" ", 1)[0] for line in packed.splitlines() if line[:2] in ("s-", "l-")]
+    exposure = _overview_exposure(stats) + [line.split(" ", 1)[0] for line in packed.splitlines() if line[:2] in ("s-", "l-")]
     return pred, {"incident_id": incident_id, "method": dict(method), "stop_reason": stop, "messages": messages,
-                  "exposure": exposure, "usage": pred["usage"], "packing": stats}
+                  "exposure": exposure, "usage": pred["usage"],
+                  "packing": {k: v for k, v in stats.items() if k != "overview_rows"}}
+
+
+def _overview_exposure(stats: dict) -> list[str]:
+    """decision 022: the whole overview is "stats:*"; a cut overview exposes only the rows packed, per service."""
+    if stats["overview_complete"]:
+        return ["stats:*"]
+    spans: dict[str, list[int]] = {}
+    for row in stats["overview_rows"]:  # "<service> +MMM:00 ..."
+        svc, minute = row.split(" ", 2)[:2]
+        spans.setdefault(svc, []).append(int(minute[1:4]))
+    return [f"stats:{svc}:{min(ms)}-{max(ms)}" for svc, ms in spans.items()]

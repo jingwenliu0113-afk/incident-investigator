@@ -78,3 +78,13 @@ def test_retrieval_answers_every_tool_use_survives_bad_numbers_and_rebuilds_a_br
     (broken / ("1" * 64)).mkdir(parents=True)
     (broken / ("1" * 64) / "retrieval.sqlite").write_text("not a database")  # a derived cache: rebuilt, never "0 found"
     assert search(Snap(), broken, "cache", k=5) == [hexid("l", 5)]
+
+
+def test_dump_all_exposure_claims_only_the_overview_rows_that_were_packed():
+    model = Scripted([tool("submit_diagnosis", ANSWER)])
+    _, full = dump_all(Snap(), "INC-001", model, method=METHOD, budget=100_000)
+    assert full["exposure"][0] == "stats:*"
+    model = Scripted([tool("submit_diagnosis", ANSWER)])
+    _, cut = dump_all(Snap(), "INC-001", model, method=METHOD, budget=60)
+    assert "stats:*" not in cut["exposure"]
+    assert all(e.startswith("stats:") and e.count(":") == 2 for e in cut["exposure"])
