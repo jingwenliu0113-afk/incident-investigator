@@ -74,3 +74,31 @@ def test_v2_thresholds_come_from_fault_free_runs_and_scores_are_compared_in_thre
     assert pred["affected_services"] == ["payment"] and pred["fault"]["fault_type"] == "error_response"
     f["frontend-proxy"]["p95_latency_ms"] = flat(20.0, m14=100.0)  # z = 40 < 45: not a user-facing slowdown
     assert predict_from_features(f, incident_id="INC-004")["user_symptom"]["kinds"] == ["none"]
+
+
+def test_minutes_without_a_warn_log_count_as_zero_for_every_service():
+    # clock audit / decision 014 §2: warn_logs is a per-minute count; a service with no spans (kafka) still scores
+    from baselines.statistical import features
+
+    M = 60 * 10**9
+
+    class Snap:
+        services = ["kafka"]
+        window = {"start_ns": 0, "end_ns": 25 * M}
+
+        def spans(self):
+            return iter(())
+
+        def logs(self):
+            return iter([{"service": "kafka", "time_unix_nano": 15 * M + k, "observed_time_unix_nano": None,
+                          "severity_number": 13} for k in range(200)])
+
+        def series(self):
+            return iter(())
+
+        def points(self):
+            return iter(())
+
+    f = features(Snap())
+    assert f["kafka"]["warn_logs"] == {m: (200 if m == 15 else 0) for m in range(25)}
+    assert robust_scores(f)["kafka"]["warn_logs"] == 200.0

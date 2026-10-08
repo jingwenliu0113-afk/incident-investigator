@@ -92,3 +92,7 @@ CPU 是量測 bug，不修正的話 cpu_saturation 永遠量不到、而且每�
 cpu 3.57（soak #5 payment）→ T = 3.6；memory 33.98（soak #5 payment）→ T = 34.0；p95_latency_ms 44.92（soak #5 frontend-proxy）→ T = 45.0。
 v2 在這兩個校準 snapshot 上（依定義）不預測任何 fault type、user symptom 為 none、affected 只放第一名。
 已知後果：記憶體門檻 34 讓較小的記憶體上升（例如 email 在 100 MiB 上限內的洩漏）可能偵測不到；這是 baseline 的設計結果，不為特定 fault 調整。
+
+**補註（時鐘稽核，2026-10-09，Pilot 之前）**：`warn_logs` 原本只有在該服務出現 span 或 WARN log 的分鐘才有值，沒有 span 的服務（kafka、astronomy-db、valkey-cart）
+因此永遠不計分；改為時間窗內每一分鐘都有值（沒有 WARN log 就是 0），與 §2「每分鐘的 WARN 以上 log 數」一致。
+在兩個無 fault 校準 snapshot 上重算，warn_logs 的最大 z 仍是 0，所以 `NULL_THRESHOLDS["warn_logs"] = 3` 不變。

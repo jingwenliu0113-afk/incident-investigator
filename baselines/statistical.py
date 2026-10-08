@@ -49,13 +49,15 @@ def features(snapshot) -> dict[str, dict[str, dict[int, float]]]:
     """{service: {feature: {minute since window start: value}}} for the snapshot's SUT services (collect.derive views)."""
     spans = service_minute_stats(snapshot)["services"]
     containers = container_minute_stats(snapshot)["services"]
+    minutes = range(-(-(snapshot.window["end_ns"] - snapshot.window["start_ns"]) // 60_000_000_000))
     out = {}
     for svc in snapshot.services:
         s, c = spans.get(svc, {}), containers.get(svc, {})
         out[svc] = {
             "error_ratio": {m: v["error_spans"] / v["spans"] for m, v in s.items() if v["spans"]},
             "p95_latency_ms": {m: v["p95_server_ms"] for m, v in s.items() if v["p95_server_ms"] is not None},
-            "warn_logs": {m: v["warn_logs"] for m, v in s.items()},
+            # a per-minute count: a minute without a WARN log is 0, also for services without spans (decision 014 §2)
+            "warn_logs": {m: 0 for m in minutes} | {m: v["warn_logs"] for m, v in s.items()},
             "cpu": {m: v["cpu"] for m, v in c.items() if v.get("cpu") is not None},
             "memory": {m: v["memory"] for m, v in c.items() if v.get("memory") is not None},
         }
