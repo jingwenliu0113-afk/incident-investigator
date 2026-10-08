@@ -31,7 +31,10 @@
 - **leakage 樣板修訂（decision 015 修訂 1）**：含數字的整個字遮成 `<n>`（商品 id 不再產生大量假的 fault 專屬樣板；無 fault 資料上 472 → 2）。
 - **Agent 工具 v1（decision 019，`agent/tools.py`）**：decision 011 §5 的 7 個資料存取工具、sqlite 索引（依 content digest 快取在 `data/external/cache/`）、
   時間排序 + 子字串比對（沒有排名）、呼叫數 / proxy token 預算、exposure log。尚未接任何 LLM（模型與預算數值待使用者決定）。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：560 passed（`-m "not network and not docker_daemon"`）。
+- **Agent 執行框架 v1（decision 020，`agent/prompt.py`、`agent/harness.py`）**：共用任務說明（只有 decision 014 那一句框架與答案空間）、
+  tool-use 迴圈、`submit_diagnosis` 結構化提交（驗證失敗最多更正 2 次，否則算放棄作答）、回合 / 工具預算到了強制提交、usage 與 transcript。
+  只有模型介面，**沒有接任何付費 API**。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：565 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
