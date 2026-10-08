@@ -236,6 +236,13 @@
       "pattern": "^Delaying international shipment due to intlShippingSlowdown feature flag$",
       "example": "Delaying international shipment due to intlShippingSlowdown feature flag",
       "source_text": "Delaying international shipment due to intlShippingSlowdown feature flag"
+    },
+    {
+      "id": "FA-11",
+      "source": "src/fraud-detection/src/main/kotlin/frauddetection/main.kt:67",
+      "pattern": "^FeatureFlag 'kafkaQueueProblems' is enabled, sleeping 1 second$",
+      "example": "FeatureFlag 'kafkaQueueProblems' is enabled, sleeping 1 second",
+      "source_text": "FeatureFlag 'kafkaQueueProblems' is enabled, sleeping 1 second"
     }
   ],
   "lexicon_extra": [
@@ -264,7 +271,7 @@
   },
   "kept_by_design": {
     "class_b": [
-      "recommendation 'get_product_list: cache hit/miss' logs and demo.recommendation.cache_hit (pre-registered Easy feature, Core \u00a76)"
+      "recommendation 'get_product_list: cache hit/miss' logs and demo.recommendation.cache_hit (pre-registered Easy feature, Core §6)"
     ],
     "class_c": [
       "Payment request failed. Invalid token. demo.user_context.loyalty_level=gold",

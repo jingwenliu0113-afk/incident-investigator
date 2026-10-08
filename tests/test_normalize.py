@@ -1,8 +1,10 @@
 """raw -> canonical snapshot (decision 011): rules, window, ids, determinism, fail-closed checks."""
 
+import base64
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,8 @@ from collect.layout import DataLayout
 from collect.normalize import NormalizeError, NormalizeInputs, check_snapshot, normalize
 from collect.policy import load_policy
 from collect.rawfile import scan_raw_file
-from normalize_fixtures import HOST_END, HOST_START, OFFSETS, S, T0, write_raw
+from normalize_fixtures import (HOST_END, HOST_START, OFFSETS, S, T0, gauge_line, kv, log, logs_line, raw_lines, res,
+                                span, traces_line, write_raw)
 
 
 @pytest.fixture
@@ -62,7 +65,7 @@ def test_logs_follow_the_rules(setup):
                              "Error: Product Catalog Fail Enabled",  # tokens deleted, no sentinel
                              "get_product_list: cache hit",  # Class B kept
                              "no event time"])
-    assert report["removed"]["X7"]["logs"] == 1 and report["removed"]["X5"]["logs"] == 1
+    assert report["removed"]["X7"]["logs"] == 2 and report["removed"]["X5"]["logs"] == 1
     assert report["removed"]["X4"]["logs"] == 1  # the log inside the removed control-plane span
     assert report["removed"]["X1"]["logs"] == 1
     assert report["tokens_deleted"]["logs"] == 1
@@ -208,3 +211,71 @@ normalize(inputs, load_policy(), incident_dir=lay.incident_dir("INC-001"), repor
     subprocess.run([sys.executable, "-c", script], check=True, env={**os.environ, "PYTHONHASHSEED": "12345"})
     other = tmp_path / "seeded" / "incidents" / "INC-001" / "normalized"
     assert {p.name: p.read_bytes() for p in other.iterdir()} == {p.name: p.read_bytes() for p in norm.iterdir()}
+
+
+def run_with(tmp_path, extra: dict[str, list[str]]):
+    """normalize the standard fixture raw plus `extra` lines per signal."""
+    layout = DataLayout(tmp_path / "data")
+    raw_dir = layout.raw_dir("RG-001")
+    raw_dir.mkdir(parents=True)
+    scans = {}
+    for sig, lines_ in raw_lines().items():
+        (raw_dir / f"{sig}.jsonl").write_text("\n".join(lines_ + extra.get(sig, [])) + "\n")
+        scans[sig] = scan_raw_file(raw_dir / f"{sig}.jsonl", sig)
+    inputs = NormalizeInputs(raw_dir=raw_dir, raw_sha256={k: v["sha256"] for k, v in scans.items()},
+                             raw_duplicates={k: v["duplicates"] for k, v in scans.items()},
+                             window_host=(HOST_START, HOST_END), clock_offsets=list(OFFSETS))
+    report = normalize(inputs, load_policy(), incident_dir=layout.incident_dir("INC-001"),
+                       report_path=layout.normalize_report_path("INC-001"), staging_dir=layout.root / "staging" / "n")
+    return layout.incident_dir("INC-001") / "normalized", report
+
+
+def test_x8_reaches_every_visible_string(tmp_path):
+    # decision 011 §3 X8: "in all visible strings" -- keys, metric metadata, severity text, scope version, trace state, bytes
+    w = T0 + 120 * S
+    blob = base64.b64encode(b"cartFailure=on").decode()
+    sp = span("4" * 32, "5" * 16, w, "Charge", attrs={"app.ofrep.enabled": True})
+    sp["attributes"] += [{"key": "cfg", "value": {"kvlistValue": {"values": kv({"paymentFailure": "on", "mode": "x"})}}},
+                         {"key": "blob", "value": {"bytesValue": blob}}]
+    sp["traceState"] = "vendor=1,flagd=2"
+    sp["links"] = [{"traceId": "6" * 32, "spanId": "6" * 16, "traceState": "flagd=3"}]
+    line = json.loads(traces_line(res("payment"), [sp]))
+    line["resourceSpans"][0]["scopeSpans"][0]["scope"]["version"] = "1.0 flagd"
+    rec = log(w, "charged", severity=9)
+    rec["severityText"] = "INFO flagd"
+    metric = json.loads(gauge_line(res("cart"), "app.cart.adds", [{"timeUnixNano": str(w), "asInt": "1"}]))
+    m = metric["resourceMetrics"][0]["scopeMetrics"][0]["metrics"][0]
+    m["description"], m["unit"] = "set by flagd", "{flagd}"
+    norm, report = run_with(tmp_path, {
+        "traces": [json.dumps(line)],
+        "logs": [logs_line(res("payment"), [rec])],
+        "metrics": [json.dumps(metric), gauge_line(res("cart"), "app.flagd.sync", [{"timeUnixNano": str(w), "asInt": "1"}])],
+    })
+    s5 = next(x for x in lines(norm / "spans.jsonl") if x["span_id"] == "5" * 16)
+    assert s5["attributes"]["app.enabled"] is True and s5["attributes"]["cfg"] == {"mode": "x"}
+    assert base64.b64decode(s5["attributes"]["blob"]["$bytes"]) == b"on"
+    assert s5["scope"]["version"] == "1.0" and "flagd" not in (s5["trace_state"] + s5["links"][0]["trace_state"])
+    assert any(x["severity_text"] == "INFO" for x in lines(norm / "logs.jsonl"))
+    series = {x["metric"]: x for x in lines(norm / "metric_series.jsonl")}
+    assert series["app.cart.adds"]["description"] == "set by" and "flagd" not in series["app.cart.adds"]["unit"]
+    assert "app.flagd.sync" not in series  # a flag-named metric goes with its series (X5), names are not rewritten
+    assert report["removed"]["X8_key"]["traces"] == 1
+
+
+def test_check_snapshot_sees_through_escapes_and_bytes(setup, tmp_path):
+    # the last line of defence greps decoded strings, not only the escaped JSON bytes
+    norm, _ = run(setup)
+    copy = tmp_path / "copy"
+    shutil.copytree(norm, copy)
+    for p in copy.iterdir():
+        os.chmod(p, 0o644)
+    policy = load_policy()
+    series = lines(copy / "metric_series.jsonl")
+    series[0]["description"] = "evaluations\npaymentFailure"
+    (copy / "metric_series.jsonl").write_text("".join(json.dumps(x, separators=(",", ":")) + "\n" for x in series))
+    spans = lines(copy / "spans.jsonl")
+    spans[0]["attributes"]["blob"] = {"$bytes": base64.b64encode(b"cartFailure=on").decode()}
+    (copy / "spans.jsonl").write_text("".join(json.dumps(x, separators=(",", ":")) + "\n" for x in spans))
+    problems = check_snapshot(copy, policy)
+    assert any(p.startswith("metric_series.jsonl: line 1: lexicon") for p in problems)
+    assert any(p.startswith("spans.jsonl: line 1: lexicon") for p in problems)

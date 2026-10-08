@@ -111,3 +111,30 @@
 - decision 008 §6 說 raw export record 要記時鐘差與 collector `service.instance.id`：目前時鐘差記在 run.json（ground-truth 側），instance id 尚未記錄；
   校準時決定是否需要補進 `raw_export.json`（schema bump）。
 - decision 006 的 `check_label(services=…)` 改用這 18 個服務。
+
+## 校準與凍結前的修正（2026-10-08，只用 soak #3 的 raw，沒有打開任何 fault raw）
+
+### 校準結果（`data/external/calibration/20261008T120419Z/calibration.json`，soak #3 整段 raw）
+
+- `check_snapshot`：0 個問題；未知 OTLP 欄位：無；未知服務：無；span kind 一律是整數編碼；`tokens_deleted` 全部是 0（沒有 fault 時不該有 token）。
+- 保留：traces 179,719 / 253,053、logs 67,377 / 80,351、metric points 149,402 / 291,292；snapshot 277 MB（約 38.6 分鐘）。
+  移除最多的是 X1（被排除的服務：flagd、frontend-web、load-generator、otelcol-contrib…）、X2（host_metrics）、X5（flag event / attribute）與 X4（控制面子樹）。
+- metrics 的 `service.name` 缺值的 216,983 個點全部來自 7 個 receiver，都由 `receivers` 對應（docker_stats 依 container.name；postgresql → astronomy-db；
+  redis → valkey-cart；kafkametrics → kafka；nginx → image-provider；httpcheck → frontend-proxy；host_metrics 丟掉）。
+- docker_stats 少了 shipping 整個 run → 不是 policy 的問題，是 receiver 的啟動 race，見 **decision 012**。
+- attribute key 裡沒有需要新增隱私規則的東西（user.id / session.id 是 load generator 產生的合成值）；三種寫法的 `feature_flag*provider*name` 都被 X5 刪掉。
+- 時間與記憶體：normalize 90.7 s、整個 calibrate 151.5 s、最大 RSS 約 0.91 GB。
+
+### 凍結前修正（read-only review workflow 的確認問題，以及 upstream 全面掃描）
+
+1. **FA-11**：fraud-detection 在 `kafkaQueueProblems` 開啟時每筆訊息都記 `FeatureFlag 'kafkaQueueProblems' is enabled, sleeping 1 second`
+   （`src/fraud-detection/src/main/kotlin/frauddetection/main.kt:67`），沒有樣板 → X8 只刪 token，留下 `'' is enabled, sleeping 1 second`，
+   而且只在 fault 期間出現。新增 Class A 樣板 FA-11（整筆丟掉）。研究筆記 §6 也漏了這條，已補上。
+   之後對 13 個 Core flag 在 upstream SUT 原始碼逐一掃描（ad、cart、checkout、email、fraud-detection、payment、product-catalog、recommendation、shipping），
+   沒有其他「點名注入」而沒有規則的訊息。
+2. **X8 套用到所有可見字串**（原本只做 value）：attribute 與 kvlist 的 key（刪完變空或撞名就丟掉該 attribute，計為 `X8_key`）、scope version、
+   severity_text、metric 的 unit / description、span 與 link 的 trace_state、bytes 值裡的文字（可解碼成 UTF-8 時）。metric 名稱命中詞彙 → 整條 series 丟掉（X5），不改名。
+3. **check_snapshot 也檢查解碼後的字串**：檔案層級的 byte grep 讀的是跳脫後的 JSON，`\n`、`\u00e9` 會吃掉 token 的邊界、base64 會完全藏住 token；
+   含跳脫字元或 `$bytes` 的行另外解碼（含 key 與 base64 內容）再檢查。
+
+policy 檔的 sha 隨 FA-11 重新釘選（狀態仍是 `calibrating`）。

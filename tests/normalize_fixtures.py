@@ -106,6 +106,8 @@ def raw_lines() -> dict[str, list[str]]:
     logs = [
         logs_line(payment, [log(w, "Payment request failed. Invalid token. demo.user_context.loyalty_level=gold")]),
         logs_line(res("ad"), [log(w, "Triggering a manual garbage collection, next one in 10 seconds.")]),  # X7
+        logs_line(res("fraud-detection"), [log(w, "FeatureFlag 'kafkaQueueProblems' is enabled, sleeping 1 second")],
+                  scope="fraud-detection"),  # X7 (FA-11)
         logs_line(res("product-catalog"), [log(w, "Error: Product Catalog Fail Feature Flag Enabled")]),  # X8 tokens
         logs_line(res("shipping"), [log(w, "evaluated", event_name="shipping.feature_flag.evaluated")]),  # X5 event
         logs_line(res("flagd"), [log(w, "flag set updated")]),  # X1

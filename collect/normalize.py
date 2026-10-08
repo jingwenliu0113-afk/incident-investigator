@@ -9,6 +9,7 @@ within bounded memory; output is byte-for-byte deterministic.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -94,15 +95,39 @@ class _Run:
 
     # ------------------------------------------------------------ transforms
     def scrub(self, value):
+        """X8 on every visible string: values, map keys and text inside bytes values."""
         if isinstance(value, str):
             out, n = self.policy.scrub(value)
             self.tokens[self.signal] += n
             return out
         if isinstance(value, list):
             return [self.scrub(v) for v in value]
-        if isinstance(value, dict) and not ({"$double", "$bytes"} & value.keys()):
-            return {k: self.scrub(v) for k, v in value.items()}
+        if isinstance(value, dict) and "$bytes" in value:
+            return self._scrub_bytes(value)
+        if isinstance(value, dict) and "$double" not in value:
+            return self._scrub_map(value)
         return value
+
+    def _scrub_map(self, value: dict) -> dict:
+        out = {}
+        for k, v in value.items():
+            k2 = self.scrub(k)
+            if not k2 or k2 in out:  # the key was only a token, or scrubbing made two keys equal
+                self.removed["X8_key"][self.signal] += 1
+                continue
+            out[k2] = self.scrub(v)
+        return out
+
+    def _scrub_bytes(self, value: dict) -> dict:
+        try:
+            text = base64.b64decode(value["$bytes"], validate=True).decode("utf-8")
+        except ValueError:  # not base64 or not text: opaque, and check_snapshot still greps it decoded
+            return value
+        out, n = self.policy.scrub(text)
+        if not n:
+            return value
+        self.tokens[self.signal] += n
+        return {"$bytes": base64.b64encode(out.encode()).decode()}
 
     def attrs(self, kvs) -> dict:
         priv = self.policy.raw["privacy"]
@@ -119,7 +144,11 @@ class _Run:
             if k in priv["mask_last4_keys"] and isinstance(v, str):
                 out[k] = "****-****-****-" + "".join(c for c in v if c.isdigit())[-4:]
                 continue
-            out[k] = self.scrub(v)
+            k2 = self.scrub(k)
+            if not k2 or k2 in out:
+                self.removed["X8_key"][self.signal] += 1
+                continue
+            out[k2] = self.scrub(v)
         return out
 
     def resource_id(self, resource: dict) -> str:
@@ -136,7 +165,7 @@ class _Run:
         return self._rid_by_raw[raw]
 
     def scope(self, scope: dict) -> dict:
-        return {"name": self.scrub(scope.get("name") or "") or None, "version": scope.get("version") or None,
+        return {"name": self.scrub(scope.get("name") or "") or None, "version": self.scrub(scope.get("version") or "") or None,
                 "attributes": self.attrs(scope.get("attributes"))}
 
     def service(self, raw_attrs: dict, scope_name: str | None, ns: int | None) -> str | None:
@@ -300,7 +329,7 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                     record = {"id": "l-" + run.rid("log", k), "time_unix_nano": nanos(r.get("timeUnixNano")),
                               "observed_time_unix_nano": nanos(r.get("observedTimeUnixNano")),
                               "severity_number": int(r.get("severityNumber") or 0) if str(r.get("severityNumber", "0")).isdigit() else 0,
-                              "severity_text": r.get("severityText") or None, "body": run.scrub(body),
+                              "severity_text": run.scrub(r.get("severityText") or "") or None, "body": run.scrub(body),
                               "event_name": run.scrub(r["eventName"]) if r.get("eventName") else None,
                               "attributes": run.attrs(r.get("attributes")), "trace_id": tid, "span_id": sid,
                               "flags": int(r.get("flags") or 0), "dropped_attributes_count": int(r.get("droppedAttributesCount", 0)),
@@ -338,7 +367,8 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                             p_attrs = attributes(p.get("attributes"))
                             rule = ("X6" if policy.scope_denied(scope.get("name"))
                                     else "X3" if any(name.startswith(x) for x in policy.raw["drop_metric_prefixes"])
-                                    else "X5" if policy.is_flag_key(name) or any(policy.is_flag_key(a) for a in p_attrs)
+                                    else "X5" if policy.is_flag_key(name) or policy.lexicon_hit(name)
+                                    or any(policy.is_flag_key(a) for a in p_attrs)
                                     else "X4" if policy.control_plane(p_attrs)
                                     else "X10" if int(p.get("flags") or 0) & 1
                                     else None)
@@ -350,8 +380,8 @@ def normalize(inputs: NormalizeInputs, policy: Policy, *, incident_dir: Path, re
                             if not db.execute("SELECT 1 FROM series WHERE id = ?", (series_id,)).fetchone():
                                 rid = run.resource_id(resource)
                                 series = {"id": series_id, "resource_id": rid, "scope": run.scope(scope), "service": svc,
-                                          "metric": name, "kind": kind, "unit": m.get("unit") or None,
-                                          "description": m.get("description") or None,
+                                          "metric": name, "kind": kind, "unit": run.scrub(m.get("unit") or "") or None,
+                                          "description": run.scrub(m.get("description") or "") or None,
                                           "temporality": enum("temporality", body.get("aggregationTemporality")) if kind in ("sum", "histogram", "exponential_histogram") else None,
                                           "monotonic": bool(body.get("isMonotonic")) if kind == "sum" else None,
                                           "attributes": run.attrs(p.get("attributes"))}
@@ -455,12 +485,12 @@ def _span_record(run: _Run, s: dict, tid: str, sid: str, parent: str | None, sta
                        "attributes": run.attrs(e.get("attributes")),
                        "dropped_attributes_count": int(e.get("droppedAttributesCount", 0))})
     links = [{"trace_id": str(link.get("traceId", "")).lower(), "span_id": str(link.get("spanId", "")).lower(),
-              "trace_state": link.get("traceState") or None, "flags": int(link.get("flags") or 0),
+              "trace_state": run.scrub(link.get("traceState") or "") or None, "flags": int(link.get("flags") or 0),
               "attributes": run.attrs(link.get("attributes")),
               "dropped_attributes_count": int(link.get("droppedAttributesCount", 0))} for link in s.get("links") or []]
     message = run.scrub(status.get("message") or "") or None
     return {"id": "s-" + sid, "trace_id": tid, "span_id": sid, "parent_span_id": parent,
-            "trace_state": s.get("traceState") or None, "flags": int(s.get("flags") or 0), "name": run.scrub(s.get("name", "")),
+            "trace_state": run.scrub(s.get("traceState") or "") or None, "flags": int(s.get("flags") or 0), "name": run.scrub(s.get("name", "")),
             "kind": enum("span_kind", s.get("kind")), "start_time_unix_nano": start,
             "end_time_unix_nano": nanos(s.get("endTimeUnixNano")), "status_code": enum("status_code", status.get("code")),
             "status_message": message, "attributes": run.attrs(s.get("attributes")), "events": events, "links": links,
@@ -504,6 +534,25 @@ def _validators() -> dict:
     return {name: Draft202012Validator({**schema, "$ref": f"#/$defs/{kind}"}) for name, kind in _KINDS.items()}
 
 
+def _visible(value):
+    """Every string a reader of the record sees once the JSON is decoded: keys, values, and text inside bytes values."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for v in value:
+            yield from _visible(v)
+    elif isinstance(value, dict):
+        if set(value) == {"$bytes"}:
+            try:
+                yield base64.b64decode(value["$bytes"], validate=True).decode("utf-8", "replace")
+            except ValueError:
+                yield value["$bytes"]
+            return
+        for k, v in value.items():
+            yield k
+            yield from _visible(v)
+
+
 def check_snapshot(snapshot_dir: Path, policy: Policy) -> list[str]:
     """decision 011 §3: everything a published snapshot must satisfy; any problem blocks publishing."""
     problems = []
@@ -538,6 +587,10 @@ def check_snapshot(snapshot_dir: Path, policy: Policy) -> list[str]:
             if not isinstance(rec, dict) or ("resource_id" if name == "resources.jsonl" else "id") not in rec:
                 problems.append(f"{name}: line {n} is not a {name.removesuffix('.jsonl')} record")
                 continue
+            # the file-wide grep above reads escaped JSON: an escape (\\n, \\u00e9) before a token hides its boundary, and
+            # base64 hides it completely, so those lines are also checked decoded
+            if (b"\\" in line or b"$bytes" in line) and any(policy.lexicon_hit(v) for v in _visible(rec)):
+                problems.append(f"{name}: line {n}: lexicon token present")
             for err in validators[name].iter_errors(rec):
                 problems.append(f"{name}: line {n}: schema: {'/'.join(map(str, err.absolute_path)) or '<root>'}: {err.message[:120]}")
                 break
