@@ -1,4 +1,4 @@
-"""Statistical rule baseline v1 (SPEC Core §7 #3, decision 014): per-service robust anomaly scores.
+"""Statistical rule baseline v2 (SPEC Core §7 #3, decision 014 and its revision 1): per-service robust anomaly scores.
 
 Reference = the first 10 minutes of the window (the one framing sentence every method gets); each feature scores the
 largest increase after it as a robust z. Fixed rules turn the scores into a decision-013 prediction.
@@ -11,9 +11,11 @@ from statistics import median
 
 from collect.derive import container_minute_stats, service_minute_stats
 
-METHOD = {"name": "stat-anomaly", "version": "1"}
+METHOD = {"name": "stat-anomaly", "version": "2"}
 REFERENCE_MINUTES = 10
-THRESHOLD = 3.0
+# decision 014 revision 1: max(3, the largest z of any SUT service on the fault-free calibration snapshots of soak #3
+# and soak #5), rounded up to 0.1; fixed here, never recomputed
+NULL_THRESHOLDS = {"error_ratio": 3.0, "p95_latency_ms": 45.0, "warn_logs": 3.0, "cpu": 3.6, "memory": 34.0}
 MAX_CANDIDATES = 5
 MIN_REFERENCE_POINTS = 3
 USER_FACING = ("frontend-proxy", "frontend")
@@ -62,16 +64,17 @@ def features(snapshot) -> dict[str, dict[str, dict[int, float]]]:
 
 def predict_from_features(feats: dict, *, incident_id: str, evidence: list[dict] | None = None) -> dict:
     z = robust_scores(feats)
-    score = {svc: max(f.values(), default=0.0) for svc, f in z.items()}
+    units = {svc: {k: v / NULL_THRESHOLDS[k] for k, v in f.items()} for svc, f in z.items()}  # 1 = the feature's threshold
+    score = {svc: max(f.values(), default=0.0) for svc, f in units.items()}
     ranked = sorted((s for s in score if score[s] > 0), key=lambda s: (-score[s], s))
     candidates = ranked[:MAX_CANDIDATES]
-    affected = [s for s in ranked if score[s] >= THRESHOLD] or candidates[:1]
+    affected = [s for s in ranked if score[s] >= 1] or candidates[:1]
     fault_type = None
-    if candidates and score[candidates[0]] >= THRESHOLD:
-        top_feature = max(z[candidates[0]].items(), key=lambda kv: (kv[1], kv[0]))[0]
+    if candidates and score[candidates[0]] >= 1:
+        top_feature = max(units[candidates[0]].items(), key=lambda kv: (kv[1], kv[0]))[0]
         fault_type = FEATURE_FAULT[top_feature]
     kinds = [kind for kind, feature in (("errors", "error_ratio"), ("latency", "p95_latency_ms"))
-             if any(z.get(s, {}).get(feature, 0.0) >= THRESHOLD for s in USER_FACING)] or ["none"]
+             if any(units.get(s, {}).get(feature, 0.0) >= 1 for s in USER_FACING)] or ["none"]
     return {"prediction_version": 1, "incident_id": incident_id, "method": dict(METHOD),
             "fault": {"fault_type": fault_type, "fault_family": None}, "origin_candidates": candidates,
             "affected_services": affected, "user_symptom": {"kinds": kinds}, "evidence": evidence or [],
@@ -84,7 +87,7 @@ def _evidence(snapshot, feats: dict, pred: dict) -> list[dict]:
     if not pred["origin_candidates"]:
         return []
     top = pred["origin_candidates"][0]
-    z = robust_scores({top: feats[top]})[top]
+    z = {k: v / NULL_THRESHOLDS[k] for k, v in robust_scores({top: feats[top]})[top].items()}
     feature = max(z.items(), key=lambda kv: (kv[1], kv[0]))[0] if z else None
     if feature not in ("error_ratio", "p95_latency_ms"):
         return []

@@ -87,7 +87,7 @@ def test_service_minute_stats_and_point_deltas(snap_dir):
               for t, v in ((10, 10), (20, 7), (30, 9))]
     assert point_deltas(updown, monotonic=False) == [{"time_unix_nano": 20, "delta": -3, "reset": False},
                                                      {"time_unix_nano": 30, "delta": 2, "reset": False}]
-    assert DERIVE_VERSION == 3
+    assert DERIVE_VERSION == 4
 
 
 def test_lone_surrogates_are_cleaned_in_every_field_so_readers_never_crash(tmp_path):
@@ -138,6 +138,44 @@ def test_container_minute_stats_and_the_statistical_baseline_on_a_real_snapshot(
     layout, norm = snap_dir
     snap = open_snapshot(norm, layout)
     stats = container_minute_stats(snap)
-    assert stats["version"] == DERIVE_VERSION and stats["services"]["checkout"][1]["cpu"] == 1  # docker_stats gauge, minute 1
+    assert stats["version"] == DERIVE_VERSION and "checkout" not in stats["services"]  # the fixture has only the gauge
     pred = predict(snap, "INC-001")
     assert check_prediction(pred) == [] and pred["usage"]["latency_s"] >= 0
+
+
+class _Containers:
+    """series() / points() of docker_stats metrics only."""
+
+    def __init__(self, series, points, start=0):
+        self._series, self._points = series, points
+        self.window = {"start_ns": start}
+
+    def series(self):
+        return iter(self._series)
+
+    def points(self):
+        return iter(self._points)
+
+
+def test_container_cpu_is_the_rate_of_the_cumulative_usage_not_the_utilization_gauge():
+    # decision 014 revision 1: in this stack docker_stats' container.cpu.utilization behaves like a cumulative ratio
+    # (it drifts for the whole run); the CPU feature is cores used = d(container.cpu.usage.total) / dt
+    from collect.derive import container_minute_stats
+
+    scope = {"name": "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/dockerstatsreceiver"}
+    series = [{"id": "m-cpu", "metric": "container.cpu.usage.total", "service": "ad", "scope": scope, "monotonic": True},
+              {"id": "m-util", "metric": "container.cpu.utilization", "service": "ad", "scope": scope, "monotonic": None},
+              {"id": "m-mem", "metric": "container.memory.usage.total", "service": "ad", "scope": scope, "monotonic": False}]
+    S = 10**9
+
+    def p(sid, t, v, start=1, first=False):
+        return {"series_id": sid, "time_unix_nano": t * S, "value": v, "start_time_unix_nano": start, "first_in_window": first}
+
+    points = [p("m-cpu", 0, 100 * S, first=True), p("m-cpu", 30, 115 * S), p("m-cpu", 50, 125 * S),  # 0.5 cores in minute 0
+              p("m-cpu", 70, 165 * S),  # 2 cores from 50 s to 70 s: minute 1
+              p("m-cpu", 80, 3 * S, start=2),  # restarted: the interval across the reset is unknown, not counted
+              p("m-cpu", 90, 4 * S, start=2),  # 0.1 cores: minute 1 is (40 + 1) s / (20 + 10) s
+              p("m-util", 30, 2.9), p("m-mem", 30, 50 * 2**20), p("m-mem", 50, 60 * 2**20)]
+    stats = container_minute_stats(_Containers(series, points))["services"]["ad"]
+    assert stats[0] == {"cpu": 0.5, "memory": 60 * 2**20}  # memory: the last value of the minute
+    assert stats[1]["cpu"] == pytest.approx(41 / 30) and stats[1]["memory"] is None

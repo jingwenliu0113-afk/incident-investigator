@@ -2,7 +2,7 @@
 
 import pytest
 
-from baselines.statistical import REFERENCE_MINUTES, predict_from_features, robust_scores
+from baselines.statistical import NULL_THRESHOLDS, REFERENCE_MINUTES, predict_from_features, robust_scores
 from eval.score import check_prediction
 
 
@@ -46,7 +46,7 @@ def test_prediction_ranks_services_and_maps_the_top_feature_to_a_fault_type():
     assert set(pred["affected_services"]) == {"payment", "checkout", "frontend"}
     assert pred["fault"] == {"fault_type": "error_response", "fault_family": None}
     assert pred["user_symptom"]["kinds"] == ["errors"]  # frontend's error ratio z >= 3
-    assert pred["method"] == {"name": "stat-anomaly", "version": "1"}
+    assert pred["method"] == {"name": "stat-anomaly", "version": "2"}
     assert check_prediction(pred) == []
 
 
@@ -61,3 +61,16 @@ def test_resource_and_latency_faults_and_a_quiet_incident():
     calm = predict_from_features({svc: quiet() for svc in ("email", "cart")}, incident_id="INC-003")
     assert calm["origin_candidates"] == [] and calm["fault"]["fault_type"] is None
     assert calm["affected_services"] == []
+
+
+def test_v2_thresholds_come_from_fault_free_runs_and_scores_are_compared_in_threshold_units():
+    # decision 014 revision 1: T_f = max(3, the largest z of any service on the fault-free calibration snapshots)
+    assert NULL_THRESHOLDS == {"error_ratio": 3.0, "p95_latency_ms": 45.0, "warn_logs": 3.0, "cpu": 3.6, "memory": 34.0}
+    f = {svc: quiet() for svc in ("payment", "cart", "frontend", "frontend-proxy")}
+    f["cart"]["p95_latency_ms"] = flat(20.0, m14=100.0)  # z = 40: a fault-free run has seen 44.9
+    f["payment"]["error_ratio"] = flat(0.0, m14=0.04)  # z = 4 of 3
+    pred = predict_from_features(f, incident_id="INC-004")
+    assert pred["origin_candidates"][:2] == ["payment", "cart"]  # 4 / 3 > 40 / 45
+    assert pred["affected_services"] == ["payment"] and pred["fault"]["fault_type"] == "error_response"
+    f["frontend-proxy"]["p95_latency_ms"] = flat(20.0, m14=100.0)  # z = 40 < 45: not a user-facing slowdown
+    assert predict_from_features(f, incident_id="INC-004")["user_symptom"]["kinds"] == ["none"]

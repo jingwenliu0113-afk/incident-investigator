@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-DERIVE_VERSION = 3  # 2: non-monotonic cumulative sums may go down; 3: container_minute_stats
+DERIVE_VERSION = 4  # 2: non-monotonic cumulative sums may go down; 3: container_minute_stats; 4: CPU from usage.total
 WARN_SEVERITY = 13  # OTLP severity_number: WARN and above
 
 
@@ -64,21 +64,37 @@ DOCKER_STATS_SCOPE = "dockerstatsreceiver"
 
 
 def container_minute_stats(snapshot) -> dict:
-    """Per service and per minute since the window start: docker_stats CPU utilization (mean) and memory usage (last)."""
-    wanted = {"container.cpu.utilization": "cpu", "container.memory.usage.total": "memory"}
+    """Per service and per minute since the window start, from docker_stats: CPU = cores used, the rate of the cumulative
+    container.cpu.usage.total over the intervals that end in the minute (an interval across a restart is unknown and
+    skipped); memory = the last container.memory.usage.total of the minute. container.cpu.utilization is not used: in
+    this stack it behaves like a cumulative ratio and drifts for the whole run (decision 014 revision 1)."""
+    wanted = {"container.cpu.usage.total": "cpu", "container.memory.usage.total": "memory"}
     series = {}
     for s in snapshot.series():
         if s["metric"] in wanted and DOCKER_STATS_SCOPE in ((s.get("scope") or {}).get("name") or ""):
             series[s["id"]] = (s["service"], wanted[s["metric"]])
     origin = snapshot.window["start_ns"]
-    acc: dict = defaultdict(lambda: defaultdict(lambda: {"cpu": [], "memory": []}))
+    points: dict = defaultdict(list)
     for p in snapshot.points():
         if p["series_id"] in series and isinstance(p.get("value"), (int, float)):
-            svc, feature = series[p["series_id"]]
-            acc[svc][(p["time_unix_nano"] - origin) // 60_000_000_000][feature].append((p["time_unix_nano"], p["value"]))
+            points[p["series_id"]].append(p)
+    acc: dict = defaultdict(lambda: defaultdict(lambda: {"cpu_ns": 0.0, "cpu_dt": 0, "memory": []}))
+    for sid, pts in points.items():
+        svc, feature = series[sid]
+        pts.sort(key=lambda p: p["time_unix_nano"])
+        if feature == "memory":
+            for p in pts:
+                acc[svc][(p["time_unix_nano"] - origin) // 60_000_000_000]["memory"].append((p["time_unix_nano"], p["value"]))
+            continue
+        for a, b in zip(pts, pts[1:]):
+            same_run = a.get("start_time_unix_nano") == b.get("start_time_unix_nano") and b["value"] >= a["value"]
+            if same_run and not b.get("first_in_window") and b["time_unix_nano"] > a["time_unix_nano"]:
+                m = acc[svc][(b["time_unix_nano"] - origin) // 60_000_000_000]
+                m["cpu_ns"] += b["value"] - a["value"]
+                m["cpu_dt"] += b["time_unix_nano"] - a["time_unix_nano"]
     out = {}
     for svc, minutes in acc.items():
-        out[svc] = {m: {"cpu": sum(v for _, v in d["cpu"]) / len(d["cpu"]) if d["cpu"] else None,
+        out[svc] = {m: {"cpu": d["cpu_ns"] / d["cpu_dt"] if d["cpu_dt"] else None,
                         "memory": max(d["memory"])[1] if d["memory"] else None}
                     for m, d in sorted(minutes.items())}
     return {"version": DERIVE_VERSION, "services": out}
