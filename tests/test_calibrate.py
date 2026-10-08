@@ -103,9 +103,20 @@ def test_freeze_needs_passing_calibrations_of_this_exact_policy_and_records_them
                                                                 "paymentFailure"))]
              for sig, ls in raw_lines().items()}
     clean["logs"].append(logs_line(res("shipping"), [log(T0 + 120 * S, "quote sent")]))
-    a = calibrate(soak(tmp_path, "a", lines=clean), tmp_path / "ca", policy=load_policy(policy_path))
-    b = calibrate(soak(tmp_path, "b", lines=clean), tmp_path / "cb", policy=load_policy(policy_path))
-    bad = calibrate(soak(tmp_path, "bad"), tmp_path / "cbad", policy=load_policy(policy_path))  # fails F3 / F4
+    code = {"commit": "a" * 40, "dirty": False}
+    a = calibrate(soak(tmp_path, "a", lines=clean), tmp_path / "ca", policy=load_policy(policy_path), code=code)
+    b = calibrate(soak(tmp_path, "b", lines=clean), tmp_path / "cb", policy=load_policy(policy_path), code=code)
+    bad = calibrate(soak(tmp_path, "bad"), tmp_path / "cbad", policy=load_policy(policy_path), code=code)  # fails F3 / F4
+    dirty = calibrate(soak(tmp_path, "d", lines=clean), tmp_path / "cd", policy=load_policy(policy_path),
+                      code={"commit": "a" * 40, "dirty": True})
+    assert a["code"] == code and a["report"]["code"] == code
+    with pytest.raises(ValueError, match="clean"):  # the normalizer behind the evidence must be a commit
+        freeze(policy_path, [tmp_path / "cd" / "calibration.json"])
+    with pytest.raises(ValueError, match="same commit"):
+        other = json.loads((tmp_path / "cb" / "calibration.json").read_text())
+        (tmp_path / "cb2.json").write_text(json.dumps({**other, "code": {"commit": "b" * 40, "dirty": False}}))
+        freeze(policy_path, [tmp_path / "ca" / "calibration.json", tmp_path / "cb2.json"])
+    assert dirty["freeze_check"]["pass"] is True
     with pytest.raises(ValueError, match="freeze criteria"):
         freeze(policy_path, [tmp_path / "ca" / "calibration.json", tmp_path / "cbad" / "calibration.json"])
     assert json.loads(policy_path.read_text())["status"] == "calibrating"

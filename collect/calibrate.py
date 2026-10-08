@@ -150,9 +150,16 @@ def _kept_services(snapshot: Path) -> set[str]:
     return out
 
 
-def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> dict:
-    """One calibration iteration into a fresh `out_dir` (earlier iterations stay as evidence)."""
+def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None, code: dict | None = None) -> dict:
+    """One calibration iteration into a fresh `out_dir` (earlier iterations stay as evidence).
+
+    `code`: git state of the normalizer (taken from this checkout when not given); freezing needs a clean commit."""
     policy = policy or load_policy()
+    if code is None:
+        from collect.provenance import project_git_state
+        from env.lock import PROJECT_DIR
+
+        code = project_git_state(PROJECT_DIR)
     _require_soak(soak_dir)
     out_dir.mkdir(parents=True, exist_ok=False)
     raw_dir = soak_dir / "raw"
@@ -168,7 +175,7 @@ def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> di
     layout = DataLayout(out_dir)
     t0 = time.monotonic()
     report = normalize(inputs, policy, incident_dir=layout.incident_dir("INC-000"),
-                       report_path=out_dir / "normalize_report.json", staging_dir=out_dir / "staging")
+                       report_path=out_dir / "normalize_report.json", staging_dir=out_dir / "staging", code=code)
     seconds = time.monotonic() - t0
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss  # bytes on macOS
     snapshot = layout.incident_dir("INC-000") / "normalized"
@@ -179,7 +186,7 @@ def calibrate(soak_dir: Path, out_dir: Path, policy: Policy | None = None) -> di
                          if "service" in r and any(r["scope_contains"] in scope for scope in inv["metric_scopes"])}
     raw_services = sut & ({svc for per in inv["services"].values() for svc in per} | set(inv["docker_container_names"])
                           | receiver_services)
-    result = {"soak": str(soak_dir), "policy": {"version": policy.raw["version"], "sha256": policy.sha256},
+    result = {"soak": str(soak_dir), "policy": {"version": policy.raw["version"], "sha256": policy.sha256}, "code": code,
               "scans": {sig: {k: s[k] for k in ("bytes", "lines", "items", "duplicates", "min_time", "max_time")}
                         for sig, s in scans.items()},
               "inventory": inv, "report": report, "check_problems": problems,
@@ -208,10 +215,14 @@ def freeze(policy_path: Path, calibrations: list[Path]) -> dict:
         cal = json.loads(Path(path).read_text())
         if cal["policy"]["sha256"] != current:
             raise ValueError(f"{path} was calibrated with {cal['policy']['sha256']}, not the current file {current}")
+        if not cal.get("code") or cal["code"].get("commit") is None or cal["code"].get("dirty"):
+            raise ValueError(f"{path} was not calibrated from a clean commit: {cal.get('code')}")
         if not cal["freeze_check"]["pass"]:
             failing = {k: v["detail"] for k, v in cal["freeze_check"].items() if k != "pass" and not v["pass"]}
             raise ValueError(f"{path} does not meet the freeze criteria: {failing}")
         loaded.append((path, cal))
+    if len({cal["code"]["commit"] for _, cal in loaded}) != 1:
+        raise ValueError("the calibrations must come from the same commit of the normalizer")
     raw = json.loads(policy_path.read_text())
     if raw.get("status") != "calibrating":
         raise ValueError(f"policy status is {raw.get('status')!r}: only a calibrating policy can be frozen (decision 011 §4)")
@@ -219,7 +230,8 @@ def freeze(policy_path: Path, calibrations: list[Path]) -> dict:
     for _, cal in loaded:
         for key, names in cal["report"]["attribute_keys"].items():
             inventory.setdefault(key, set()).update(names)
-    sources = [{"soak": cal["soak"], "calibration_sha256": sha256_path(path)} for path, cal in loaded]
+    sources = [{"soak": cal["soak"], "calibration_sha256": sha256_path(path), "code_commit": cal["code"]["commit"]}
+               for path, cal in loaded]
     raw.update(status="frozen", attribute_key_inventory={k: sorted(v) for k, v in sorted(inventory.items())},
                frozen_from=sources)
     policy_path.write_text(json.dumps(raw, indent=2, ensure_ascii=False) + "\n")

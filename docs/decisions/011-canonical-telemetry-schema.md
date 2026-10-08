@@ -184,5 +184,5 @@ policy 只有在**每一份**沒有 fault 的 soak raw（soak #3，以及之後�
 凍結時同時寫入：`attribute_key_inventory` = 各 soak 校準 report 的 `attribute_keys` 聯集；這裡記錄 soak 目錄、每份 `calibration.json` 的 sha256、
 凍結後的 policy sha 與 commit。凍結之後，任何改動都是 v2（見 §4）。
 凍結由 `python -m collect freeze --calibration <a> --calibration <b>` 執行（`collect.calibrate.freeze`）：每份校準都必須是**目前這個 policy 檔**
-（sha 相同）且 F1–F6 全過，否則拒絕；policy 檔寫入 `status: frozen`、`attribute_key_inventory` 與 `frozen_from`（soak 與 calibration.json 的 sha256），
+（sha 相同）、來自同一個乾淨的 commit（calibration.json 記錄 normalizer 的 git 狀態）且 F1–F6 全過，否則拒絕；policy 檔寫入 `status: frozen`、`attribute_key_inventory` 與 `frozen_from`（soak 與 calibration.json 的 sha256），
 之後手動重釘 `POLICY_SHA256`（測試會檢查）。
