@@ -117,4 +117,4 @@ def retrieval(snapshot, incident_id: str, model, *, method: dict, cache_root: Pa
     pred = finish(pred, incident_id, method, tokens, proxy=proxy_tokens(view) + proxy_tokens(results), tool_calls=0,
                   retrievals=len(queries), t_start=t_start, price_per_mtok=price_per_mtok)
     return pred, {"incident_id": incident_id, "method": dict(method), "stop_reason": stop, "messages": messages,
-                  "exposure": order, "usage": pred["usage"], "queries": queries}
+                  "exposure": ["stats:*", *order], "usage": pred["usage"], "queries": queries}

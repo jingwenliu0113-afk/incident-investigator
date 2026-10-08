@@ -36,7 +36,9 @@
   只有模型介面，**沒有接任何付費 API**。
 - **Dump-all 與 retrieval baseline（decision 021）**：共同的概覽區塊；dump-all = 概覽 → error 等級 record 依樣板分組 → 每分鐘輪流的時間分層樣本，在 B 內從尾端截；
   retrieval = 模型提 ≤ q 個查詢 → 每個 BM25（FTS5）取 k 筆 → 依時間排序交回 → 提交。預算建議值（B 120k、q 8、k 25、Agent 40 次工具 / 120k tokens / 30 回合）**待使用者決定**。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：569 passed（`-m "not network and not docker_daemon"`）。
+- **失敗分類 v1（decision 022）**：origin 或 fault_type 錯 = 失敗，依序歸一類：no_answer → coverage（review 的 telemetry_coverage 看不到 origin）→ mechanism →
+  not_seen（exposure 沒有 origin 在 fault 期間的證據）→ seen_misread（看到了仍判錯 = 推理失敗）→ rule_limit（統計 baseline）。score 表列出各類次數。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：573 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 

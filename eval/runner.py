@@ -45,11 +45,14 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> l
     written = []
     for inc, _ in incidents_in(layout, split):
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        pred = METHODS[method](snapshot, inc)
+        out = METHODS[method](snapshot, inc)
+        pred, transcript = out if isinstance(out, tuple) else (out, None)
         if problems := check_prediction(pred):
             raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
         path = out_dir / f"{inc}.json"
         path.write_text(json.dumps(pred, indent=2) + "\n")
+        if transcript is not None:  # LLM methods: messages, exposure, stop reason (decisions 020, 022)
+            (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
         written.append(path)
     return written
 
@@ -91,6 +94,7 @@ def _evidence_aggregate(rows: list[dict]) -> dict:
 
 def score_method(layout: DataLayout, method: str, split: str, out_root: Path) -> dict:
     from collect.review import effective_label
+    from eval.failures import CATEGORIES, classify
     from eval.relevance import gold_score, weak_score
 
     out_dir = Path(out_root) / split / method
@@ -111,13 +115,19 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
         reviewed += label["labeling"]["method"] == "catalog+review"
         pred = json.loads((out_dir / f"{inc}.json").read_text())
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        rows.append(score_incident(pred, label) | {
+        tpath = out_dir / f"{inc}.transcript.json"
+        transcript = json.loads(tpath.read_text()) if tpath.exists() else None
+        scores = score_incident(pred, label)
+        rows.append(scores | {
             "run_group_id": rg,
             "difficulty": audit["difficulty"],
+            "failure": classify(pred, label, scores, transcript, snapshot, clock_offset_s=_clock_offset(layout, inc)),
+            "label_reviewed": label["labeling"]["method"] == "catalog+review",
             "evidence_existence": existence(pred["evidence"], snapshot)["rate"],
             "evidence_weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=_clock_offset(layout, inc)),
             "evidence_gold": gold_score(pred["evidence"], snapshot, _gold(layout, inc))})
-    scored = [{k: v for k, v in r.items() if not k.startswith("evidence_") and k != "difficulty"} for r in rows]
+    scored = [{k: v for k, v in r.items() if not k.startswith("evidence_") and k not in ("difficulty", "failure", "label_reviewed")}
+              for r in rows]
     agg = aggregate(scored) if scored else {"n_incidents": 0, "n_run_groups": 0, "metrics": {}}
     by_difficulty = {}
     for d in DIFFICULTIES:
@@ -125,9 +135,14 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
         if group:
             by_difficulty[d] = {"n_incidents": len(group),
                                 "metrics": {m: sum(r[m] for r in group) / len(group) for m in MAIN_METRICS}}
+    failed = [r for r in rows if r["failure"] is not None]
+    failures = {"n_failures": len(failed), "by_category": {c: sum(r["failure"] == c for r in failed) for c in CATEGORIES},
+                "by_difficulty": {d: {c: sum(r["failure"] == c for r in failed if r["difficulty"] == d) for c in CATEGORIES}
+                                  for d in DIFFICULTIES if any(r["difficulty"] == d for r in failed)},
+                "classified_without_review": sum(not r["label_reviewed"] for r in failed)}
     result = {"method": method, "split": split, "labels": {"reviewed": reviewed, "a_priori": len(rows) - reviewed},
               "incidents": rows, "excluded": excluded, "aggregate": agg,
-              "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows)}
+              "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows), "failures": failures}
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
     return result
@@ -153,6 +168,11 @@ def _table(result: dict) -> str:
         lines.append(f"| {d} | {g['n_incidents']} | " + " | ".join(f"{g['metrics'][m]:.3f}" for m in MAIN_METRICS) + " |")
     if result["excluded"]:
         lines += ["", "Excluded from every score: " + ", ".join(f"{e['incident_id']} ({e['reason']})" for e in result["excluded"])]
+    f = result["failures"]
+    lines += ["", f"## Failures (decision 022): {f['n_failures']} incidents with origin or fault type wrong"
+              f" ({f['classified_without_review']} classified without a reviewed label)", "",
+              "| category | count |", "|---|---:|"]
+    lines += [f"| {c} | {n} |" for c, n in f["by_category"].items()]
     lines += ["", "## Evidence (decisions 013 §4, 017; each layer on its own)", "",
               "| layer | n incidents | mean | 95% interval |", "|---|---:|---:|---|"]
     names = {"existence": "existence", "temporal": "weak: temporal", "service": "weak: affected service",

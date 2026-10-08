@@ -244,4 +244,5 @@ class ToolSession:
                                "WHERE service = ? AND minute >= ? AND minute < ? ORDER BY minute", (service, lo, hi)).fetchall()
         lines = [f"{_rel_minute(m)} spans={n} errors={e} p95_ms={_num(p)} warn_logs={w} cpu_cores={_num(c)} "
                  f"memory_mib={_num(None if mem is None else mem / MiB, '.1f')}" for m, n, e, p, w, c, mem in rows]
-        return "\n".join([f"{service} per minute ({len(lines)} minutes)", *lines]), []
+        shown = [f"stats:{service}:{rows[0][0]}-{rows[-1][0]}"] if rows else []  # decision 022: what was looked at
+        return "\n".join([f"{service} per minute ({len(lines)} minutes)", *lines]), shown

@@ -140,6 +140,8 @@ def test_the_exposure_log_lists_each_shown_record_once_in_order(session):
     session.call("search_spans", {"service": "payment"})
     session.call("get_trace", {"trace_id": "b" * 32})
     assert session.exposure == [hexid("s", 2), hexid("s", 3), hexid("s", 1), hexid("s", 4)]
+    session.call("service_minute_stats", {"service": "payment", "t0": 600})
+    assert session.exposure[-1] == "stats:payment:11-11"  # decision 022: which service and minutes were looked at
 
 
 def test_tool_descriptions_do_not_describe_the_collection_and_pass_the_lexicon():

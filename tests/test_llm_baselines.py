@@ -58,7 +58,7 @@ def test_retrieval_asks_for_queries_then_answers_from_what_they_found(tmp_path):
     found = model.calls[1]["messages"][-1]["content"][0]["content"]
     assert re.findall(r"^([sl]-[0-9a-f]{16}) ", found, re.MULTILINE) == [hexid("l", 5), hexid("s", 2), hexid("l", 6)]  # by time
     assert pred["usage"]["retrievals"] == 2 and pred["usage"]["tool_calls"] == 0
-    assert transcript["exposure"] == [hexid("l", 5), hexid("s", 2), hexid("l", 6)]
+    assert transcript["exposure"] == ["stats:*", hexid("l", 5), hexid("s", 2), hexid("l", 6)]
     many = {"queries": [{"text": f"q{i}"} for i in range(12)]}
     pred, _ = retrieval(Snap(), "INC-001", Scripted([tool("propose_queries", many)], [tool("submit_diagnosis", ANSWER, "x")]),
                         method=METHOD, cache_root=tmp_path / "cache", q=8, k=5)

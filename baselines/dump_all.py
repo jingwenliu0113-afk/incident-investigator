@@ -106,6 +106,6 @@ def dump_all(snapshot, incident_id: str, model, *, method: dict, budget: int, pr
     pred, stop = submit_round(model, SYSTEM, messages, snapshot, incident_id, method, tokens)
     pred = finish(pred, incident_id, method, tokens, proxy=stats["proxy_tokens"], tool_calls=0, retrievals=0,
                   t_start=t_start, price_per_mtok=price_per_mtok)
-    exposure = [line.split(" ", 1)[0] for line in packed.splitlines() if line[:2] in ("s-", "l-")]
+    exposure = ["stats:*"] + [line.split(" ", 1)[0] for line in packed.splitlines() if line[:2] in ("s-", "l-")]
     return pred, {"incident_id": incident_id, "method": dict(method), "stop_reason": stop, "messages": messages,
                   "exposure": exposure, "usage": pred["usage"], "packing": stats}

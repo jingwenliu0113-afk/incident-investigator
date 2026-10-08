@@ -156,3 +156,25 @@ def test_scoring_needs_the_leakage_audit_drops_lexicon_hits_and_reports_by_diffi
     assert result["aggregate"]["n_incidents"] == 0 and result["incidents"] == []
     assert result["excluded"] == [{"incident_id": "INC-001", "reason": "lexicon_hits=2 (decision 015)"}]
     assert "INC-001" in (out / "pilot" / "stat-anomaly" / "table.md").read_text()
+
+
+def test_failures_are_classified_from_the_transcript_and_counted_by_category(tmp_path, monkeypatch):
+    # decision 022: a method may return (prediction, transcript); run writes the transcript next to the prediction
+    from baselines.statistical import predict
+
+    def wrong(snapshot, incident_id):
+        pred = {**predict(snapshot, incident_id), "origin_candidates": ["cart"],
+                "fault": {"fault_type": "error_response", "fault_family": None}}
+        return pred, {"stop_reason": "submitted", "exposure": ["stats:payment:0-30"]}
+
+    layout = stored(tmp_path / "data")
+    out = tmp_path / "results"
+    monkeypatch.setitem(METHODS, "wrong", wrong)
+    run_method(layout, "wrong", "pilot", out)
+    assert (out / "pilot" / "wrong" / "INC-001.transcript.json").exists()
+    audit_set(layout, "pilot", out)
+    result = score_method(layout, "wrong", "pilot", out)
+    assert result["incidents"][0]["failure"] == "seen_misread"
+    assert result["failures"]["n_failures"] == 1 and result["failures"]["by_category"]["seen_misread"] == 1
+    assert result["failures"]["classified_without_review"] == 1
+    assert "seen_misread" in (out / "pilot" / "wrong" / "table.md").read_text()
