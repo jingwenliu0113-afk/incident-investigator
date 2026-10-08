@@ -109,3 +109,18 @@ def test_each_step_runs_in_the_project_directory_and_its_output_goes_to_its_log(
     assert _subprocess(["pwd"], log) == 0
     assert log.read_text().splitlines() == ["$ pwd", str(PROJECT_DIR)]
     assert _subprocess(["sh", "-c", "echo oops >&2; exit 4"], log) == 4 and "oops" in log.read_text()
+
+
+def test_a_restarted_loop_first_processes_valid_incidents_left_without_a_label(tmp_path):
+    # a process that failed earlier: `next` already counts the incident, so the loop must finish it before moving on
+    layout = DataLayout(tmp_path)
+    run_group(layout, "RG-001", "paymentFailure", "100%", "valid", inc="INC-001")
+    stack = Stack(layout, ["valid"])
+    out, _ = loop(tmp_path, stack, max_runs=1)
+    first = stack.calls[0]
+    assert first[first.index("collect") + 1] == "process" and first[first.index("--incident") + 1] == "INC-001"
+    assert layout.label_path("INC-001").exists() and out["runs"][0]["flag"] == "productCatalogFailure"
+    stack = Stack(DataLayout(tmp_path / "b"), [], process_rc=2)
+    run_group(DataLayout(tmp_path / "b"), "RG-001", "paymentFailure", "100%", "valid", inc="INC-001")
+    out, _ = loop(tmp_path / "b", stack)
+    assert out["stopped"] == "process_failed" and out["incident_id"] == "INC-001" and len(stack.calls) == 1

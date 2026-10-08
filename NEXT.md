@@ -2,7 +2,7 @@
 
 ## 目前位置（2026-10-08 18:45Z，台北 10-09 02:45）
 
-**Core 的工具鏈都已完成並測試（614 passed），還沒有任何正式資料結果。**
+**Core 的工具鏈都已完成並測試（615 passed），還沒有任何正式資料結果。**
 - **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
 - **LLM 方法**：dump-all、retrieval、agent 的程式已就緒，等使用者批准模型、預算與成本。
 - **已完成的 Core 範圍**：
@@ -51,7 +51,7 @@
   （usage 各欄的 n / mean / median / max、總成本、停止原因、實際看過的 record 與概覽比例）。只報告、不計分。
   另加測試：dump-all / retrieval 送給模型的所有文字都通過詞彙檢查、不描述收集協定（decision 015 §6）。測試 604 passed。
 - **`collect pilot-loop`**（SPEC Week 1「自動化 collect → normalize → label」）：next → 一個 run（只在 run 期間持有 lock）→ process，重複到收齊或需要人；
-  之後自動 leakage → stat-anomaly。只是把既有步驟串起來，不改任何協定。測試 614 passed。**今晚不執行**（電力模式，A7）。
+  之後自動 leakage → stat-anomaly。只是把既有步驟串起來，不改任何協定；重新啟動時先補處理「有效但還沒有 label」的 incident。測試 615 passed。**今晚不執行**（電力模式，A7）。
 - **decision 025**：run record 與 manifest 記錄收集開始時的電源與 `pmset` 電力設定（唯讀，不改任何設定）；`collect status` 列出每個有效 run 的模式。
   要用哪一種模式收集是使用者的決定（A5）。測試 608 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
