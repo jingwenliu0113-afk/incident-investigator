@@ -68,6 +68,8 @@ def parse_memcg_dump(text: str, id_to_service: Mapping[str, str]) -> dict[str, d
         if not parts or parts[0] not in id_to_service:
             continue
         kv = dict(p.split("=", 1) for p in parts[1:] if "=" in p)
+        if not kv.get("current") or not kv.get("max"):
+            continue  # the cgroup is gone (container restarting): keep the other containers' readings
         out[id_to_service[parts[0]]] = {
             "current": int(kv["current"]),
             "max": None if kv["max"] == "max" else int(kv["max"]),

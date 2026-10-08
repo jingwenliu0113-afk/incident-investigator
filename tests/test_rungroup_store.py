@@ -93,3 +93,12 @@ def test_store_refuses_to_overwrite_an_existing_run_group(tmp_path):
     rec, work = finished(tmp_path)
     with pytest.raises(FileExistsError):
         store_run_group(rec, work, layout, lock_sha256=LOCK)
+
+
+def test_an_inconsistent_raw_export_is_refused_before_anything_moves(tmp_path):
+    layout = DataLayout(tmp_path / "data")
+    rec, work = finished(tmp_path)
+    rec["raw"]["collector"]["restarts"] = -1  # not a valid raw export record
+    with pytest.raises(ValueError, match="inconsistent"):
+        store_run_group(rec, work, layout, lock_sha256=LOCK)
+    assert not layout.raw_dir("RG-001").exists() and (work / "raw" / "traces.jsonl").exists()  # a retry can still store it

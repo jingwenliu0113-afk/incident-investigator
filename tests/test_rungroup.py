@@ -251,10 +251,40 @@ def test_a_crash_still_restores_the_flag_copies_raw_and_tears_down(tmp_path, fla
         return real_sample(kind)
 
     stack.sample = exploding
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as info:
         go(stack, clock, flag_path, tmp_path)
     assert flag_path.read_bytes() == original
     assert "finalize_raw" in stack.calls and stack.calls[-1] == ["down", "--volumes"]
+    # decision 009 §4: every run that started leaves a record, a crashed one too
+    rec = info.value.run_record
+    assert rec["status"] == "aborted_error" and "daemon went away" in rec["reasons"][0]
+    assert rec["raw"] is not None and rec["down_exit_code"] == 0 and "events" in rec
+
+
+def test_a_second_interrupt_cannot_skip_down_and_signals_are_masked_during_teardown(tmp_path, flag_path):
+    import signal
+
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    seen = {}
+    real_compose = stack.compose
+
+    def finalize(out_dir):
+        stack.calls.append("finalize_raw")
+        raise KeyboardInterrupt  # Ctrl-C while `compose stop -t 120` runs, and again in the teardown's retry
+
+    def compose(args):
+        if args == ["down", "--volumes"]:
+            seen["sigint"] = signal.getsignal(signal.SIGINT)
+        return real_compose(args)
+
+    stack.finalize_raw, stack.compose = finalize, compose
+    before = signal.getsignal(signal.SIGINT)
+    with pytest.raises(KeyboardInterrupt) as info:
+        go(stack, clock, flag_path, tmp_path)
+    assert stack.calls[-1] == ["down", "--volumes"] and seen["sigint"] == signal.SIG_IGN
+    assert signal.getsignal(signal.SIGINT) == before
+    assert info.value.run_record["status"] == "aborted_error"
 
 
 def test_preflight_problems_refuse_to_start(tmp_path, flag_path):
@@ -280,3 +310,36 @@ def test_sampling_errors_invalidate_the_run(tmp_path, flag_path):
     stack.sample = flaky
     rec = go(stack, clock, flag_path, tmp_path)
     assert rec["status"] == "invalid" and "sampling_errors" in rec["reasons"]
+
+
+def test_sampling_errors_outside_the_normal_period_are_recorded_but_keep_the_run_valid(tmp_path, flag_path):
+    # decision 009 §4: only the normal period decides validity; an OOM-restarting container during the fault can make a
+    # memcg read fail, and that must not systematically drop restart-causing faults
+    schedule = go(Stack(Clock(), flag_path), Clock(), flag_path, tmp_path / "ref")["schedule"]
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    real_sample = stack.sample
+
+    def flaky(kind):
+        now = clock.now()
+        if kind in ("memcg", "state") and schedule["fault_on"] < now < schedule["fault_off"]:
+            return {"kind": "error", "ts": now, "sampler": kind, "error": "cgroup gone"}
+        if kind == "memcg" and schedule["normal_start"] < now < schedule["fault_on"]:
+            return {"kind": "error", "ts": now, "sampler": kind, "error": "cgroup gone"}  # memcg decides nothing
+        return real_sample(kind)
+
+    stack.sample = flaky
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "valid" and rec["sampling_errors"]
+
+
+def test_verify_running_must_be_clean_before_the_warm_up(tmp_path, flag_path):
+    # decision 009 §1/§3: the gate starts only after a clean verify-running
+    clock = Clock()
+    original = flag_path.read_bytes()
+    stack = Stack(clock, flag_path)
+    stack.verify_running = lambda wait: ["otel-collector: exited"]
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "aborted_unstable" and "verify-running" in rec["reasons"][0]
+    assert "gate" not in rec and not [c for c in stack.calls if isinstance(c, tuple)]  # never queried flagd
+    assert flag_path.read_bytes() == original and stack.calls[-1] == ["down", "--volumes"]

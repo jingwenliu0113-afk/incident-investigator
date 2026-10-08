@@ -53,6 +53,8 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 | 整個 run | raw 不完整（decision 008 §6 的任一旗標） | **run 無效** |
 | 整個 run | flag 寫入後的生效確認失敗（見決策 5） | **run 無效** |
 | incident 視窗 | 任何 SUT 服務的 container 在某個完整分鐘沒有 docker_stats 資料（decision 012） | **run 無效**（`container_metrics_missing`） |
+| normal period | state 或 Locust 的取樣失敗（2026-10-08 修訂 2） | **run 無效**（`sampling_errors`）：看不到的 normal period 無法保證乾淨 |
+| normal period 以外，或 memcg 取樣 | 取樣失敗 | **不影響有效性**，逐筆記在 `sampling_errors` |
 
 - 無效的 run 保留紀錄與原始資料（供除錯），但不指派 incident id、不進任何 split；之後以**新的 run group id 與新 seed** 重收，不重用 seed。
 - 所有 run（包含中止與無效）都寫一份 run record，讓「丟掉了多少 run、為什麼」可以回報（EXPERIMENT_RULES：不得只回報成功案例）。
@@ -99,3 +101,16 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 - 每個 run group 的長度約 5（暖機）+ 0–10（閘門）+ 10–15（normal）+ fault + ≥5（recovery）+ 3（drain）分鐘；fault 10 分鐘時約 35–50 分鐘。
 - dataset 只包含通過閘門、normal period 乾淨、raw 完整、flag 生效確認通過的 run；報告要附「中止 / 無效 run 的數量與原因」。
 - 本決策只規定 run 的結構與有效性；每種 fault 的持續時間、要收哪些 fault，在 Pilot fault 清單（M3 / M5）決定。
+
+## 修訂 2（2026-10-08，任何 incident 收集之前；review 確認的問題，讓程式與本決策一致）
+
+1. **取樣失敗**：原本程式把任何時段的取樣失敗都判無效，比 §4 嚴格，而且會系統性排除「讓 container 重啟的 fault」
+   （例如 `emailMemoryLeak`：OOM 重啟時 cgroup 暫時不存在，memcg 讀取失敗）。改為只有 normal period 內 state / Locust 的取樣失敗才無效；
+   其他的照樣記錄。memcg 的解析也改成跳過 cgroup 已消失的 container，不影響其他 container 的讀數。
+2. **verify-running 不乾淨就中止**：§1 / §3 說閘門在 `verify-running` 乾淨之後才開始；原本只記錄不檢查。300 s 後仍有問題 → `aborted_unstable`，
+   不碰 flag，照常收尾。
+3. **中途出錯也留下 run record**：harness 任何例外（含 Ctrl-C）都把 run 記為 `aborted_error`，原因寫進 `reasons`，照常收尾後由 `collect run` 存檔（§4「所有 run 都寫 run record」）。
+   store 在搬動 raw 之前先檢查 raw export，被拒絕時可以重試。
+4. **收尾不會被打斷**：SIGTERM / SIGHUP 轉成和 Ctrl-C 一樣的流程；收尾期間忽略 SIGINT / SIGTERM / SIGHUP（子程序 `compose stop` / `down` 也繼承），
+   而且 `down` 放在最內層的 finally，一定會執行。
+

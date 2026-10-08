@@ -116,11 +116,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=PILOT_FAULT_MINUTES)
     stack = LiveStack(PROJECT_DIR, UPSTREAM_DIR, layout.root)
     work = layout.root / "staging" / rg
+    import signal
+
+    def interrupt(signum, frame):  # SIGTERM / SIGHUP (terminal closed) unwind like Ctrl-C, so the teardown runs
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    for s in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(s, interrupt)
     try:
         record = run_group(plan, stack, RealClock(), flag_path=FLAG_FILE, work_dir=work)
-    except RuntimeError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+    except BaseException as e:
+        if (crashed := getattr(e, "run_record", None)) is not None:  # decision 009 §4: a started run keeps its record
+            store_run_group(crashed, work, layout, lock_sha256=stack.lock_sha256)
+        if isinstance(e, RuntimeError):
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        raise
     stored = store_run_group(record, work, layout, lock_sha256=stack.lock_sha256)
     after = verify_against_disk(stack.lock, UPSTREAM_DIR, PROJECT_DIR)
     print(json.dumps({"run_group_id": rg, "status": record["status"], "reasons": record["reasons"],

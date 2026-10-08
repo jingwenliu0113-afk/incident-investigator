@@ -379,6 +379,13 @@ def test_event_watch_runs_docker_events_for_the_project_and_parses_what_it_wrote
     assert EventWatch(tmp_path / "e2.jsonl", project="p", env={}, popen=FakeProc).stop() is None
 
 
+def test_parse_memcg_dump_skips_a_container_whose_cgroup_is_gone():
+    # a container restarting mid-sample has no cgroup files: skip it, keep the others' readings
+    text = "aaa current=1 max=2 oom_kill=0 max_events=0\nbbb current= max= oom_kill= max_events=\n"
+    assert parse_memcg_dump(text, {"aaa": "cart", "bbb": "email"}) == {
+        "cart": {"current": 1, "max": 2, "oom_kill": 0, "max_events": 0}}
+
+
 def test_debug_exporter_minutes():
     log = "\n".join([
         '2026-10-08T10:05:01.1Z\tinfo\tTraces\t{"otelcol.component.id": "debug", "spans": 7}',

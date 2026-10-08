@@ -11,6 +11,7 @@ import json
 import random
 import re
 import shutil
+import signal
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -79,6 +80,22 @@ class Stack(Protocol):
     def ofrep(self, flag: str, context: dict) -> tuple[str, object]: ...
     def vm_time(self) -> float: ...
     def finalize_raw(self, out_dir: Path) -> dict: ...  # env.soak.finalize_raw
+
+
+_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP")
+
+
+def _mask_signals() -> dict:
+    """Ignore interrupts while tearing down; children (`compose stop` / `down`) inherit SIG_IGN too."""
+    try:
+        return {name: signal.signal(getattr(signal, name), signal.SIG_IGN) for name in _SIGNALS}
+    except ValueError:  # not the main thread: nothing to mask
+        return {}
+
+
+def _restore_signals(saved: dict) -> None:
+    for name, handler in saved.items():
+        signal.signal(getattr(signal, name), handler)
 
 
 def _ns(ts: str) -> int:
@@ -171,7 +188,11 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
             record["status"] = "aborted_up_failed"
             record["reasons"].append(f"compose up exit {rc}")
             return record
-        record["initial_verify_running"] = stack.verify_running(300)
+        record["initial_verify_running"] = problems = stack.verify_running(300)
+        if problems:  # decision 009 §1/§3: the gate starts only after a clean verify-running
+            record["status"] = "aborted_unstable"
+            record["reasons"].append("verify-running not clean after 300 s: " + "; ".join(problems[:10]))
+            return record
         record["container_rescan"] = stack.rescan_containers()
 
         run_until(clock.monotonic() + plan.warmup_minutes * 60)
@@ -210,23 +231,34 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
         run_until(clock.monotonic() + plan.drain_minutes * 60)  # decision 008 §4
         events = watch.stop()  # before the collector stop: its exit is judged with the raw export
         raw = stack.finalize_raw(work_dir)
+    except BaseException as e:  # decision 009 §4: a run that started always leaves a record, a crashed one too
+        record["status"] = "aborted_error"
+        record["reasons"].append(f"harness error: {type(e).__name__}: {str(e)[:300]}")
+        e.run_record = record  # the same dict: the teardown below still fills raw / events / down_exit_code
+        raise
     finally:
-        if flag_path.read_bytes() != original:
-            write_atomic(flag_path, original)
-        samples_file.close()
-        if watch is not None:
-            stopped = watch.stop()
-            events = events if events is not None else stopped
-        if up_started and raw is None:
+        masked = _mask_signals()  # a second Ctrl-C / SIGTERM must not cut the teardown short
+        try:
             try:
-                raw = stack.finalize_raw(work_dir)  # whatever exists is kept for debugging (decision 009 §4)
-            except Exception as e:  # noqa: BLE001 - teardown must still run
-                record["raw_error"] = str(e)[:300]
-        record["raw"] = raw
-        if up_started:
-            record["down_exit_code"] = stack.compose(["down", "--volumes"])
+                if flag_path.read_bytes() != original:
+                    write_atomic(flag_path, original)
+                samples_file.close()
+                if watch is not None:
+                    stopped = watch.stop()
+                    events = events if events is not None else stopped
+                if up_started and raw is None:
+                    try:
+                        raw = stack.finalize_raw(work_dir)  # whatever exists is kept for debugging (decision 009 §4)
+                    except BaseException as e:  # noqa: BLE001 - teardown must still run
+                        record["raw_error"] = f"{type(e).__name__}: {str(e)[:300]}"
+                record["raw"] = raw
+                record["events"] = events
+            finally:
+                if up_started:
+                    record["down_exit_code"] = stack.compose(["down", "--volumes"])
+        finally:
+            _restore_signals(masked)
 
-    record["events"] = events
     if {"fault_on", "fault_off"} <= times.keys():
         record["schedule"] = dict(times)
         record["normal_period"] = period_observations(samples, events or [], start=times["normal_start"],
@@ -252,8 +284,12 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
     if len(offsets) == 2 and abs(offsets[1] - offsets[0]) > MAX_CLOCK_DRIFT:
         record["reasons"].append("clock_drift")  # the window cannot be mapped onto the data clock reliably
     if errors := [s for s in samples if s["kind"] == "error"]:
-        record["sampling_errors"] = errors[:20]
-        record["reasons"].append("sampling_errors")  # a period we could not observe cannot be vouched for
+        record["sampling_errors"] = errors[:20]  # all of them are kept for the label review
+        # decision 009 §4: only the normal period decides validity, and only state / Locust samples judge it
+        blind = [s for s in errors if s.get("sampler") in ("state", "locust")
+                 and times.get("normal_start", "~") <= s["ts"] <= times.get("fault_on", "")]
+        if blind:
+            record["reasons"].append("sampling_errors")  # a normal period we could not observe cannot be vouched for
     record["status"] = "valid" if not record["reasons"] else "invalid"
     if record["status"] == "valid":
         record["incident_window"] = {"start": times["normal_start"], "end": times["end"]}  # decision 009 §1
@@ -284,16 +320,17 @@ def store_run_group(record: dict, work_dir: Path, layout: DataLayout, *, lock_sh
         raise FileExistsError(f"{rg} already stored ({truth} / {raw_dir})")
     incident_ids = [next_id(layout, "INC")] if record["status"] == "valid" else []
 
+    export = None
+    if (raw := record.get("raw")) is not None:  # checked before anything moves, so a refused store can be retried
+        export = build_raw_export(rg, lock_sha256, raw["collector"], raw["files"], accounting=record.get("raw_accounting"))
+        if problems := check_raw_export(export):
+            raise ValueError(f"raw export record of {rg} is inconsistent: {problems}")
     raw_dir.mkdir(parents=True)
     for sig in SIGNALS:
         src = work_dir / "raw" / f"{sig}.jsonl"
         if src.exists():
             shutil.move(src, raw_dir / src.name)
-    raw = record.get("raw")
-    if raw is not None:
-        export = build_raw_export(rg, lock_sha256, raw["collector"], raw["files"], accounting=record.get("raw_accounting"))
-        if problems := check_raw_export(export):
-            raise ValueError(f"raw export record of {rg} is inconsistent: {problems}")
+    if export is not None:
         (raw_dir / "raw_export.json").write_text(json.dumps(export, indent=2) + "\n")
 
     truth.mkdir(parents=True)
