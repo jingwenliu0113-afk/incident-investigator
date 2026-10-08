@@ -40,7 +40,7 @@
   not_seen（exposure 沒有 origin 在 fault 期間的證據）→ seen_misread（看到了仍判錯 = 推理失敗）→ rule_limit（統計 baseline）。score 表列出各類次數。
 - **Held-out 協定（decision 023，Proposed）**：與 Pilot 相同的 10 個 fault、每個 K 個（使用者決定）、隨機 block 順序、方法執行前 review、freeze 紀錄、Gate 用單一 paired 檢定。
   已實作與 K 無關的分析：`python -m eval compare --method A --against B --set pilot`（paired run-group bootstrap、leave-one-fault-out）。
-- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：601 passed（`-m "not network and not docker_daemon"`）。
+- 沒有進入 Advanced / Optional；沒有任何付費用量。測試：602 passed（`-m "not network and not docker_daemon"`）。
 
 ## 上次完成
 
@@ -115,6 +115,8 @@
       `uv run python -m eval score --method stat-anomaly --set pilot`（v2；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
    - 目前：RG-001（2026-10-08 15:21Z，paymentFailure）aborted_unstable（暖機中 grafana exit 1 重啟、payment healthcheck 連續失敗，payment 140/140 MiB）→ 下一個仍是 paymentFailure 100%。
    - 每次 run 之間 lock 會釋放（wrapper 一次只包一個 run），其他 Project 可以在空檔取得。
+   - 非正式的整條 pipeline 檢查：`./tools/with-mac-lock uv run python -m collect smoke --root <scratch>`（normal / fault / recovery 各 2 分鐘，
+     資料只寫在 scratch，永不進任何集合；跑完自動 normalize → replay → label → leakage → 統計 baseline）。
    - **run 進行中不改 `collect/`、`env/`**（run 會在中途延遲 import 這些模組；改了會讓一個 run 混用兩個版本），也要保持 working tree 乾淨
      （preflight 與 normalize 都拒絕 dirty tree）；可以改 `eval/`、`agent/`、`baselines/`、文件。
 5. **Gate 前請使用者做的人工作業**：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。

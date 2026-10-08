@@ -76,6 +76,55 @@ def _label(layout: DataLayout, incident: str, labeler: str) -> dict:
     return {"incident_id": incident, "label": "written", "method": label["labeling"]["method"]}
 
 
+SMOKE_MINUTES = {"normal": 2, "fault": 2, "recovery": 2}
+
+
+def _smoke(ns: argparse.Namespace) -> int:
+    """A short non-formal run through the real stack and every later step, all under a scratch root."""
+    root = ns.root.resolve()
+    formal = (PROJECT_DIR / "data" / "external").resolve()
+    if root == formal or formal in root.parents:
+        print(f"error: the smoke root must be outside {formal} (a smoke run is never part of any set)", file=sys.stderr)
+        return 2
+    import subprocess
+    from datetime import UTC, datetime
+
+    from collect.live import LiveStack, RealClock
+    from eval.runner import audit_set, run_method, score_method
+
+    layout = DataLayout(root)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "SMOKE.txt").write_text("non-formal smoke run: never use these data in any set\n")
+    rg = next_id(layout, "RG")
+    plan = Plan(run_group_id=rg, seed=random.SystemRandom().randrange(2**31), flag=ns.flag, variant=ns.variant,
+                fault_minutes=SMOKE_MINUTES["fault"], normal_base_minutes=SMOKE_MINUTES["normal"], normal_jitter_minutes=0,
+                recovery_base_minutes=SMOKE_MINUTES["recovery"], recovery_jitter_minutes=0)
+    stack = LiveStack(PROJECT_DIR, UPSTREAM_DIR, PROJECT_DIR / "data/external")  # preflight: the formal lock and soak
+    work = root / "staging" / rg
+    record = run_group(plan, stack, RealClock(), flag_path=FLAG_FILE, work_dir=work)
+    stored = store_run_group(record, work, layout, lock_sha256=stack.lock_sha256)
+    steps: dict = {"run_group_id": rg, "status": record["status"], "reasons": record["reasons"],
+                   "clock_offset_seconds": record.get("clock_offset_seconds"), "incident_ids": stored["incident_ids"]}
+    if record["status"] == "valid":
+        inc = stored["incident_ids"][0]
+        try:
+            steps["normalize"] = _normalize(layout, inc)["content_sha256"]
+            out = _replay(layout, inc)
+            steps["replay"] = {"every_id_resolves": out["every_id_resolves"], "checks": out["checks"]}
+            steps["label"] = _label(layout, inc, "agent:smoke")["label"]
+            results = root / "results"
+            steps["leakage"] = audit_set(layout, "pilot", results)["incidents"]
+            run_method(layout, "stat-anomaly", "pilot", results)
+            scored = score_method(layout, "stat-anomaly", "pilot", results)
+            steps["stat_anomaly"] = {"main": {m: v["mean"] for m, v in scored["aggregate"]["metrics"].items()},
+                                     "failure": scored["incidents"][0]["failure"]}
+        except (LookupError, ValueError, PermissionError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
+            steps["error"] = f"{type(e).__name__}: {e}"
+    steps["finished_at"] = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    print(json.dumps(steps, indent=2, default=str))
+    return 0 if record["status"] == "valid" and "error" not in steps else 1
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m collect", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -98,6 +147,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                                        "origin / affected / symptom from its set's pre-registered plan (decision 016)")
     lab.add_argument("--incident", required=True)
     lab.add_argument("--labeler", required=True, help="who labels, e.g. human:<name> or agent:claude-code")
+    smk = sub.add_parser("smoke", help="NOT a formal run: a short run (2-minute normal / fault / recovery) into a scratch data "
+                                       "root, then normalize, replay, label, leakage audit and the statistical baseline there; "
+                                       "checks the whole pipeline and never enters any set")
+    smk.add_argument("--root", type=Path, required=True, help="scratch data root, outside data/external")
+    smk.add_argument("--flag", default="paymentFailure")
+    smk.add_argument("--variant", default="100%")
     sta = sub.add_parser("status", help="decision 016: run groups and incidents of every planned fault of a set")
     sta.add_argument("--set", dest="split", required=True, choices=["pilot"])
     nxt = sub.add_parser("next", help="the next planned fault to collect, as `--flag F --variant V` (nothing when complete)")
@@ -137,6 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({**out, "next": "re-pin POLICY_SHA256 in collect/policy.py to this sha256, run the tests, "
                                          "record the freeze in decision 011, commit"}, indent=2))
         return 0
+    if ns.command == "smoke":
+        return _smoke(ns)
     if ns.command in ("status", "next"):
         from collect.pilot import next_planned, plan_status
 

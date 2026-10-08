@@ -63,3 +63,12 @@ def test_every_run_names_its_set_and_held_out_waits_for_its_protocol(capsys):
         main(["run", "--flag", "paymentFailure", "--variant", "100%"])  # --set is required
     assert main(["run", "--set", "heldout", "--flag", "paymentFailure", "--variant", "100%"]) == 2
     assert "held-out" in capsys.readouterr().err
+
+
+def test_a_smoke_run_never_writes_into_the_formal_data_tree(tmp_path, capsys):
+    # a short, non-formal pipeline check: its data root must be outside data/external (never a set, never an id there)
+    import collect.__main__ as cli
+
+    assert main(["smoke", "--root", str(cli.PROJECT_DIR / "data" / "external" / "x")]) == 2
+    assert "outside" in capsys.readouterr().err
+    assert cli.SMOKE_MINUTES == {"normal": 2, "fault": 2, "recovery": 2}
