@@ -40,6 +40,7 @@ from env.lock import (
     build_lock,
     check_lock,
     check_rendered,
+    lock_sha256,
     pinned_images,
     upstream_git_problems,
     verify_against_disk,
@@ -287,6 +288,7 @@ def cmd_soak(
     minutes: float,
     warmup_minutes: float,
     out_dir: Path,
+    drain_minutes: float = 3,
     interval: float = 15,
     lock_dir: Path = soak.HEAVY_LOCK_DIR,
     compose_exec: Callable[..., int] | None = None,
@@ -310,9 +312,10 @@ def cmd_soak(
         samples_file.write(json.dumps(sample) + "\n")
         samples_file.flush()
 
+    raw_expected = soak.raw_export_expected(lock)
     watch = soak.EventWatch(out_dir / "docker-events.jsonl", project=lock["startup"]["project_name"], env=env)
     up_at = soak._now()
-    report: dict = {"pass": False, "up_at": up_at}
+    report: dict = {"pass": False, "up_at": up_at, "env_lock_sha256": lock_sha256(lock)}
     try:
         if (up_rc := compose_exec(project_dir, upstream_dir, ["up"])) != 0:
             # containers started before the failure keep running (unless-stopped): `finally` still tears down
@@ -345,7 +348,9 @@ def cmd_soak(
             i += 1
         take(("state", "memcg", "locust"))
         window_end = samples[-1]["ts"]
-        events = watch.stop()
+        if raw_expected:
+            time.sleep(drain_minutes * 60)  # decision 008 §4: late spans and one more 60 s metric cycle reach /raw
+        events = watch.stop()  # before the collector stop: its exit is judged by R7, not as a death in R2
 
         collector_log = ""
         try:
@@ -356,6 +361,8 @@ def cmd_soak(
             (out_dir / "docker-inspect.json").write_text(soak._run(["docker", "inspect", *sampler.ids], env))
         except (subprocess.CalledProcessError, OSError) as e:
             report["aborted"] = f"capture failed: {str(e)[:300]}"
+        if raw_expected:
+            report["raw"] = soak.finalize_raw(lambda args: compose_exec(project_dir, upstream_dir, args), lock, env, out_dir)
         try:
             rendered = render_config(**_compose_kwargs(lock, project_dir, upstream_dir))
             limits = {svc: int(rendered["services"][svc]["deploy"]["resources"]["limits"]["memory"])
@@ -365,7 +372,7 @@ def cmd_soak(
             report["aborted"] = report.get("aborted", "") + f" memory limit unknown: {e}"
         report.update(soak.evaluate(samples, window_start=window_start, window_end=window_end,
                                     limits=limits, flow_minutes=soak.debug_exporter_minutes(collector_log),
-                                    events=events))
+                                    events=events, raw=report.get("raw")))
         report.update(docker_events=events, opensearch=soak.opensearch_rejections(collector_log),
                       sampling_errors=[s for s in samples if s["kind"] == "error"])
         if report.get("aborted") or report["sampling_errors"]:
@@ -373,6 +380,11 @@ def cmd_soak(
     finally:
         samples_file.close()
         report.setdefault("docker_events", watch.stop())  # before `down`: teardown deaths are not part of the record
+        if raw_expected and "raw" not in report:  # a broken run still keeps whatever raw telemetry exists
+            try:
+                report["raw"] = soak.finalize_raw(lambda args: compose_exec(project_dir, upstream_dir, args), lock, env, out_dir)
+            except Exception as e:  # noqa: BLE001 - teardown must still run
+                report["raw_error"] = str(e)[:300]
         down_rc = compose_exec(project_dir, upstream_dir, ["down", "--volumes"])
         report["teardown"] = {"down_exit_code": down_rc,
                               "verify": verify_against_disk(lock, upstream_dir, project_dir)}
@@ -417,6 +429,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sk.add_argument("--minutes", type=float, default=MIN_SOAK_MINUTES)
     sk.add_argument("--warmup-minutes", type=float, default=5)
     sk.add_argument("--interval", type=float, default=15)
+    sk.add_argument("--drain-minutes", type=float, default=3, help="raw export only: keep running after the window")
     sk.add_argument("--out", type=Path)
     for name in ("compose", "compose-cmd"):
         sub.add_parser(name).add_argument("args", nargs=argparse.REMAINDER)
@@ -455,7 +468,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise CliError(f"a baseline soak window must be at least {MIN_SOAK_MINUTES} minutes (decision 004)")
             out = ns.out or project_dir / "data/external/soak" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             report = cmd_soak(project_dir, upstream_dir, minutes=ns.minutes, warmup_minutes=ns.warmup_minutes,
-                              out_dir=out, interval=ns.interval)
+                              out_dir=out, interval=ns.interval, drain_minutes=ns.drain_minutes)
             print((out / "report.md").read_text() if (out / "report.md").exists() else json.dumps(report, indent=2))
             return 0 if report.get("pass") and not report["teardown"]["verify"] else 1
         elif ns.command == "compose":

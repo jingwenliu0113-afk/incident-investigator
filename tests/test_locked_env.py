@@ -77,8 +77,8 @@ def test_memory_limits_from_the_project_overlay_and_unchanged_gomemlimit(lock, s
 
 
 @pytest.mark.docker_cli
-def test_project_override_changes_nothing_but_the_watched_memory_limits(lock):
-    from env.soak import WATCHED_SERVICES
+def test_project_override_changes_nothing_but_memory_limits_and_the_raw_extras_mount(lock):
+    from env.soak import RAW_CONFIG, RAW_EXTRAS_TARGET, RAW_SERVICE, WATCHED_SERVICES
 
     def leaves(node, path=()):
         if isinstance(node, dict):
@@ -89,9 +89,30 @@ def test_project_override_changes_nothing_but_the_watched_memory_limits(lock):
         else:
             yield path, node
 
-    with_override = dict(leaves(_render(lock)))
+    rendered = _render(lock)
+    with_override = dict(leaves(rendered))
     without = dict(leaves(_render(lock, drop=(OVERRIDES,))))
     changed = {p for p in with_override.keys() | without.keys() if with_override.get(p) != without.get(p)}
-    # every limit the overlay changes is judged by the soak test's R6 (decision 004 revision), and nothing else changes
-    assert changed == {("services", svc, "deploy", "resources", "limits", "memory") for svc in WATCHED_SERVICES}
+    # every limit the overlay changes is judged by the soak test's R6 (decision 004 revision), plus the collector's
+    # extras layer (decision 008); nothing else changes
+    assert changed == {("services", svc, "deploy", "resources", "limits", "memory") for svc in WATCHED_SERVICES} | {
+        ("services", RAW_SERVICE, "volumes")}
     assert set(WATCHED_SERVICES) == {"product-catalog", "checkout"}
+    vols = {v["target"]: v for v in rendered["services"][RAW_SERVICE]["volumes"]}
+    before = {v["target"]: v for v in json.loads(without[("services", RAW_SERVICE, "volumes")])}
+    assert vols[RAW_EXTRAS_TARGET]["source"] == str(PROJECT_DIR / RAW_CONFIG)  # replaces the upstream extras stub
+    assert {t: v for t, v in vols.items() if t != RAW_EXTRAS_TARGET} == {
+        t: v for t, v in before.items() if t != RAW_EXTRAS_TARGET}  # the other collector mounts stay as upstream
+
+
+def test_locked_stack_exports_raw_telemetry(lock):
+    from env.soak import raw_export_expected
+
+    assert raw_export_expected(lock)  # decision 008: the lock records env/otelcol-config-raw.yml with its sha256
+
+
+def test_lock_sha256_is_the_sha256_of_the_committed_lock_file(lock):
+    from env.lock import LOCK_PATH, lock_sha256, sha256_path
+
+    # manifests, raw exports and soak reports name the environment by this digest (decision 001)
+    assert lock_sha256(lock) == sha256_path(PROJECT_DIR / LOCK_PATH)

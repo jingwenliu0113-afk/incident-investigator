@@ -1,0 +1,42 @@
+# Raw telemetry export (decision 008). Loaded as the collector's extras layer, after
+# otelcol-config.yml -> otelcol-config-full.yml -> otelcol-config-observability.yml
+# (env/compose.overrides.yaml mounts it over the upstream extras stub).
+#
+# It only ADDS exporters and pipelines. The collector replaces lists wholesale when it merges
+# layers, so no existing pipeline or list is touched here (tests/test_raw_export_config.py).
+
+exporters:
+  # One exporter and one file per signal. JSON Lines: one TracesData / MetricsData / LogsData per line.
+  # append: a collector restart or SIGHUP must not truncate the file (it cannot be combined with rotation).
+  # /raw is in the container's writable layer; the harness copies it out before `down` (decision 008 §3–4).
+  file/raw_traces:
+    path: /raw/traces.jsonl
+    append: true
+    create_directory: true
+  file/raw_metrics:
+    path: /raw/metrics.jsonl
+    append: true
+    create_directory: true
+  file/raw_logs:
+    path: /raw/logs.jsonl
+    append: true
+    create_directory: true
+
+service:
+  pipelines:
+    # Straight from the receivers: none of the upstream processors (span renaming, redaction,
+    # resource detection) runs first. memory_limiter is the shared upstream instance: it changes
+    # nothing and refuses together with the main pipelines, so a refused batch is not written twice.
+    traces/raw:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [file/raw_traces]
+    metrics/raw:
+      # the effective upstream metrics receivers minus the span_metrics connector (built from processed spans)
+      receivers: [docker_stats, http_check/frontend-proxy, host_metrics, nginx, otlp, redis, postgresql, kafkametrics]
+      processors: [memory_limiter]
+      exporters: [file/raw_metrics]
+    logs/raw:
+      receivers: [otlp]
+      processors: [memory_limiter]
+      exporters: [file/raw_logs]

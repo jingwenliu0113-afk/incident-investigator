@@ -22,6 +22,6 @@
   "notes": [
     "Human-edited input. `python -m env resolve` turns it into env/otel-demo.lock.json + env/compose.pinned.yaml.",
     "See docs/decisions/001-pin-otel-demo-3.1.0.md for why this tag and compose file set.",
-    "env/compose.overrides.yaml: product-catalog memory 128M (decision 004, escalated after soak #1), checkout memory 64M (decision 007)."
+    "env/compose.overrides.yaml: product-catalog memory 128M (decision 004, escalated after soak #1), checkout memory 64M (decision 007), otel-collector extras = env/otelcol-config-raw.yml (decision 008 raw export)."
   ]
 }

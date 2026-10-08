@@ -17,12 +17,21 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from collect.rawfile import scan_raw_file
 from env.lock import pinned_images
 from env.runtime import PROJECT_LABEL, SERVICE_LABEL
 
 HEAVY_LOCK_DIR = Path("/tmp/ai-portfolio-mac-heavy.lock")
 WATCHED_SERVICES = ("product-catalog", "checkout")  # R6: every service whose memory limit env/compose.overrides.yaml changes
 NEAR_LIMIT = 0.80  # R6: p95 of memory.current must stay below this share of the limit
+
+# raw export (decision 008)
+RAW_SERVICE = "otel-collector"
+RAW_CONFIG = "env/otelcol-config-raw.yml"
+RAW_EXTRAS_TARGET = "/etc/otelcol-config-extras.yml"
+RAW_DIR_IN_COLLECTOR = "/raw"
+RAW_SIGNALS = ("traces", "metrics", "logs")
+RAW_STOP_TIMEOUT = 120  # seconds of graceful shutdown before SIGKILL
 
 _5XX = re.compile(r"HTTPError\('5\d\d\b")
 _SIGNALS = {"Traces": ("traces", "spans"), "Metrics": ("metrics", "data points"), "Logs": ("logs", "log records")}
@@ -112,11 +121,13 @@ def evaluate(
     limits: Mapping[str, int],
     flow_minutes: Mapping[str, set[str]],
     events: list[dict] | None,
+    raw: dict | None = None,
 ) -> dict:
     """Judge samples against R1–R6 (docs/decisions/004).
 
     `limits`: memory limit in bytes of every service whose limit the project overlay changed (R6).
     `events` are the project's Docker oom/die events since before `up`, or None when the stream broke.
+    `raw`: the raw export of a stack that has the raw pipeline (decision 008), judged by R7–R9.
     """
     w0, w1 = _ts(window_start), _ts(window_end)
 
@@ -160,10 +171,7 @@ def evaluate(
     crit["R4"] = {"pass": bool(win_states) and not bad,
                   "detail": f"{len(win_states)} samples; problems: {bad[:10] or 'none'}"}
 
-    minutes, t = [], w0.replace(second=0, microsecond=0)
-    while t < w1:
-        minutes.append(t.strftime("%H:%M"))
-        t += timedelta(minutes=1)
+    minutes = [t.strftime("%H:%M") for t in _window_minutes(w0, w1)]
     gaps = {sig: [m for m in minutes if m not in flow_minutes.get(sig, set())] for sig in ("traces", "metrics", "logs")}
     gaps = {k: v for k, v in gaps.items() if v}
     crit["R5"] = {"pass": bool(minutes) and not gaps, "detail": f"{len(minutes)} minutes; gaps: {gaps or 'none'}"}
@@ -186,6 +194,9 @@ def evaluate(
             f"memory.max hits in window {hits}; cgroup limit seen {sorted(map(str, seen))}")
     crit["R6"] = {"pass": r6_ok, "detail": "; ".join(r6_detail) or "no watched service"}
 
+    if raw is not None:
+        crit.update(evaluate_raw(raw, window_start=window_start, window_end=window_end))
+
     return {
         "pass": all(c["pass"] for c in crit.values()),
         "window": {"start": window_start, "end": window_end},
@@ -193,6 +204,45 @@ def evaluate(
         "ambient": {"ask_agent": ambient},
         "warmup": {"http_5xx": warm_5xx},
     }
+
+
+def _window_minutes(w0: datetime, w1: datetime) -> list[datetime]:
+    out, t = [], w0.replace(second=0, microsecond=0)
+    while t < w1:
+        out.append(t)
+        t += timedelta(minutes=1)
+    return out
+
+
+def raw_export_expected(lock: dict) -> bool:
+    """Does the locked stack run the raw pipeline (decision 008: project extras config on the collector)?"""
+    return any(m["service"] == RAW_SERVICE and m["target"] == RAW_EXTRAS_TARGET
+               and m["source"] == {"root": "project", "path": RAW_CONFIG} for m in lock.get("bind_mounts", []))
+
+
+def evaluate_raw(raw: dict, *, window_start: str, window_end: str) -> dict:
+    """R7–R9 (decision 008 §8). raw = {"collector": {restarts, stop_exit_code, copied}, "files": {signal: scan | None}}."""
+    col, files = raw["collector"], raw["files"]
+    missing = [sig for sig in RAW_SIGNALS if not files.get(sig) or not files[sig]["bytes"]]
+    r7_ok = col.get("restarts") == 0 and col.get("stop_exit_code") == 0 and bool(col.get("copied")) and not missing
+    crit = {"R7": {"pass": r7_ok, "detail": (
+        f"collector restarts {col.get('restarts')}, stop exit code {col.get('stop_exit_code')}, "
+        f"copied {col.get('copied')}; missing or empty files: {missing or 'none'}"
+        + (f"; {col['error']}" if col.get("error") else ""))}}
+
+    scanned = {sig: files[sig] for sig in RAW_SIGNALS if files.get(sig)}
+    bad = {sig: {"parse_errors": f["parse_errors"], "lines": f["parse_error_lines"], "truncated_last_line": f["last_line_truncated"],
+                 "wrong_signal_lines": f["wrong_signal_lines"]}
+           for sig, f in scanned.items() if f["parse_errors"] or f["wrong_signal_lines"]}
+    crit["R8"] = {"pass": len(scanned) == len(RAW_SIGNALS) and not bad,
+                  "detail": f"{len(scanned)} files scanned; problems: {bad or 'none'}"}
+
+    minutes = [t.strftime("%Y-%m-%dT%H:%M") for t in _window_minutes(_ts(window_start), _ts(window_end))]
+    gaps = {sig: [m[11:] for m in minutes if m not in set(scanned[sig]["minutes"])] for sig in scanned}
+    gaps = {k: v for k, v in gaps.items() if v}
+    crit["R9"] = {"pass": bool(minutes) and len(scanned) == len(RAW_SIGNALS) and not gaps,
+                  "detail": f"{len(minutes)} minutes; gaps by data time: {gaps or 'none'}"}
+    return crit
 
 
 def require_heavy_lock(project_dir: Path, *, lock_dir: Path = HEAVY_LOCK_DIR) -> dict:
@@ -234,6 +284,13 @@ class EventWatch:
                            stdout=self._file, stderr=subprocess.STDOUT, env=env)
         self._stopped = False
         self._events: list[dict] | None = None
+
+    def seen(self) -> list[dict]:
+        """Events written so far, without ending the stream."""
+        if self._stopped:
+            return list(self._events or [])
+        self._file.flush()
+        return parse_docker_events(self.path.read_text(), project=self.project)
 
     def stop(self) -> list[dict] | None:
         """The events seen, or None if the stream ended on its own (a hole in the record)."""
@@ -286,6 +343,36 @@ class Sampler:
         return {"kind": "locust", "ts": _now(), **data}
 
 
+def collector_state(container_id: str, env: dict[str, str], run: Run = _run) -> dict:
+    out = run(["docker", "inspect", "--format", "{{.RestartCount}} {{.State.ExitCode}} {{.State.Status}}",
+               container_id], env).split()
+    return {"restarts": int(out[0]), "exit_code": int(out[1]), "status": out[2]}
+
+
+def finalize_raw(compose: Callable[[list[str]], int], lock: dict, env: dict[str, str], out_dir: Path) -> dict:
+    """decision 008 §4: stop the collector gracefully (final flush), then copy /raw out before anything is removed.
+
+    `compose(args)` runs `docker compose <args>` on the locked stack and returns its exit code.
+    """
+    collector: dict = {"copied": False}
+    t0 = time.monotonic()
+    collector["stop_rc"] = compose(["stop", "-t", str(RAW_STOP_TIMEOUT), RAW_SERVICE])
+    collector["stop_seconds"] = round(time.monotonic() - t0, 1)
+    try:
+        cid = next(i for i, svc in project_container_ids(lock, env).items() if svc == RAW_SERVICE)
+        st = collector_state(cid, env)
+        collector.update(container_id=cid, restarts=st["restarts"], stop_exit_code=st["exit_code"])
+    except (StopIteration, subprocess.CalledProcessError, ValueError, IndexError) as e:
+        collector["error"] = f"collector state unknown: {str(e)[:200]}"
+    dest = out_dir / "raw"
+    t0 = time.monotonic()
+    cp_rc = compose(["cp", f"{RAW_SERVICE}:{RAW_DIR_IN_COLLECTOR}", str(dest)])
+    collector.update(cp_rc=cp_rc, cp_seconds=round(time.monotonic() - t0, 1), copied=cp_rc == 0 and dest.is_dir())
+    files = {sig: scan_raw_file(dest / f"{sig}.jsonl", sig) if (dest / f"{sig}.jsonl").is_file() else None
+             for sig in RAW_SIGNALS}
+    return {"collector": collector, "files": files}
+
+
 def project_container_ids(lock: dict, env: dict[str, str], run: Run = _run) -> dict[str, str]:
     ids = run(["docker", "ps", "-a", "-q", "--no-trunc", "--filter",
                f"label={PROJECT_LABEL}={lock['startup']['project_name']}"], env).split()
@@ -326,4 +413,11 @@ def write_report(out_dir: Path, report: dict) -> None:
               f"{(report.get('ambient') or {}).get('ask_agent')}; OpenSearch: {report.get('opensearch')}",
               f"- warm-up HTTP 5xx (recorded, not judged) = {(report.get('warmup') or {}).get('http_5xx')}",
               f"- teardown: {report.get('teardown')}"]
+    if report.get("raw") or report.get("raw_error"):
+        raw = report.get("raw") or {}
+        files = {sig: (f and {k: f[k] for k in ("bytes", "lines", "items", "duplicates", "parse_errors", "min_time", "max_time")})
+                 for sig, f in (raw.get("files") or {}).items()}
+        lines += [f"- raw collector: {raw.get('collector')}", f"- raw files: {files}"]
+        if report.get("raw_error"):
+            lines.append(f"- raw error: {report['raw_error']}")
     (out_dir / "report.md").write_text("\n".join(lines) + "\n")

@@ -18,3 +18,8 @@ services:
         limits:
           # decision 007: upstream 20M OOM-killed twice with no fault injected. First version 64M (same rule as 004).
           memory: 64M
+  otel-collector:
+    volumes:
+      # decision 008: raw telemetry export. Replaces the upstream extras stub (compose merges volumes by target);
+      # relative to the upstream checkout, i.e. env/otelcol-config-raw.yml. Adds pipelines, rewrites none.
+      - ../../otelcol-config-raw.yml:/etc/otelcol-config-extras.yml

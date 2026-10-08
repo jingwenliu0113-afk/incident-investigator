@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://incident-investigator.local/schemas/raw_export.schema.json",
+  "title": "Raw telemetry export of one run group (NOT agent-readable)",
+  "description": "Stored at data/external/raw/<run_group_id>/raw_export.json next to the three OTLP JSON Lines files (decision 008). Built by collect.rawexport.build_raw_export from collect.rawfile scans; complete is true only when there are no flags.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "raw_export_version",
+    "run_group_id",
+    "env_lock_sha256",
+    "collector",
+    "files",
+    "flags",
+    "complete"
+  ],
+  "properties": {
+    "raw_export_version": {
+      "const": 1
+    },
+    "run_group_id": {
+      "type": "string",
+      "pattern": "^RG-[0-9]{3,}(?!\\n)$"
+    },
+    "env_lock_sha256": {
+      "$ref": "#/$defs/digest"
+    },
+    "collector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "container_id",
+        "restarts",
+        "stop_exit_code",
+        "stop_seconds",
+        "cp_seconds",
+        "copied"
+      ],
+      "properties": {
+        "container_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restarts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "stop_exit_code": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stop_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cp_seconds": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "copied": {
+          "type": "boolean"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "signal",
+          "format",
+          "bytes",
+          "sha256",
+          "lines",
+          "empty_lines",
+          "parse_errors",
+          "parse_error_lines",
+          "last_line_truncated",
+          "wrong_signal_lines",
+          "items",
+          "duplicates",
+          "min_time",
+          "max_time",
+          "by_service",
+          "minutes"
+        ],
+        "properties": {
+          "path": {
+            "enum": [
+              "traces.jsonl",
+              "metrics.jsonl",
+              "logs.jsonl"
+            ]
+          },
+          "signal": {
+            "enum": [
+              "traces",
+              "metrics",
+              "logs"
+            ]
+          },
+          "format": {
+            "const": "otlp-json-lines"
+          },
+          "bytes": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "sha256": {
+            "$ref": "#/$defs/digest"
+          },
+          "lines": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "empty_lines": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parse_errors": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "parse_error_lines": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "last_line_truncated": {
+            "type": "boolean"
+          },
+          "wrong_signal_lines": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "min_time": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/utc_timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_time": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/utc_timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "by_service": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "minutes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?!\\n)$"
+            }
+          }
+        }
+      }
+    },
+    "flags": {
+      "description": "Why the export is incomplete (decision 008 §6); empty when complete.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(collector_restarted|collector_sigkilled|copy_failed|memory_limiter_refused|exporter_rejected|missing_file:(traces|metrics|logs)|parse_errors:(traces|metrics|logs))(?!\\n)$"
+      }
+    },
+    "complete": {
+      "type": "boolean"
+    },
+    "accounting": {
+      "description": "Loss accounting (decision 008 §6); its exact shape is fixed once real collector counters are observed.",
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}(?!\\n)$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z(?!\\n)$"
+    }
+  }
+}

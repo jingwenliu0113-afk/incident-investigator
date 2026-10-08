@@ -1,14 +1,16 @@
 """Physical layout of collected data (all under gitignored data/external/).
 
     data/external/
-    ├── incidents/<INC-nnn>/          agent/baseline-readable side
-    │   ├── raw/ normalized/
-    │   └── manifest.json             provenance only
+    ├── incidents/<INC-nnn>/
+    │   ├── normalized/               the ONLY agent/baseline-readable data (is_agent_readable)
+    │   └── manifest.json             provenance only (people and eval)
+    ├── raw/<RG-nnn>/                 raw telemetry of one run group + raw_export.json (decision 008)
     └── ground_truth/                 NEVER mounted or readable by agents/baselines
         ├── run_groups/<RG-nnn>/injection.json
         └── incidents/<INC-nnn>/label.json
 
-IDs are opaque counters so a path never reveals the fault.
+IDs are opaque counters so a path never reveals the fault. Which raw run group an incident was
+cut from is recorded only on the ground-truth side.
 """
 
 from __future__ import annotations
@@ -51,6 +53,32 @@ class DataLayout:
 
     def injection_path(self, run_group_id: str) -> Path:
         return self.run_group_truth_dir(run_group_id) / "injection.json"
+
+    @property
+    def raw_root(self) -> Path:
+        return self.root / "raw"
+
+    def raw_dir(self, run_group_id: str) -> Path:
+        return self.raw_root / _checked(run_group_id, RUN_GROUP_ID, "run group id")
+
+    def raw_export_path(self, run_group_id: str) -> Path:
+        return self.raw_dir(run_group_id) / "raw_export.json"
+
+    def is_agent_readable(self, path: Path) -> bool:
+        """Allow-list (decision 008 §5): only incidents/<INC>/normalized/** may reach an agent or baseline.
+
+        Decided by file identity like is_ground_truth: symlinks are resolved, letter case is folded,
+        and anything that may alias a ground-truth file (extra hard links) is refused.
+        """
+        if self.is_ground_truth(path):
+            return False
+        resolved, incidents = Path(path).resolve(), self.incidents_root.resolve()
+        base = [p.casefold() for p in incidents.parts]
+        if [p.casefold() for p in resolved.parts[: len(base)]] != base:
+            return False
+        rest = resolved.parts[len(base):]
+        return (len(rest) >= 2 and rest[0].isascii() and INCIDENT_ID.fullmatch(rest[0].upper()) is not None
+                and rest[1].casefold() == "normalized")
 
     def label_path(self, incident_id: str) -> Path:
         return (self.ground_truth_root / "incidents" / _checked(incident_id, INCIDENT_ID, "incident id")

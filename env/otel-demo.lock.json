@@ -1,6 +1,6 @@
 {
   "lock_version": 1,
-  "generated_at": "2026-10-08T10:37:44Z",
+  "generated_at": "2026-10-08T11:16:37Z",
   "upstream": {
     "repo": "https://github.com/open-telemetry/opentelemetry-demo",
     "tag": "3.1.0",
@@ -28,7 +28,7 @@
       {
         "root": "project",
         "path": "env/compose.overrides.yaml",
-        "sha256": "sha256:81b04ec2af469d728ae32ba7466cd366281661f8ac5af56558728814a77da4ff"
+        "sha256": "sha256:fe1da17deb1ba24f1efd513bfffba77877af0460f7fb03cc7fad68725f0083e4"
       },
       {
         "root": "project",
@@ -504,11 +504,11 @@
       "service": "otel-collector",
       "target": "/etc/otelcol-config-extras.yml",
       "source": {
-        "root": "upstream",
-        "path": "src/otel-collector/otelcol-config-extras.yml"
+        "root": "project",
+        "path": "env/otelcol-config-raw.yml"
       },
       "kind": "file",
-      "sha256": "sha256:4b343286290788a7dd246e9c19229bfeb27028d55130070531bf47634757823a",
+      "sha256": "sha256:95c4d7cf8ca7a515526adb9f8667139f370cb72b8721affe1824bfdcfab42aaa",
       "read_only": false
     },
     {

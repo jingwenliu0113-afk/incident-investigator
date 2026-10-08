@@ -1,6 +1,8 @@
 """Baseline soak test evaluation — pass criteria R1–R6 are fixed in docs/decisions/004."""
 
+import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -10,9 +12,11 @@ from env.soak import (
     count_5xx,
     debug_exporter_minutes,
     evaluate,
+    evaluate_raw,
     is_ambient,
     parse_docker_events,
     parse_memcg_dump,
+    raw_export_expected,
     require_heavy_lock,
 )
 
@@ -170,6 +174,71 @@ def test_window_without_samples_cannot_pass():
     assert report["pass"] is False
 
 
+# ---------------------------------------------------------------- raw export (decision 008 §8)
+
+def raw_scan(signal, minutes=("2026-10-08T10:05", "2026-10-08T10:06", "2026-10-08T10:07"), **over):
+    s = {"signal": signal, "bytes": 100, "lines": 3, "parse_errors": 0, "parse_error_lines": [],
+         "last_line_truncated": False, "wrong_signal_lines": 0, "items": 9, "duplicates": 0,
+         "minutes": list(minutes)}
+    s.update(over)
+    return s
+
+
+def raw_ok(**collector):
+    return {"collector": {"restarts": 0, "stop_exit_code": 0, "copied": True, **collector},
+            "files": {sig: raw_scan(sig) for sig in ("traces", "metrics", "logs")}}
+
+
+def test_raw_export_passes_when_collector_stopped_cleanly_and_files_cover_the_window():
+    crit = evaluate_raw(raw_ok(), window_start=W0, window_end=W1)
+    assert {k: v["pass"] for k, v in crit.items()} == {"R7": True, "R8": True, "R9": True}
+
+
+@pytest.mark.parametrize("collector, failing", [
+    ({"restarts": 1}, "R7"),  # a restart may have truncated or interleaved the files
+    ({"stop_exit_code": 137}, "R7"),  # SIGKILLed before the final flush
+    ({"copied": False}, "R7"),
+])
+def test_r7_collector_must_stop_gracefully_and_files_must_be_copied(collector, failing):
+    assert evaluate_raw(raw_ok(**collector), window_start=W0, window_end=W1)[failing]["pass"] is False
+
+
+def test_r7_needs_all_three_non_empty_files_and_r8_needs_clean_lines():
+    raw = raw_ok()
+    raw["files"]["logs"] = None  # not copied / missing
+    assert evaluate_raw(raw, window_start=W0, window_end=W1)["R7"]["pass"] is False
+    raw = raw_ok()
+    raw["files"]["metrics"] = raw_scan("metrics", bytes=0, lines=0, items=0, minutes=())
+    assert evaluate_raw(raw, window_start=W0, window_end=W1)["R7"]["pass"] is False
+    for broken in ({"parse_errors": 1, "parse_error_lines": [3], "last_line_truncated": True},
+                   {"wrong_signal_lines": 2}):
+        raw = raw_ok()
+        raw["files"]["traces"] = raw_scan("traces", **broken)
+        assert evaluate_raw(raw, window_start=W0, window_end=W1)["R8"]["pass"] is False, broken
+
+
+def test_r9_every_window_minute_must_have_data_in_every_raw_file():
+    raw = raw_ok()
+    raw["files"]["metrics"] = raw_scan("metrics", minutes=("2026-10-08T10:05", "2026-10-08T10:07"))
+    crit = evaluate_raw(raw, window_start=W0, window_end=W1)
+    assert crit["R9"]["pass"] is False and "metrics" in crit["R9"]["detail"] and "10:06" in crit["R9"]["detail"]
+
+
+def test_raw_criteria_join_the_verdict_only_when_the_stack_exports_raw():
+    assert set(run(healthy_run())["criteria"]) == {f"R{i}" for i in range(1, 7)}
+    report = evaluate(healthy_run(), window_start=W0, window_end=W1, limits={"product-catalog": LIMIT},
+                      flow_minutes=FLOW, events=[], raw=raw_ok(stop_exit_code=137))
+    assert report["criteria"]["R7"]["pass"] is False and report["pass"] is False
+
+
+def test_raw_export_expected_from_the_locked_extras_mount():
+    mount = {"service": "otel-collector", "target": "/etc/otelcol-config-extras.yml",
+             "source": {"root": "project", "path": "env/otelcol-config-raw.yml"}}
+    upstream_stub = {**mount, "source": {"root": "upstream", "path": "src/otel-collector/otelcol-config-extras.yml"}}
+    assert raw_export_expected({"bind_mounts": [mount]}) is True
+    assert raw_export_expected({"bind_mounts": [upstream_stub]}) is False
+
+
 # ---------------------------------------------------------------- parsing helpers
 
 def test_count_5xx_and_ambient_classification():
@@ -238,6 +307,11 @@ def test_event_watch_runs_docker_events_for_the_project_and_parses_what_it_wrote
     events = watch.stop()
     assert events == [{"ts": "2026-10-08T10:01:05Z", "service": "cart", "action": "oom", "exit_code": None}]
     assert watch.stop() == events  # idempotent: safe to call again from a finally block
+
+    # a run reads the events so far without ending the stream (decision 009 stability gate)
+    live = EventWatch(tmp_path / "live.jsonl", project="p", env={}, popen=FakeProc)
+    assert live.seen() == [{"ts": "2026-10-08T10:01:05Z", "service": "cart", "action": "oom", "exit_code": None}]
+    assert live.stop() == live.seen()
 
     FakeProc.exited_early = True  # e.g. the daemon went away: the stream has a hole, R2 cannot be judged
     assert EventWatch(tmp_path / "e2.jsonl", project="p", env={}, popen=FakeProc).stop() is None
@@ -308,7 +382,8 @@ def soak_env(monkeypatch):
     existing = {}  # project containers present before `up`
 
     def container_ids(lock, env):
-        return dict(existing) if ["up"] not in calls else {"id1": "product-catalog", "id2": "load-generator"}
+        return dict(existing) if ["up"] not in calls else {"id1": "product-catalog", "id2": "load-generator",
+                                                            "id3": "otel-collector"}
 
     monkeypatch.setattr(soak_mod, "project_container_ids", container_ids)
 
@@ -397,7 +472,10 @@ def test_failed_up_still_stops_the_watch_tears_down_and_reports(tmp_path, soak_e
     out = tmp_path / "out"
     report = soak_env.cli.cmd_soak(tmp_path, tmp_path, minutes=0, warmup_minutes=0, out_dir=out,
                                    compose_exec=lambda p, u, args: soak_env.calls.append(args) or (1 if args == ["up"] else 0))
-    assert soak_env.calls == ["watch ii-otel-demo", ["up"], "watch stopped", ["down", "--volumes"]]
+    calls = soak_env.calls
+    assert calls[:3] == ["watch ii-otel-demo", ["up"], "watch stopped"] and calls[-1] == ["down", "--volumes"]
+    # the locked stack exports raw telemetry (decision 008): whatever /raw holds is still copied out before `down`
+    assert calls[3:-1] == [["stop", "-t", "120", "otel-collector"], ["cp", "otel-collector:/raw", str(out / "raw")]]
     assert report["pass"] is False and "compose up failed" in report["aborted"]
     assert "FAILED" in (out / "report.md").read_text()
 
@@ -413,3 +491,68 @@ def test_soak_refuses_to_start_over_existing_project_containers(tmp_path, soak_e
                               compose_exec=soak_env.compose_exec)
     assert soak_env.calls == []
     assert not (tmp_path / "out").exists()
+
+
+@pytest.fixture
+def raw_soak(monkeypatch, soak_env):
+    """A stack with the raw pipeline: `compose cp` produces three small valid raw files."""
+    soak_mod = soak_env.soak
+    monkeypatch.setattr(soak_mod, "raw_export_expected", lambda lock: True)
+    monkeypatch.setattr(soak_mod, "collector_state", lambda cid, env: {"restarts": 0, "exit_code": 0, "status": "exited"})
+
+    class GoodSampler:
+        def __init__(self, *a, **kw):
+            self.ids = {"id1": "product-catalog", "id2": "load-generator", "id3": "otel-collector"}
+
+        def state(self):
+            return state(soak_mod._now())
+
+        def memcg(self):
+            return memcg(soak_mod._now())
+
+        def locust(self):
+            return locust(soak_mod._now(), requests=10, errors={})
+
+    monkeypatch.setattr(soak_mod, "Sampler", GoodSampler)
+    monkeypatch.setattr(soak_mod, "_run", lambda *a, **kw: "")
+
+    def compose_exec(p, u, args):
+        soak_env.calls.append(args)
+        if args[0] == "cp":
+            dest = Path(args[2])
+            dest.mkdir(parents=True)
+            for sig, top in (("traces", "resourceSpans"), ("metrics", "resourceMetrics"), ("logs", "resourceLogs")):
+                (dest / f"{sig}.jsonl").write_text(json.dumps({top: []}) + "\n")
+        return 0
+
+    soak_env.compose_exec = compose_exec
+    return soak_env
+
+
+def test_soak_drains_stops_the_collector_and_copies_raw_before_down(tmp_path, raw_soak):
+    report = raw_soak.cli.cmd_soak(tmp_path, tmp_path, minutes=0, warmup_minutes=0, out_dir=tmp_path / "out",
+                                   compose_exec=raw_soak.compose_exec)
+    calls = raw_soak.calls
+    stop = ["stop", "-t", "120", "otel-collector"]
+    cp = ["cp", "otel-collector:/raw", str(tmp_path / "out" / "raw")]
+    # the event watch ends before the collector is stopped on purpose (its exit is judged by R7, not R2)
+    assert calls.index("watch stopped") < calls.index(stop) < calls.index(cp) < calls.index(["down", "--volumes"])
+    assert report["criteria"]["R7"]["pass"] is True and report["criteria"]["R8"]["pass"] is True
+    assert report["raw"]["files"]["traces"]["sha256"].startswith("sha256:")
+    # decision 009 §2: collection checks that *this* lock passed a soak
+    from env.lock import LOCK_PATH, PROJECT_DIR, sha256_path
+    assert report["env_lock_sha256"] == sha256_path(PROJECT_DIR / LOCK_PATH)
+
+
+def test_soak_still_copies_raw_before_down_when_the_run_breaks(tmp_path, monkeypatch, raw_soak):
+    def boom():
+        raise RuntimeError("engine gone")
+
+    monkeypatch.setattr(raw_soak.cli, "_engine_platform", boom)
+    with pytest.raises(RuntimeError):
+        raw_soak.cli.cmd_soak(tmp_path, tmp_path, minutes=0, warmup_minutes=0, out_dir=tmp_path / "out",
+                              compose_exec=raw_soak.compose_exec)
+    calls = raw_soak.calls
+    cp = ["cp", "otel-collector:/raw", str(tmp_path / "out" / "raw")]
+    assert cp in calls and calls.index(cp) < calls.index(["down", "--volumes"])
+    assert (tmp_path / "out" / "raw" / "traces.jsonl").exists()

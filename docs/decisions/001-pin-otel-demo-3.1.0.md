@@ -70,6 +70,7 @@ registry（ghcr / Docker Hub / quay）查證，重點發現如下：
 - 已知但不修的 upstream 行為（記錄起來，leakage audit 與 failure taxonomy 要考慮）：
   - Grafana 啟動時會抓沒有固定版本的 `grafana-opensearch-datasource` plugin（只影響 UI，不影響 telemetry 匯出）。
   - observability 模式下 collector config 會丟掉 `prometheus/ad` receiver（ad 的 Prometheus custom metrics 不會被收集；ad 的 OTLP metrics 不受影響）。
+    （更正，decision 008：是 full layer 的 metrics receivers list 拿掉的；我們的組合一定載入 full，效果相同。）
   - observability 的 profiles pipeline 會輸出到 firepit，但 firepit 只存在於 profiling layer → collector 自己的 log 裡可能出現 exporter 錯誤。
   - `_JAVA_OPTIONS`（JDK-8345296 在 macOS/AArch64 的 SIGILL workaround，值是 `-XX:UseSVE=0`）會從環境傳進 ad / fraud-detection / kafka / opensearch。
     我們的 sanitized env 讓它**一律不設定**。3.1.0 arm64 image 裡 ad（JDK 24.0.2）、fraud-detection（17.0.18）、kafka（21.0.11）的 JDK 都已經包含修正；

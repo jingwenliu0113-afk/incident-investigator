@@ -10,6 +10,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.3",
+    "pyyaml>=6.0.3",
 ]
 
 [tool.uv]
@@ -22,4 +23,5 @@ addopts = "-ra --strict-markers"
 markers = [
     "network: talks to public container registries / GitHub (deselect with -m 'not network')",
     "docker_cli: needs the docker CLI (daemon not required)",
+    "docker_daemon: runs a short --rm container from a locked image (deselect during soak / collection runs)",
 ]

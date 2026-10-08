@@ -8,6 +8,8 @@ Core §1。為什麼是這個版本、這組 compose 與這些 override，見 `d
 | `otel-demo.overrides.env` | 人 | 疊在 upstream `.env` 之上的變數（`DEMO_VERSION`、`IMAGE_VERSION`…）；每改一行都要寫 decision log |
 | `otel-demo.lock.json` | `python -m env resolve` | upstream commit、每個檔案 / bind mount 的 sha256、28 個 image 的 index digest 與 arm64 / amd64 manifest digest、`up` 參數 |
 | `compose.pinned.yaml` | `python -m env resolve` / `pin` | compose override：每個 service 都改成 `image: <ref>@sha256:<index digest>` |
+| `compose.overrides.yaml` | 人 | 本 Project 的 compose overlay：memory limit（decision 004 / 007）、collector 的 raw export layer（decision 008）；每一項都要有 decision log |
+| `otelcol-config-raw.yml` | 人 | collector 的 extras layer：只新增 `traces/raw`、`metrics/raw`、`logs/raw` 與 `file/raw_*`，不改任何 upstream pipeline（decision 008） |
 | `upstream/opentelemetry-demo/` | `python -m env fetch-upstream` | upstream shallow clone（gitignored） |
 
 ## 常用指令
@@ -54,7 +56,10 @@ git -C env/upstream/opentelemetry-demo clean -fdx   # -x: also ignored files suc
 container 重啟時 cgroup 會重建、`memory.events` 歸零，只看 memcg 會漏掉 OOM kill（decision 004 修訂）。
 取樣窗少於 30 分鐘、沒有持有本 Project 的 heavy lock、或已經有本 Project 的 container（要先 `compose down --volumes`），都會被拒絕。
 `compose up` 失敗時仍會 `down` 並寫出報告。
-結果寫在 `data/external/soak/<UTC 時間>/`（`report.md`、`report.json`、`samples.jsonl`、`docker-events.jsonl`、log、docker inspect）；R1–R6 全部通過才算 baseline 穩定。
+鎖定的 stack 有 raw pipeline 時（decision 008），視窗結束後再 drain 3 分鐘（`--drain-minutes`），接著 `stop -t 120 otel-collector`，
+在 `down` 之前把 `/raw` 用 `compose cp` 複製到結果目錄的 `raw/`，再用 R7（collector 正常停止、檔案都在）、R8（每行都能解析）、R9（視窗內每分鐘三種 signal 都有資料）判定。
+結果寫在 `data/external/soak/<UTC 時間>/`（`report.md`、`report.json`、`samples.jsonl`、`docker-events.jsonl`、`raw/`、log、docker inspect）；
+R1–R6（有 raw pipeline 時加上 R7–R9）全部通過才算 baseline 穩定。報告記錄 lock 的 sha256，收集前會檢查「這個 lock」通過過 soak（decision 009）。
 
 ## 改環境的流程
 

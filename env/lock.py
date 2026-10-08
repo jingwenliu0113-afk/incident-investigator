@@ -45,6 +45,11 @@ def _sha256_file(path: Path) -> str:
     return "sha256:" + h.hexdigest()
 
 
+def lock_sha256(lock: dict) -> str:
+    """sha256 of the lock as `python -m env resolve` writes it; names the environment in every record."""
+    return "sha256:" + hashlib.sha256((json.dumps(lock, indent=2) + "\n").encode()).hexdigest()
+
+
 def sha256_path(path: Path) -> str:
     """sha256 of a file, or of a directory tree (relative names + file hashes)."""
     path = Path(path)
