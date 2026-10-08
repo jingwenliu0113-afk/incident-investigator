@@ -447,3 +447,38 @@ def test_a_clean_run_saves_no_container_logs(tmp_path, flag_path):
     rec = go(stack, clock, flag_path, tmp_path)
     assert rec["status"] == "valid" and "restarted_logs" not in rec
     assert not any(isinstance(c, tuple) and c[0] == "save_logs" for c in stack.calls)
+
+
+class SkewedStack(Stack):
+    """The Docker VM clock runs 120 s ahead of the host: docker events, docker_stats minutes and the collector's
+    counters are on the VM (data) clock, the schedule on the host clock."""
+
+    SKEW = 120.0
+
+    def vm_time(self):
+        return self.clock.time() + self.SKEW
+
+    def ofrep(self, flag, context):
+        if not any(e["action"] == "oom" for e in self.events):  # at fault on: an OOM 60 s before it, in VM time
+            vm = T0 + timedelta(seconds=self.clock.t - 60 + self.SKEW)
+            self.events.append({"ts": vm.strftime("%Y-%m-%dT%H:%M:%SZ"), "service": "checkout", "action": "oom",
+                                "exit_code": None})
+        return super().ofrep(flag, context)
+
+    def finalize_raw(self, out_dir):
+        out = super().finalize_raw(out_dir)
+        out["container_minutes"] = {c: [(T0 + timedelta(minutes=m, seconds=self.SKEW)).strftime("%Y-%m-%dT%H:%M")
+                                         for m in range(int(self.minute()) + 2)] for c in out["container_minutes"]}
+        for s in out["collector_snapshots"]:
+            s["t"] += int(self.SKEW) * 10**9
+        return out
+
+
+def test_vm_clock_data_is_judged_against_the_schedule_through_the_measured_offset(tmp_path, flag_path):
+    # docker events come from the daemon in the VM: an OOM 60 s before fault on (host) is in the normal period even though
+    # its VM timestamp is 60 s after fault on; docker_stats minutes are VM minutes too (no false gaps)
+    clock = Clock()
+    rec = go(SkewedStack(clock, flag_path), clock, flag_path, tmp_path)
+    assert abs(rec["clock_offset_seconds"][0] - 120.0) < 1e-6
+    assert "normal_period_not_clean" in rec["reasons"] and rec["normal_period"]["kills"]
+    assert "container_metrics_missing" not in rec["reasons"] and "raw_incomplete" not in rec["reasons"]

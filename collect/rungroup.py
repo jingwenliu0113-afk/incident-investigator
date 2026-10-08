@@ -13,7 +13,7 @@ import re
 import shutil
 import signal
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
@@ -303,13 +303,25 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
     return record
 
 
+def _shifted(ts: str, seconds: float) -> str:
+    t = datetime.fromisoformat(ts) + timedelta(seconds=seconds)
+    return t.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def _judge(record: dict, samples: list[dict], events: list[dict] | None, raw: dict | None, times: dict) -> None:
-    """Validity of a run group that ran to its end (decision 009 §4, 008 §6, 012)."""
+    """Validity of a run group that ran to its end (decision 009 §4, 008 §6, 012).
+
+    The schedule and the samplers are on the host clock; docker events (the daemon runs in the Docker VM), docker_stats
+    minutes and the collector's counters are on the VM (data) clock. The measured offset (VM minus host, at normal start)
+    maps them onto each other (decision 009 revision 4)."""
+    offsets = record["clock_offset_seconds"]
+    shift = offsets[0] if offsets else 0.0
+    host_events = [{**e, "ts": _shifted(e["ts"], -shift)} for e in events or []]
     if {"fault_on", "fault_off"} <= times.keys():
         record["schedule"] = dict(times)
-        record["normal_period"] = period_observations(samples, events or [], start=times["normal_start"],
+        record["normal_period"] = period_observations(samples, host_events, start=times["normal_start"],
                                                       end=times["fault_on"])
-        record["fault_and_recovery"] = period_observations(samples, events or [], start=times["fault_on"],
+        record["fault_and_recovery"] = period_observations(samples, host_events, start=times["fault_on"],
                                                            end=times["end"])
         if not record["normal_period"]["clean"]:
             record["reasons"].append("normal_period_not_clean")
@@ -317,16 +329,16 @@ def _judge(record: dict, samples: list[dict], events: list[dict] | None, raw: di
             record["reasons"].append("event_stream_missing")
     if raw is not None and {"normal_start", "end"} <= times.keys():
         record["raw_accounting"] = account(raw.get("collector_snapshots") or [], raw.get("sdk_errors") or {},
-                                           raw["files"], start_ns=_ns(times["normal_start"]), end_ns=_ns(times["end"]))
+                                           raw["files"], start_ns=_ns(times["normal_start"]) + int(shift * 1e9),
+                                           end_ns=_ns(times["end"]) + int(shift * 1e9))
     if raw is None or raw_flags(raw["collector"], raw["files"]) or record.get("raw_accounting", {}).get("flags"):
         record["reasons"].append("raw_incomplete")
     if raw is not None and {"normal_start", "end"} <= times.keys():
         record["container_metric_gaps"] = container_metric_gaps(
             raw.get("container_minutes") or {}, services=load_policy().raw["sut_services"],
-            start=times["normal_start"], end=times["end"])
+            start=_shifted(times["normal_start"], shift), end=_shifted(times["end"], shift))
         if record["container_metric_gaps"]:
             record["reasons"].append("container_metrics_missing")  # decision 012
-    offsets = record["clock_offset_seconds"]
     if len(offsets) == 2 and abs(offsets[1] - offsets[0]) > MAX_CLOCK_DRIFT:
         record["reasons"].append("clock_drift")  # the window cannot be mapped onto the data clock reliably
     if errors := [s for s in samples if s["kind"] == "error"]:

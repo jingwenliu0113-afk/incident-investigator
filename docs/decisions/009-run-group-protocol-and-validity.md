@@ -123,6 +123,15 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 - `--set heldout` 目前一律拒絕：held-out 的收集協定（fault 清單、時長、split 大小）要先另寫 decision。
 - 之前沒有任何 injection 紀錄（RG-001 中止、沒有 injection），不影響既有資料。
 
+## 修訂 4（2026-10-09，任何有效 incident 收集之前）：VM 時鐘的資料經量到的時鐘差對到排程
+
+- **發現**（程式碼審查）：排程與取樣是 host 時鐘；docker events（daemon 在 Docker VM 裡）、docker_stats 的分鐘、collector 自己的計數器是 VM（資料）時鐘。
+  有效性判定直接拿兩者比較，只有在時鐘差接近 0 時才對。`docker info` 回報的 daemon 時間曾比 host 慢約 68 分鐘
+  （Docker Desktop 閒置時的值，可能是快取或 VM 暫停，不可靠），所以不能假設時鐘差為 0。
+- **修訂**：以 normal 開始時量到的時鐘差（VM − host，`clock_offset_seconds[0]`）換算：事件時間減去時鐘差後再分到 normal / fault 時段；
+  container metric 缺口（decision 012）與 loss accounting（decision 008 §6）的時間窗加上時鐘差後再比較。判定規則與門檻不變。
+- 測試：VM 快 120 s 時，host 時間 fault_on 前 60 s 的 OOM（VM 時間戳在 fault_on 之後）判為 normal period 的問題。
+
 ## 收集結果
 
 ### RG-001（2026-10-08 15:21Z，paymentFailure 100%，**aborted_unstable**，沒有注入 fault、沒有 incident id）
