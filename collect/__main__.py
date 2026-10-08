@@ -47,7 +47,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     norm.add_argument("--incident", required=True)
     cal = sub.add_parser("calibrate", help="dry normalize + inventory on a soak's raw (no fault), before freezing")
     cal.add_argument("--soak", type=Path, required=True)
+    rep = sub.add_parser("replay", help="Day 1 #6: analyse an incident from its snapshot alone (live system deleted)")
+    rep.add_argument("--incident", required=True)
     ns = parser.parse_args(argv)
+
+    if ns.command == "replay":
+        import os
+
+        from collect.replay import replay
+        from env import compose, soak
+        from env.cli import _load_lock
+
+        lock, env = _load_lock(PROJECT_DIR), compose.sanitized_env(os.environ)
+        try:
+            out = replay(DataLayout(PROJECT_DIR / "data/external"), ns.incident,
+                         live_containers=lambda: sorted(soak.project_container_ids(lock, env).values()))
+        except (RuntimeError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps(out, indent=2))
+        return 0 if out["every_id_resolves"] and not out["checks"] else 1
 
     if ns.command == "normalize":
         from datetime import UTC, datetime
