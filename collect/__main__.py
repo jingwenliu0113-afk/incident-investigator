@@ -49,6 +49,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     cal.add_argument("--soak", type=Path, required=True)
     rep = sub.add_parser("replay", help="Day 1 #6: analyse an incident from its snapshot alone (live system deleted)")
     rep.add_argument("--incident", required=True)
+    lab = sub.add_parser("label", help="write an incident's a priori (catalog) label; fault facts come from injection.json")
+    lab.add_argument("--incident", required=True)
+    lab.add_argument("--origin", required=True)
+    lab.add_argument("--affected", required=True, help="comma-separated SUT services (decision 010 rule 3)")
+    lab.add_argument("--symptom", required=True, help="comma-separated: errors, latency, degraded_feature, none")
+    lab.add_argument("--description", required=True)
+    lab.add_argument("--labeler", required=True, help="who labels, e.g. human:<name> or agent:claude-code")
+    lab.add_argument("--notes")
     ns = parser.parse_args(argv)
 
     if ns.command == "replay":
@@ -70,6 +78,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(out, indent=2))
         return 0 if out["every_id_resolves"] and not out["checks"] else 1
 
+    if ns.command == "label":
+        from datetime import UTC, datetime
+
+        from collect.labeling import catalog_label
+
+        try:
+            label = catalog_label(DataLayout(PROJECT_DIR / "data/external"), ns.incident, origin=ns.origin,
+                                  affected=ns.affected.split(","), symptom_kinds=ns.symptom.split(","),
+                                  symptom_description=ns.description, labeler=ns.labeler, notes=ns.notes,
+                                  now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        except (LookupError, ValueError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        # the label is ground truth: only say where it went
+        print(json.dumps({"incident_id": ns.incident, "label": "written", "method": label["labeling"]["method"]}))
+        return 0
     if ns.command == "normalize":
         from datetime import UTC, datetime
 
