@@ -170,8 +170,9 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
         write_atomic(flag_path, content)
         confirmed = False
         while True:
-            record["harness_flag_queries"].append({"ts": clock.now(), "flag": plan.flag})
+            ts = clock.now()
             variant, _ = stack.ofrep(plan.flag, check_context(plan.flag))
+            record["harness_flag_queries"].append({"ts": ts, "flag": plan.flag, "served": variant})
             if variant == expect:
                 confirmed = True
                 break

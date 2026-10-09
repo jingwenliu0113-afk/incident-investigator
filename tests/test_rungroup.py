@@ -388,6 +388,8 @@ def test_unconfirmed_fault_off_invalidates_the_run(tmp_path, flag_path):
     assert rec["status"] == "invalid" and rec["reasons"] == ["flag_unconfirmed"]
     assert rec["flag"]["on"]["confirmed"] and not rec["flag"]["off"]["confirmed"]
     assert flag_path.read_bytes() == original and stack.calls[-1] == ["down", "--volumes"]
+    # what flagd served at every poll is kept, so a switch that did not take effect can be diagnosed
+    assert {q["served"] for q in rec["harness_flag_queries"]} == {"100%"} and len(rec["harness_flag_queries"]) > 3
 
 
 def test_a_broken_event_stream_invalidates_the_run(tmp_path, flag_path):
