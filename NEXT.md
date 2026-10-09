@@ -2,7 +2,7 @@
 
 ## 目前位置（2026-10-09 03:30Z，台北 11:30）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集暫停：productCatalogFailure 連續 3 次無效，依規則等人看（A0）。**
+**Core 的工具鏈都已完成並測試；Pilot 正式收集進行中（productCatalogFailure 3 次無效後，使用者換網路並決定重試）。**
 - **Pilot 進度**：RG-002（INC-001，自動模式開始）撤回；RG-003（paymentFailure 100%，高效能）**valid → INC-002**（已 normalize / replay / label）。
   RG-004–006（productCatalogFailure）都在暖機前 aborted_unstable：grafana 啟動時要從 grafana.com 下載 `grafana-opensearch-datasource` plugin
   （upstream `GF_INSTALL_PLUGINS`），網路慢時逾時 → grafana 一直重啟（4–14 次）→ verify-running 不乾淨。與 fault 無關，是環境對外部網路的相依。
@@ -191,10 +191,8 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
-0. **productCatalogFailure 連續 3 個 run group 無效 → 依 decision 016 §5 / 009 §4 由人看過才再收**（原因見「目前位置」：grafana 下載 plugin 逾時，非 fault 造成）。兩個選項：
-   - **(a) 直接重試**：使用者確認看過後再收。網路慢時可能再失敗；之後 held-out 50 個 run 也一直受外部網路影響。
-   - **(b) 讓環境不依賴網路（建議）**：在 `env/compose.overrides.yaml` 關掉 grafana 啟動時下載 plugin（grafana 只是 UI，不是被測系統，也不在 telemetry 匯出路徑上）。
-     env lock 會改變 → 寫 decision、跑一次新的 soak（約 1 小時 lock）、INC-002 在舊 lock 下收集要撤回重收（約 45 分鐘）。之後所有 run 都不受外部網路影響。
+0. **（處理中）productCatalogFailure 連續 3 次無效**：使用者換了網路並決定重試（grafana.com 回應從 3–9 s 降到 1.3–1.8 s），以 `collect ack-failures` 記錄後重啟迴圈。
+   若仍失敗會回報；另一選項是在 `env/compose.overrides.yaml` 關掉 grafana 啟動時下載 plugin（改 env lock、新的 soak、INC-002 撤回重收）。
 1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
    scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
 2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）

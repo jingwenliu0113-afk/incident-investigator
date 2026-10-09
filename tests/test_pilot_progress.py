@@ -5,7 +5,8 @@ import json
 import pytest
 
 from collect.layout import DataLayout
-from collect.pilot import MAX_INVALID_ATTEMPTS, PLANS, next_planned, plan_status, withdraw, withdrawn
+from collect.pilot import (MAX_INVALID_ATTEMPTS, PLANS, acknowledge_failures, next_planned, plan_status, withdraw,
+                           withdrawn)
 
 
 def run_group(layout, rg, flag, variant, status, inc=None, split="pilot", exercised=None, power=None):
@@ -142,3 +143,24 @@ def test_a_withdrawn_run_group_is_kept_on_disk_but_its_incident_is_not_usable(tm
     for bad in ("RG-001", "RG-002", "RG-009"):  # not valid, already withdrawn, unknown
         with pytest.raises(ValueError):
             withdraw(layout, bad, reason="x", decided_by="user", now="2026-10-09T03:00:00Z")
+
+
+def test_after_a_person_looked_at_the_failed_runs_the_fault_is_collected_again_and_counting_restarts(tmp_path):
+    # decision 016 §5 / 009 §4: a person looks at the run records; the look is recorded, later failures count anew
+    layout = DataLayout(tmp_path)
+    run_group(layout, "RG-001", "paymentFailure", "100%", "valid", inc="INC-001")
+    for i in range(2, 2 + MAX_INVALID_ATTEMPTS):
+        run_group(layout, f"RG-00{i}", "productCatalogFailure", "on", "aborted_unstable")
+    with pytest.raises(RuntimeError):
+        next_planned(layout, "pilot")
+    ack = acknowledge_failures(layout, "pilot", "productCatalogFailure", "on", reason="grafana plugin download timed out",
+                               decided_by="user (chat)", now="2026-10-09T03:40:00Z")
+    assert ack["run_groups"] == ["RG-002", "RG-003", "RG-004"]
+    assert next_planned(layout, "pilot")["flag"] == "productCatalogFailure"
+    assert plan_status(layout, "pilot")[1]["acknowledged"] == ["RG-002", "RG-003", "RG-004"]
+    with pytest.raises(ValueError):  # nothing new to acknowledge
+        acknowledge_failures(layout, "pilot", "productCatalogFailure", "on", reason="x", decided_by="user", now="t")
+    for i in range(5, 5 + MAX_INVALID_ATTEMPTS):
+        run_group(layout, f"RG-00{i}", "productCatalogFailure", "on", "invalid")
+    with pytest.raises(RuntimeError):  # three more failures stop for a person again
+        next_planned(layout, "pilot")
