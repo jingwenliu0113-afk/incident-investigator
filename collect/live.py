@@ -65,6 +65,22 @@ def project_tree_problems(state: dict) -> list[str]:
     return problems
 
 
+FORMAL_POWER = {"source": "AC Power", "powermode": "0"}  # decision 025 revision 1: automatic power mode on AC power
+
+
+def power_problems(power: dict | None) -> list[str]:
+    """Every formal run is collected on AC power in the automatic power mode (decision 025 revision 1)."""
+    if power is None:
+        return ["power state unreadable (pmset); a formal run needs automatic power mode on AC power (decision 025)"]
+    problems, settings = [], power.get("settings") or {}
+    if power.get("source") != FORMAL_POWER["source"]:
+        problems.append(f"power source is {power.get('source')!r}; a formal run needs AC power (decision 025)")
+    if settings.get("powermode") != FORMAL_POWER["powermode"] or settings.get("lowpowermode", "0") != "0":
+        problems.append(f"power settings are {settings}; a formal run needs the automatic power mode, powermode 0 "
+                        "(decision 025)")
+    return problems
+
+
 class LiveStack:
     def __init__(self, project_dir: Path, upstream_dir: Path, data_root: Path):
         self.project_dir, self.upstream_dir, self.data_root = project_dir, upstream_dir, data_root
@@ -87,6 +103,9 @@ class LiveStack:
             problems += project_tree_problems(project_git_state(self.project_dir))
         except (OSError, subprocess.CalledProcessError) as e:
             problems.append(f"project git state unreadable: {str(e)[:200]}")
+        from collect.provenance import power_facts
+
+        problems += power_problems(power_facts())
         if not soak.raw_export_expected(self.lock):
             problems.append("the locked stack has no raw pipeline (decision 008)")
         if passing_soak(self.data_root, self.lock_sha256) is None:

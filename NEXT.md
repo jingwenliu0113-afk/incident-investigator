@@ -1,10 +1,11 @@
 # NEXT
 
-## 目前位置（2026-10-08 18:45Z，台北 10-09 02:45）
+## 目前位置（2026-10-09 01:40Z，台北 09:40）
 
-**Core 的工具鏈都已完成並測試（615 passed），還沒有任何正式資料結果。**
-- **正式收集**：Pilot 的 10 個 incident 尚未收集。今晚依使用者指示延後（Mac 自動電力模式）；heavy lock 也常被 llm-serving-lab 占用。
-- **LLM 方法**：dump-all、retrieval、agent 的程式已就緒，等使用者批准模型、預算與成本。
+**Core 的工具鏈都已完成並測試；Pilot 正式收集已開始（`collect pilot-loop`，背景執行，約 8 小時）。**
+- **正式收集**：使用者解除電力限制並決定固定自動電力模式 + AC 供電（decision 025 修訂 1，preflight 檢查）。
+  收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
+- **LLM 方法**：付費 API 由使用者決定先延後（A1）；程式已就緒。
 - **已完成的 Core 範圍**：
 
   | 項目 | decision |
@@ -187,17 +188,14 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
-1. **LLM 方法的模型、預算與成本**（決定之前 dump-all / retrieval / agent 一律拒絕執行；見下面的估算）。
-2. **Pilot 的人工作業**（Gate 前）：每個有效 incident 的 label review（decision 018）與 evidence gold 標註（decision 017）。
-3. **Held-out 協定（decision 023，Proposed）要使用者決定的事項**：每個 fault 的 incident 數 K（建議 6 → N = 60，約 45 小時 lock）；
-   held-out 的 LLM 設定與費用；gold 標註量（全標最多 20N 筆，或修訂 017 改抽樣，建議抽樣）；Gate 三個條件的操作定義；
-   Pilot 驗證失敗的 fault 是移除（預設）還是補收；需要新 policy / env lock 時的處理（預設排除受影響的 incident）；方法 bug 修正後重跑的費用。
-4. **`/usr/bin/git` 失效（Xcode 更新後 xcrun 架構錯誤，見 C）**：請開一次 Xcode 完成安裝，或用 `sudo xcode-select -s /Library/Developer/CommandLineTools`（需 sudo，我不會執行）。在修好之前，正式收集也要在 `PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH` 下執行，否則 preflight 與 normalize 的 git 檢查會失敗。
-5. **正式收集用哪一種電力模式**（decision 025）：run 從現在起會記錄 `pmset` 的 `powermode`（目前是 0 = 自動）。請告訴我正式收集要固定用哪一種
-   （例如高效能），我再加上 preflight 檢查；在那之前一個 set 的所有正式 run 應在同一種模式下收集（`collect status` 會列出每個 run 的模式）。
-6. **`data/samples/` 的縮小範例要不要進 git**：SPEC §2 建議放一份可進 git 的縮小範例（README 的 dataset schema / demo 用），
-   但 GitHub 規則禁止推 incident snapshot。預設不放；若要放，請指定範圍（例如 Pilot 一個 incident 的約 100 筆 record）。
-7. **告訴我 Mac 已回到正常電力模式**：之後用 `collect pilot-loop --labeler agent:claude-code` 開始正式 Pilot 收集（從 paymentFailure 100% 起；lock 被占用時它會等），10 個 fault 約 8 小時 lock 時間（每個約 45 分鐘，無效的要重收）。
+1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
+   scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
+2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）
+   與 evidence gold 標註（decision 017，`python -m eval gold-todo --set pilot`）。
+3. **decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
+
+已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定自動電力模式 + AC 供電（decision 025 修訂 1，preflight 檢查）；
+真實 snapshot sample 不進 git（需要時用 synthetic fixture）；`/usr/bin/git` 已由使用者修好；電力模式限制解除。
 
 ### B. LLM 方法的估算（第 A1 項用）
 
@@ -217,13 +215,8 @@
 - 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
 
 ### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
-- **2026-10-08 17:05Z（台北 10-09 01:05）起：`/usr/bin/git` 失效**（xcrun 載入 `/Applications/Xcode.app/.../libxcrun.dylib` 時出現 arm64 / arm64e 架構錯誤；Xcode.app 在 17:05–17:06Z 剛被修改，看起來正在更新）。
-  影響：專案的 provenance（collect preflight、normalize 的乾淨 checkout 檢查）會失敗。暫時做法：在本 session 的 shell 用
-  `PATH=/Library/Developer/CommandLineTools/usr/bin:$PATH`（CommandLineTools 的 git 正常；沒有改任何系統設定），測試 601 passed。
-  18:45Z 仍失敗（已 1.5 小時）→ 列入 A4，需要使用者處理。本 session 的 commit、測試與兩次冒煙測試都在上述 PATH 下完成。
-- **2026-10-09 晚上（使用者指示）：Mac 使用自動電力模式 → 正式 incident collection 延後**（會產生 performance-sensitive 的正式結果）。
-  一般 heavy 工作、correctness、資料處理、開發測試照常。電力模式恢復正常（使用者告知）且 heavy lock 空出後，從 `collect next --set pilot`（目前是 paymentFailure 100%）繼續。
-- **2026-10-08 15:30Z：Mac heavy lock 被 `llm-serving-lab` 持有**（15:27:40Z 起，`batch_9b_pilot.sh`）。RG-002（paymentFailure 100% 重收）等 lock 釋放；依 MACHINE_POLICY 不搶、不刪。期間做不需要 lock 的 Core 工作（Pilot 清單、leakage audit 工具、baseline 表）。
+- 目前沒有。heavy lock 被其他 Project 占用時，`collect pilot-loop` 每 5 分鐘重試（最多 4 小時），不搶、不刪。
+- 已解除：`/usr/bin/git` 失效（2026-10-08 17:05Z 起，使用者已處理）；Mac 自動電力模式下延後正式收集（2026-10-09 使用者解除，並決定正式收集固定用自動模式 + AC）。
 
 ### D. 歷史紀錄與環境狀態
 - （歷史）soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。

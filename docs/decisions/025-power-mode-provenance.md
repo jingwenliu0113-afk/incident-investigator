@@ -1,6 +1,7 @@
 # 025 — 收集時的電力模式記錄在 provenance
 
 - 狀態：Accepted（2026-10-08）；在任何正式 Pilot incident 收集之前寫定。只增加紀錄，不改收集協定、有效性判定或任何指標。
+  **修訂 1（2026-10-09，使用者決定）**：正式收集固定為自動電力模式 + AC 供電，preflight 檢查（見文末）。
 - 影響範圍：run record 與 incident manifest 的 `machine`（`schemas/run_manifest.schema.json` 新增可選的 `machine.power`）；`collect status` 的輸出。
 
 ## 背景
@@ -34,3 +35,14 @@
 ## 對實驗的影響
 
 - 從下一個 run group 起，所有 run record 與 manifest 都帶 `machine.power`；2026-10-08 以前的 run（含 RG-001 與兩次冒煙測試）沒有這個欄位。
+
+## 修訂 1（2026-10-09，使用者決定；在任何正式 Pilot incident 收集之前）
+
+- **決定**：所有正式收集（Pilot 與 held-out）固定在 **自動電力模式（`pmset` 的 `powermode` = 0）+ AC 供電**；不要求高效能模式。
+- **落地**：`collect.live.power_problems` 加進 `LiveStack.preflight`：
+  - 電源不是 `AC Power` → 拒絕；
+  - `powermode` 不是 `"0"`，或有 `lowpowermode` 且不是 `"0"` → 拒絕；
+  - 讀不到 `pmset`、或 `powermode` 沒有列出 → 拒絕（不假設）。
+  - 非正式的冒煙測試用同一個 preflight，也在相同條件下執行。
+- 仍只記錄 run 開始時的狀態（決策 2）；run 中途被改的情況不在有效性判定內。
+- 原本「§4：不在這裡規定」由本修訂取代。

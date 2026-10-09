@@ -1,8 +1,8 @@
-# 023 — Held-out 評測協定（Proposed）
+# 023 — Held-out 評測協定
 
 ## 狀態 / 影響範圍
 
-- **狀態**：Proposed（2026-10-09）。本協定寫在任何 held-out 資料與任何方法結果出現之前。
+- **狀態**：Accepted（2026-10-09，使用者決定：K = 5，其餘依保守預設；見文末「使用者決定」）。本協定寫在任何 held-out 資料與任何方法結果出現之前。
   - 標「Pilot 後定稿」的項目，要等 Pilot 的收集、review、leakage audit 與 LLM 方法試跑都完成，並在第一個 held-out run group 之前定稿一次。
   - 定稿之後，每次修改都另寫 decision log。
   - 看到 held-out 方法結果之後，永不修改。
@@ -246,3 +246,16 @@
 7. **方法 bug 修正後的重跑費用**：重跑結果只作探索性結果。
 
 以下由 Project 自行固定：§1 的規則、§3、§4、§5、§6 的規則、§7 的統計方法。
+
+## 使用者決定（2026-10-09，在任何 Pilot 正式資料與任何方法結果之前）
+
+1. **K = 5**（N = 50，約 38 小時 lock，另加無效重收）：每個 fault 5 個有效 incident，各自不同的 seed 與 run group；run group 不得跨 split（§4）。
+2. **LLM 設定與費用**：付費 LLM API 方法**先延後**；在使用者批准之前，held-out 不會凍結 LLM 方法的設定，也不產生任何付費用量。
+   scripted fake model 只用來驗證 harness，不產生任何方法結果。
+3. **gold 標註量**：使用者未另外指定 → 依保守做法**不修訂 017**（全部依 017 現行規定）；若要改為抽樣，須在 freeze 之前由使用者決定並寫 decision。
+4. **Gate 定義**：§7 三個條件依本文的操作定義；不付費重跑 Agent（預設）。
+5. **Pilot 驗證失敗的 fault**：從 held-out 移除並列出（預設）。
+6. **需要新 policy 或改 env lock**：排除受影響的 incident（預設）。
+7. **方法 bug 修正後的重跑**：只作探索性結果；重跑的付費用量另行批准（預設）。
+- 另外：真實 incident snapshot 的 sample 不進 git；需要範例時用 synthetic / tiny generated fixture。
+- 標「Pilot 後定稿」的項目（§1 的 fault 清單與 `PLANS["heldout"]`、§6 的 freeze 紀錄內容）仍在 Pilot 收集與 review 完成後、第一個 held-out run group 之前定稿一次。

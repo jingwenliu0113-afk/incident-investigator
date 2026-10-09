@@ -2,7 +2,7 @@
 
 import json
 
-from collect.live import foreign_running, passing_soak, project_tree_problems
+from collect.live import foreign_running, passing_soak, power_problems, project_tree_problems
 
 LOCK = "sha256:" + "1" * 64
 
@@ -37,3 +37,14 @@ def test_a_formal_run_needs_a_committed_clean_project_tree():
     assert project_tree_problems({"commit": "a" * 40, "dirty": False}) == []
     assert project_tree_problems({"commit": "a" * 40, "dirty": True}) != []
     assert project_tree_problems({"commit": None, "dirty": False}) != []
+
+
+def test_a_formal_run_needs_automatic_power_mode_on_ac_power():
+    # decision 025 revision 1 (user decision 2026-10-09): every formal run under the same power conditions
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "0"}}) == []
+    assert power_problems({"source": "Battery Power", "settings": {"powermode": "0"}}) != []
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "2"}}) != []  # high power is not asked for
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "1"}}) != []
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "0", "lowpowermode": "1"}}) != []
+    assert power_problems({"source": "AC Power", "settings": {}}) != []  # not reported: never assumed
+    assert power_problems(None) != []
