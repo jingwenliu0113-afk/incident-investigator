@@ -5,7 +5,8 @@ import json
 
 import pytest
 
-from eval.gate import GATE_BOOTSTRAP, condition_1, condition_2, condition_3, coverage, per_fault, verdict
+from eval.gate import (GATE_BOOTSTRAP, condition_1, condition_2, condition_3, coverage, fault_directions, per_fault,
+                       verdict)
 
 MAIN = ("fault_type", "origin_top1", "affected_f1", "symptom_exact")
 
@@ -48,13 +49,33 @@ def test_only_a_wrong_origin_counts_and_an_abstention_is_a_wrong_origin():
     assert out["met"] and out["majority_category"] == "no_answer"  # any 022 category, as 023 §7 is written
 
 
+def test_the_majority_category_is_taken_over_the_wrong_origins_only():
+    # 023 §7 "這些失敗中過半": the origin-wrong incidents; fault-type-only failures (mechanism) are not among them
+    rows = [row(1, "f", 0, "seen_misread"), row(2, "f", 0, "seen_misread"), row(3, "f", 0, "not_seen"),
+            row(4, "f", 1, "mechanism", fault_type=0), row(5, "f", 1, "mechanism", fault_type=0)]
+    out = condition_2(rows, {"f": 5})["by_fault"]["f"]
+    assert out["categories"] == {"not_seen": 1, "seen_misread": 2}  # no mechanism count
+    assert out["majority_category"] == "seen_misread" and out["met"]  # 2 of 3, not 2 of 5
+
+
 def test_a_missing_cell_never_lowers_the_threshold():
     # held-out: K is the design's (5 slots); with one cell missing 2 wrong of 4 scored is still below ceil(5 / 2)
     rows = [row(1, "f", 0, "seen_misread"), row(2, "f", 0, "seen_misread"), row(3, "f", 1, None), row(4, "f", 1, None)]
     out = condition_2(rows, {"f": 5})["by_fault"]["f"]
     assert (out["k"], out["threshold"], out["n_scored"], out["met"]) == (5, 3, 4, False)
-    # the Pilot: K is what was scored for the fault (one incident: one wrong origin is ceil(1 / 2))
+    # the condition as 023 §7 writes it, for any K (held-out K is the design's slot count)
     assert condition_2([row(1, "g", 0, "not_seen")], {"g": 1})["met"]
+
+
+def test_on_the_pilot_one_incident_of_a_fault_cannot_show_a_reproducible_failure():
+    # the Pilot's K is the scored count; with K < 2 one wrong origin would be "ceil(K / 2)" by itself: not evaluated
+    one = condition_2([row(1, "g", 0, "not_seen")], {"g": 1}, min_k=2)
+    g = one["by_fault"]["g"]
+    assert (g["evaluable"], g["met"], one["met"], one["not_evaluable"], one["faults_met"]) == (False, False, False, ["g"], [])
+    two = condition_2([row(1, "g", 0, "not_seen"), row(2, "g", 0, "not_seen")], {"g": 2}, min_k=2)
+    assert two["met"] and two["by_fault"]["g"]["evaluable"] and two["not_evaluable"] == []
+    with pytest.raises(ValueError, match="category"):  # still refused: a wrong origin without a category
+        condition_2([row(1, "g", 0, None)], {"g": 1}, min_k=2)
 
 
 def test_a_wrong_origin_without_a_failure_category_is_refused():
@@ -127,6 +148,24 @@ def test_the_equal_weight_mean_counts_each_fault_once_and_lists_the_missing_cell
     assert per_fault([], {}, [], MAIN)["equal_weight"] == {"n_faults": 0, "means": {m: None for m in MAIN}}
 
 
+def test_each_fault_reports_k_of_k_right_for_both_methods_and_the_direction_of_the_difference():
+    # 023 §7 robustness report: per fault, origin_top1 right k of K for each method and the sign of a - b (no threshold)
+    a = [row(1, "f1", 1, None), row(2, "f1", 1, None), row(3, "f1", 0, "not_seen"), row(4, "f2", 0, "not_seen"),
+         row(5, "f2", 0, "not_seen"), row(6, "f3", 1, None)]
+    b = [row(1, "f1", 0, "coverage"), row(2, "f1", 1, None), row(3, "f1", 0, "coverage"), row(4, "f2", 1, None),
+         row(5, "f2", 0, "coverage"), row(6, "f3", 1, None)]
+    out = fault_directions(a, b, {"f1": 5, "f2": 5, "f3": 5, "f4": 5}, {"f1": 5, "f2": 5, "f3": 5, "f4": 5})
+    assert out["f1"] == {"a": {"right": 2, "scored": 3, "k": 5}, "b": {"right": 1, "scored": 3, "k": 5}, "n_paired": 3,
+                         "mean_diff": pytest.approx(1 / 3), "direction": "+"}
+    assert (out["f2"]["a"]["right"], out["f2"]["b"]["right"], out["f2"]["direction"]) == (0, 1, "-")
+    assert out["f3"]["direction"] == "0"
+    assert out["f4"] == {"a": {"right": 0, "scored": 0, "k": 5}, "b": {"right": 0, "scored": 0, "k": 5}, "n_paired": 0,
+                         "mean_diff": None, "direction": None}  # a missing cell: no direction
+    # only the incidents scored for both give the direction; each method's k counts its own scored incidents
+    one_sided = fault_directions([row(1, "f", 1, None), row(2, "f", 1, None)], [row(2, "f", 1, None)], {"f": 2}, {"f": 2})
+    assert one_sided["f"]["n_paired"] == 1 and one_sided["f"]["direction"] == "0" and one_sided["f"]["a"]["right"] == 2
+
+
 # ---------------------------------------------------------------- `eval gate` over written scores and comparisons
 
 CONFIG = {"model": "scripted", "budgets": {"agent_max_tool_calls": 40, "agent_max_proxy_tokens": 120_000,
@@ -153,26 +192,35 @@ def pilot_incidents(root, specs):
 def methods(monkeypatch, agent_origin: dict, stat_origin: dict):
     """'agent' (its approval is faked: no model is called) and 'stat-anomaly' answer the given origin per incident."""
     import eval.runner as runner
-    from agent.harness import _abstain
     from eval.runner import METHODS
 
     monkeypatch.setattr(runner, "load_llm_config", lambda *a, **k: CONFIG)
+    monkeypatch.setitem(METHODS, "agent", answering("agent", agent_origin, True))
+    monkeypatch.setitem(METHODS, "stat-anomaly", answering("stat-anomaly", stat_origin, False))
 
-    def answer(name, origins, transcript):
-        def run(snapshot, inc):
-            pred = {**_abstain(inc, {"name": name, "version": "test"}), "usage": {},
-                    "fault": {"fault_type": "error_response", "fault_family": None},
-                    "origin_candidates": [origins[inc]], "affected_services": [origins[inc]],
-                    "user_symptom": {"kinds": ["errors"]}}
-            return (pred, {"stop_reason": "submitted", "exposure": []}) if transcript else pred
-        return run
 
-    monkeypatch.setitem(METHODS, "agent", answer("agent", agent_origin, True))
-    monkeypatch.setitem(METHODS, "stat-anomaly", answer("stat-anomaly", stat_origin, False))
+def answering(name, origins, transcript):
+    """A fake method `name` answering origins[incident] (with a transcript like an LLM method when `transcript`)."""
+    from agent.harness import _abstain
+
+    def run(snapshot, inc):
+        pred = {**_abstain(inc, {"name": name, "version": "test"}), "usage": {},
+                "fault": {"fault_type": "error_response", "fault_family": None},
+                "origin_candidates": [origins[inc]], "affected_services": [origins[inc]],
+                "user_symptom": {"kinds": ["errors"]}}
+        return (pred, {"stop_reason": "submitted", "exposure": []}) if transcript else pred
+    return run
 
 
 def files(root):
     return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()) if root.exists() else []
+
+
+def contents(root):
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+THREE = [("paymentFailure", "100%", "payment"), ("paymentFailure", "100%", "payment"), ("cartFailure", "100%", "cart")]
 
 
 def test_every_registered_method_is_an_llm_method_or_a_statistical_baseline():
@@ -223,12 +271,25 @@ def test_on_the_pilot_the_gate_is_a_diagnostic_read_from_written_scores_and_comp
         "productCatalogLockContention on", "adHighCpu on", "adManualGc on", "emailMemoryLeak 1000x",
         "recommendationCacheFailure on"}  # planned Pilot faults without a scored incident
     assert set(d["per_fault"]) == {"agent", "stat-anomaly"}
+    # 023 §7 robustness report: origin_top1 right k of K per fault for both methods and the direction of the difference
+    by = d["fault_directions"]["stat-anomaly"]
+    assert (by["paymentFailure 100%"]["a"], by["paymentFailure 100%"]["b"], by["paymentFailure 100%"]["direction"]) == (
+        {"right": 0, "scored": 2, "k": 2}, {"right": 0, "scored": 2, "k": 2}, "0")
+    assert (by["cartFailure 100%"]["a"]["right"], by["cartFailure 100%"]["b"]["right"], by["cartFailure 100%"]["direction"]) \
+        == (1, 0, "+")
     saved = json.loads((out / "pilot/agent/gate.json").read_text())
     assert saved == json.loads(json.dumps(result))
     text = (out / "pilot/agent/gate.md").read_text()
     assert "NOT a Gate decision" in text and "not_seen" in text and "equal weight" in text
+    assert "| cartFailure 100% | 1 / 1 | 0 / 1 | 1 | + |" in text and "scored / K" in text and "n / K" not in text
+    written = {name: (out / "pilot/agent" / name).read_bytes() for name in ("gate.json", "gate.md")}
 
-    # scores rewritten after the comparison: the comparison no longer describes them
+    # the baseline scored again after the comparison (023 §6: every method is): the comparison no longer describes it
+    stat = out / "pilot/stat-anomaly/scores.json"
+    stat.write_text(json.dumps({**json.loads(stat.read_text()), "rescored": True}, indent=2) + "\n")
+    with pytest.raises(LookupError, match="again"):
+        gate_methods("pilot", "agent", "stat-anomaly", out)
+    # the Agent's scores rewritten after the comparison
     scores = out / "pilot/agent/scores.json"
     scores.write_text(json.dumps({**json.loads(scores.read_text()), "rescored": True}, indent=2) + "\n")
     with pytest.raises(LookupError, match="again"):
@@ -236,6 +297,115 @@ def test_on_the_pilot_the_gate_is_a_diagnostic_read_from_written_scores_and_comp
     scores.write_text(json.dumps({**json.loads(scores.read_text()), "method": "dump-all"}, indent=2) + "\n")
     with pytest.raises(ValueError, match="dump-all"):  # a scores.json is read only as the method and set it names
         gate_methods("pilot", "agent", "stat-anomaly", out)
+    # a held-out scores.json under the Pilot path, with a comparison computed from it: never read as the Pilot's
+    scores.write_text(json.dumps({**json.loads(scores.read_text()), "method": "agent", "split": "heldout"}, indent=2) + "\n")
+    compare_methods("pilot", "agent", "stat-anomaly", out, metrics=("origin_top1",))
+    with pytest.raises(ValueError, match="heldout"):
+        gate_methods("pilot", "agent", "stat-anomaly", out)
+    # a comparison of the same two files the other way round (stat-anomaly - agent) is not agent - stat-anomaly
+    scores.write_text(json.dumps({**json.loads(scores.read_text()), "split": "pilot"}, indent=2) + "\n")
+    compare_methods("pilot", "stat-anomaly", "agent", out, metrics=("origin_top1",))
+    (out / "pilot/compare-agent-vs-stat-anomaly.json").write_bytes(
+        (out / "pilot/compare-stat-anomaly-vs-agent.json").read_bytes())
+    with pytest.raises(LookupError, match="again"):
+        gate_methods("pilot", "agent", "stat-anomaly", out)
+    assert {name: (out / "pilot/agent" / name).read_bytes() for name in ("gate.json", "gate.md")} == written
+
+
+def test_the_gate_compares_the_agent_with_every_registered_statistical_baseline(tmp_path, monkeypatch):
+    import eval.runner as runner
+    from eval.runner import compare_methods, gate_methods, run_method, score_method
+
+    layout = pilot_incidents(tmp_path / "data", THREE)
+    out = tmp_path / "results"
+    truth = {"INC-001": "payment", "INC-002": "payment", "INC-003": "cart"}
+    methods(monkeypatch, truth, {inc: "checkout" for inc in truth})  # the Agent always right, stat-anomaly always wrong
+    monkeypatch.setattr(runner, "STATISTICAL_BASELINES", ("stat-anomaly", "stat-b"))  # a second one registered
+    monkeypatch.setitem(runner.METHODS, "stat-b", answering("stat-b", truth, False))  # as right as the Agent
+    for m in ("agent", "stat-anomaly"):
+        run_method(layout, m, "pilot", out)
+        score_method(layout, m, "pilot", out)
+    compare_methods("pilot", "agent", "stat-anomaly", out, metrics=("origin_top1",))
+    before = contents(out)
+    with pytest.raises(LookupError, match="stat-b"):  # the second baseline has no scores: refused, not skipped
+        gate_methods("pilot", "agent", "stat-anomaly", out)
+    assert contents(out) == before
+    run_method(layout, "stat-b", "pilot", out)
+    score_method(layout, "stat-b", "pilot", out)
+    before = contents(out)
+    with pytest.raises(LookupError, match="stat-b"):  # scores but no comparison
+        gate_methods("pilot", "agent", "stat-anomaly", out)
+    assert contents(out) == before
+
+    compare_methods("pilot", "agent", "stat-b", out, metrics=("origin_top1",))
+    result = gate_methods("pilot", "agent", "stat-anomaly", out)
+    by = result["conditions"]["1"]["by_baseline"]
+    assert result["baselines"] == ["stat-anomaly", "stat-b"] and set(by) == {"stat-anomaly", "stat-b"}
+    assert by["stat-anomaly"]["met"] and by["stat-anomaly"]["lower_bound"] == 1.0
+    assert by["stat-b"]["lower_bound"] == 0.0 and not by["stat-b"]["met"] and not result["conditions"]["1"]["met"]
+    assert set(result["descriptive"]["fault_directions"]) == {"stat-anomaly", "stat-b"}
+    # --against may name either baseline: the other one is compared all the same
+    assert set(gate_methods("pilot", "agent", "stat-b", out)["conditions"]["1"]["by_baseline"]) == {"stat-anomaly", "stat-b"}
+
+
+def test_on_the_pilot_a_fault_scored_once_is_not_evaluated_for_condition_2(tmp_path, monkeypatch, capsys):
+    import eval.__main__ as cli
+    from eval.runner import compare_methods, run_method, score_method
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)
+    layout = pilot_incidents(tmp_path / "data/external", [("paymentFailure", "100%", "payment")])
+    out = tmp_path / "data/external/results"
+    methods(monkeypatch, {"INC-001": "cart"}, {"INC-001": "cart"})  # the Agent wrong on the fault's only incident
+    for m in ("agent", "stat-anomaly"):
+        run_method(layout, m, "pilot", out)
+        score_method(layout, m, "pilot", out)
+    compare_methods("pilot", "agent", "stat-anomaly", out, metrics=("origin_top1",))
+    assert cli.main(["gate", "--method", "agent", "--against", "stat-anomaly", "--set", "pilot"]) == 0
+    printed = capsys.readouterr().out
+    c2 = json.loads((out / "pilot/agent/gate.json").read_text())["conditions"]["2"]
+    pay = c2["by_fault"]["paymentFailure 100%"]
+    assert (pay["k"], pay["origin_wrong"], pay["evaluable"], pay["met"]) == (1, 1, False, False) and not c2["met"]
+    assert c2["not_evaluable"] == ["paymentFailure 100%"]
+    for text in (printed, (out / "pilot/agent/gate.md").read_text()):
+        assert "one incident cannot show reproducibility" in text
+
+
+def test_nothing_is_written_when_gate_md_cannot_be_rendered_and_gate_json_is_written_last(tmp_path, monkeypatch):
+    import collect.faults
+    import eval.runner as runner
+    from eval.runner import compare_methods, gate_methods, run_method, score_method
+
+    layout = pilot_incidents(tmp_path / "data", THREE)
+    out = tmp_path / "results"
+    methods(monkeypatch, {"INC-001": "cart", "INC-002": "cart", "INC-003": "cart"}, {i: "cart" for i in
+                                                                                    ("INC-001", "INC-002", "INC-003")})
+    for m in ("agent", "stat-anomaly"):
+        run_method(layout, m, "pilot", out)
+        score_method(layout, m, "pilot", out)
+    compare_methods("pilot", "agent", "stat-anomaly", out, metrics=("origin_top1",))
+    render = runner._gate_md
+
+    def broken(result):
+        raise RuntimeError("cannot render")
+
+    monkeypatch.setattr(runner, "_gate_md", broken)
+    before = contents(out)
+    with pytest.raises(RuntimeError):
+        gate_methods("pilot", "agent", "stat-anomaly", out)
+    assert contents(out) == before  # no gate.json without its gate.md
+
+    order, atomic = [], collect.faults.write_atomic
+
+    def recording(path, content):
+        order.append(path.name)
+        atomic(path, content)
+
+    monkeypatch.setattr(runner, "_gate_md", render)
+    monkeypatch.setattr(collect.faults, "write_atomic", recording)
+    result = gate_methods("pilot", "agent", "stat-anomaly", out)
+    assert order == ["gate.md", "gate.json"]  # each replaced atomically; the decision record last
+    assert json.loads((out / "pilot/agent/gate.json").read_text()) == json.loads(json.dumps(result))
+    assert (out / "pilot/agent/gate.md").read_text() == render(result)
 
 
 def test_every_score_reports_the_per_fault_table_and_its_missing_cells(tmp_path, monkeypatch):
@@ -282,8 +452,29 @@ def test_on_the_heldout_set_the_gate_is_the_decision_with_the_design_k(tmp_path,
     assert "closed" in next(m["reason"] for m in missing if m["slot"] == "H03")
     assert json.loads((out / "heldout/agent/scores.json").read_text())["by_fault"]["missing"] == missing
     assert "Gate decision" in (out / "heldout/agent/gate.md").read_text()
+    pay_dir = result["descriptive"]["fault_directions"]["stat-anomaly"]["paymentFailure 100%"]
+    assert (pay_dir["a"], pay_dir["b"], pay_dir["direction"]) == (
+        {"right": 0, "scored": 2, "k": 3}, {"right": 2, "scored": 2, "k": 3}, "-")  # K = the design's slots
+    # the held-out gate output lists no incident or run group id (the closed slot keeps its slot, fault and reason)
+    assert result["heldout"]["closed_slots"] == [{"slot": "H03", "flag": "paymentFailure", "variant": "100%",
+                                                  "reason": "fault not exercised twice: closed by default (decision 023 §5.3)"}]
+    written = {name: (out / "heldout/agent" / name).read_bytes() for name in ("gate.json", "gate.md")}
+    for raw in written.values():
+        assert b"INC-" not in raw and b"RG-" not in raw
 
+    # stat-anomaly scored again on fewer incidents (same freeze and list): first the comparison is stale ...
     scores = out / "heldout/stat-anomaly/scores.json"
+    doc = json.loads(scores.read_text())
+    scores.write_text(json.dumps({**doc, "incidents": [r for r in doc["incidents"] if r["incident_id"] != "INC-051"]},
+                                 indent=2) + "\n")
+    with pytest.raises(LookupError, match="again"):
+        gate_methods("heldout", "agent", "stat-anomaly", out, layout=layout, project_dir=project)
+    # ... and compared again, the two methods are not scored on the same incidents: no Gate decision
+    compare_methods("heldout", "agent", "stat-anomaly", out, layout=layout, project_dir=project, metrics=("origin_top1",))
+    with pytest.raises(ValueError, match="every listed incident"):
+        gate_methods("heldout", "agent", "stat-anomaly", out, layout=layout, project_dir=project)
+    assert {name: (out / "heldout/agent" / name).read_bytes() for name in ("gate.json", "gate.md")} == written
+
     scores.write_text(json.dumps({**json.loads(scores.read_text()), "heldout": {"freeze_sha256": "sha256:old"}}))
     with pytest.raises(PermissionError, match="stat-anomaly"):
         gate_methods("heldout", "agent", "stat-anomaly", out, layout=layout, project_dir=project)

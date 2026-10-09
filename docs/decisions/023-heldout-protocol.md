@@ -357,10 +357,12 @@
 ### 輸出
 
 - `gate.json`：`kind`（held-out 為 `gate_decision`，Pilot 為 `diagnostic`）、`statement`、`all_met`、`decision`（held-out 為 `pass` / `not_passed`，Pilot 為 null）、
-  `conditions`（`1`：每個統計 baseline 的 n、平均差異、區間、下界；`2`：每個 fault 的 K、⌈K/2⌉、計分數、origin 答錯數、各類別次數、過半的類別；`3`：失敗數、not_seen / seen_misread 次數、比例）、
-  `descriptive`（coverage 比例、其他主要指標的 paired 差異、origin_top1 的 LOFO、Agent 與每個統計 baseline 的各 fault 表）、`inputs`（讀到的 scores.json 與 compare 的 sha256）；
-  held-out 另有 freeze 與清單的 sha、移除的 fault、關閉的 slot。held-out 的 gate 輸出不列 incident id。
+  `conditions`（`1`：每個統計 baseline 的 n、平均差異、區間、下界；`2`：每個 fault 的 K、⌈K/2⌉、計分數、origin 答錯數、各類別次數、過半的類別、是否評估；`3`：失敗數、not_seen / seen_misread 次數、比例）、
+  `descriptive`（coverage 比例、其他主要指標的 paired 差異、origin_top1 的 LOFO、對每個統計 baseline 的各 fault origin_top1 答對數 k/K 與差異方向、Agent 與每個統計 baseline 的各 fault 表）、`inputs`（讀到的 scores.json 與 compare 的 sha256）；
+  held-out 另有 freeze 與清單的 sha、移除的 fault、關閉的 slot（只列 slot、fault 與原因）。held-out 的 gate 輸出（`gate.json`、`gate.md`、印出的摘要）不列 incident id 或 run group id；
+  incident id 只在清單與各方法的 scores.json 裡。
 - 每個方法的 `eval score` 也在 scores.json 的 `by_fault` 與 table.md 的「Per fault」段列出各 fault 平均、等權平均與缺格清單。
+  表中「scored / K」是該 fault 計分的 incident 數 / K，不是答對數（答對數 k/K 見解讀 14）。
 
 ### 解讀
 
@@ -371,8 +373,12 @@
 3. **Gate 只針對 Agent**：`--method` 只接受 agent（SPEC Gate）；其他方法只用 score / compare 描述。
 4. **條件 2 的 K**：held-out 用驗證過的 `heldout_incidents.json` 中該 fault 的 slot 數（設計的 K = 5）；缺格（關閉的 slot、詞彙命中排除）**不降低**門檻 ⌈K/2⌉，
    缺格不會讓條件 2 比較容易成立。Pilot 用該 fault 實際計分的 incident 數（由資料推得）。只看有計分 incident 的 fault。
+   **Pilot 上 K < 2 的 fault 不評估條件 2**（2026-10-10 review 修正）：K = 1 時 ⌈1/2⌉ = 1，一次答錯本身就「過半」，單一 incident 無法顯示可重現性；
+   這種 fault 標為 not evaluated、不算成立，gate.md 與印出的摘要註明「one incident cannot show reproducibility」。這只讓 Pilot 診斷更難成立，
+   held-out 照 §7 原文計算（K 是設計的 slot 數），程式行為不變。
 5. **條件 2 的「答錯」與「同一個類別」**：答錯 = origin_top1 = 0，包括放棄作答（013 §2、026 解讀 19）；只有 fault_type 錯（mechanism）不算。
    依 §7 的文字，「同一個類別」是 022 六類中的任一類（包括 no_answer、coverage），輸出寫出是哪一類。「過半」是嚴格大於一半（2/4 不算）。
+   「這些失敗」只指 origin 答錯的 incident：過半的分母是 origin 答錯數，不含只有 fault_type 錯的失敗。
 6. **條件 3**：分母是 022 §1 的所有失敗（origin 或 fault_type 錯）；> 0.5 是嚴格的；沒有任何失敗時比例無定義，條件不成立。
 7. **判定只在 held-out**：三個條件都成立才是 `pass`。held-out 的輸出寫明這是 §7 的 Gate 判定，只用第一次執行的結果（§5、§6：每個（方法, incident）只跑一次，預測永不覆寫）。
    Pilot 照樣計算三個條件，但 `decision` 是 null，輸出寫明「DIAGNOSTIC ONLY, NOT a Gate decision」（SPEC §5：Pilot 永不進 test）。
@@ -384,6 +390,10 @@
     缺格：held-out 是沒有計分 incident 的 slot（附原因：關閉或詞彙命中排除）與 Pilot 後移除的 fault；Pilot 是 Pilot 清單中沒有計分 incident 的 fault。
 11. fault_type 與另外兩個主要指標的 paired 差異、origin_top1 的 LOFO 下界從 compare 讀出，只列在描述段（§7：fault_type 與 LOFO 不是 Gate 條件）。
 12. **沒有分數就不寫**：Agent 沒有分數（付費 LLM 方法延後，NEXT A1）時，exit 2、印出「the Gate cannot be evaluated yet」、不寫任何檔案；
-    統計 baseline 沒有分數、compare 缺少或過期時也一樣。所有檢查都在寫入之前。
+    統計 baseline 沒有分數、compare 缺少或過期時也一樣。所有檢查都在寫入之前。`gate.md` 與 `gate.json` 的內容都先產生完，再各自以 atomic replace 寫入，
+    `gate.md` 先、`gate.json` 最後：任何一個新的 `gate.json` 旁邊都是它自己的 `gate.md`。
 13. gate 是決定性的，可以重跑。§6 的評分 bug 修正後重新評分，scores.json 會改變，要先重跑 compare 才能重跑 gate；修正前後兩組數字的並列報告不是這個指令做的事
-    （freeze 之後的修正路徑仍是 026「待使用者決定」2）。
+    （freeze 之後的修正路徑仍是 026「待使用者決定」2）。只重新評分統計 baseline 也一樣：compare 記錄的兩份 sha 都要與目前的 scores.json 相符。
+14. **§7 穩健性報告的「各 fault 的 k/K 與差異方向」**（2026-10-10 review 補上；只描述，不設門檻）：對每個統計 baseline、每個 fault，列出 Agent 與該 baseline 的
+    origin_top1 答對數 k / K（k 數各自計分的 incident；K 取各自的各 fault 表：held-out 是設計的 slot 數，Pilot 是計分數），以及 Agent − baseline 在該 fault
+    兩者都計分的 incident 上的差異方向（+ / 0 / −；沒有共同 incident 時不給方向）。LOFO 的下界照舊從 compare 讀出（解讀 11）。

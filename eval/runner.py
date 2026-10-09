@@ -599,7 +599,8 @@ def _fault_lines(table: dict) -> list[str]:
     lines = ["", "## Per fault (decision 023 §7; descriptive only, no interval)", "",
              f"equal weight: the mean of the per-fault means over the {eq['n_faults']} faults with a scored incident; "
              "incidents: the mean over every scored incident (the reported estimate, decision 023 §7).", "",
-             "| fault | n / K | " + " | ".join(MAIN_METRICS) + " |", "|---|---:|" + "---:|" * len(MAIN_METRICS)]
+             "scored / K: the fault's scored incidents of its K (a count of incidents, not of right answers).", "",
+             "| fault | scored / K | " + " | ".join(MAIN_METRICS) + " |", "|---|---:|" + "---:|" * len(MAIN_METRICS)]
     lines += [f"| {f} | {v['n']} / {v['k']} | " + " | ".join(_num(v["means"][m]) for m in MAIN_METRICS) + " |"
               for f, v in table["faults"].items()]
     lines += [f"| equal weight ({eq['n_faults']} faults) | | " + " | ".join(_num(eq["means"][m]) for m in MAIN_METRICS) + " |",
@@ -846,7 +847,9 @@ def gate_methods(split: str, method: str, against: str, out_root: Path, *, layou
             raise PermissionError("the held-out Gate needs the data layout to verify the incident list (decision 023 §5)")
         freeze, listing = heldout_guard(layout, project_dir)
         current = (freeze["sha256"], listing["sha256"])
-    from eval.gate import GATE_BOOTSTRAP, GATE_METRIC, condition_1, condition_2, condition_3, coverage, verdict
+    from collect.faults import write_atomic
+    from eval.gate import (GATE_BOOTSTRAP, GATE_METRIC, PILOT_MIN_K, condition_1, condition_2, condition_3, coverage,
+                           fault_directions, verdict)
 
     if method != GATE_METHOD:
         raise ValueError(f"the Gate is about the Agent (SPEC Gate): --method {GATE_METHOD}; other methods are described by "
@@ -895,7 +898,9 @@ def gate_methods(split: str, method: str, against: str, out_root: Path, *, layou
     rows = docs[method][0]["incidents"]
     tables = {m: fault_table(split, d["incidents"], listing["doc"] if listing else None) for m, (d, _) in docs.items()}
     k_of = {f: v["k"] for f, v in tables[method]["faults"].items() if v["n"]}
-    c1, c2, c3 = condition_1(compares), condition_2(rows, k_of), condition_3(rows)
+    design_k = {m: {f: v["k"] for f, v in t["faults"].items()} for m, t in tables.items()}
+    c1, c3 = condition_1(compares), condition_3(rows)
+    c2 = condition_2(rows, k_of, min_k=1 if current is not None else PILOT_MIN_K)  # 023 §7 as written on the held-out set
     result = {"gate_version": 1, "split": split, "method": method, "baselines": baselines, **verdict(c1, c2, c3, split),
               "conditions": {"1": c1, "2": c2, "3": c3},
               "descriptive": {
@@ -903,15 +908,24 @@ def gate_methods(split: str, method: str, against: str, out_root: Path, *, layou
                   "paired_other_metrics": {b: {m: v for m, v in compares[b]["paired"].items() if m != GATE_METRIC}
                                            for b in baselines},
                   "lofo": {b: (compares[b].get("lofo") or {}).get(GATE_METRIC) for b in baselines},
+                  "fault_directions": {b: fault_directions(rows, docs[b][0]["incidents"], design_k[method], design_k[b])
+                                       for b in baselines},
                   "per_fault": tables},
               "inputs": {"scores_sha256": {m: sha for m, (_, sha) in docs.items()}, "compare_sha256": compare_shas}}
-    if current is not None:
+    if current is not None:  # no incident id in the held-out gate output: a closed slot keeps its slot, fault and reason
         result["heldout"] = {"freeze_sha256": current[0], "heldout_incidents_sha256": current[1],
-                             "removed_faults": listing["doc"]["removed_faults"], "closed_slots": listing["doc"]["closed_slots"]}
+                             "removed_faults": listing["doc"]["removed_faults"],
+                             "closed_slots": [{k: c[k] for k in ("slot", "flag", "variant", "reason")}
+                                              for c in listing["doc"]["closed_slots"]]}
     out_dir = root / method
-    (out_dir / "gate.json").write_text(json.dumps(result, indent=2) + "\n")
-    (out_dir / "gate.md").write_text(_gate_md(result))
+    text = _gate_md(result).encode()  # both rendered before either is written
+    data = (json.dumps(result, indent=2) + "\n").encode()
+    write_atomic(out_dir / "gate.md", text)
+    write_atomic(out_dir / "gate.json", data)  # last: a new gate.json always has its gate.md
     return result
+
+
+NOT_EVALUABLE = "one incident cannot show reproducibility (Pilot)"
 
 
 def _condition_lines(result: dict) -> list[tuple[str, str, str]]:
@@ -922,6 +936,8 @@ def _condition_lines(result: dict) -> list[tuple[str, str, str]]:
     two = "; ".join(f"{f}: {v['categories'][v['majority_category']]} of {v['origin_wrong']} wrong are "
                     f"{v['majority_category']} (K {v['k']})" for f, v in c["2"]["by_fault"].items() if v["met"]) or \
         "no fault"
+    if skipped := c["2"].get("not_evaluable"):
+        two += f"; {len(skipped)} fault(s) with K < 2 not evaluated ({', '.join(skipped)}): {NOT_EVALUABLE}"
     s = c["3"]
     three = ("no failure" if s["share"] is None else
              f"{sum(s['by_category'].values())} of {s['n_failures']} failures = {s['share']:.2f}")
@@ -950,7 +966,8 @@ def _gate_md(result: dict) -> str:
               "| fault | scored | K | ceil(K/2) | origin wrong | categories of the wrong origins | met |",
               "|---|---:|---:|---:|---:|---|---|"]
     lines += [f"| {f} | {v['n_scored']} | {v['k']} | {v['threshold']} | {v['origin_wrong']} | "
-              + (", ".join(f"{c} {n}" for c, n in v["categories"].items()) or "-") + f" | {'yes' if v['met'] else 'no'} |"
+              + (", ".join(f"{c} {n}" for c, n in v["categories"].items()) or "-") + " | "
+              + (("yes" if v["met"] else "no") if v.get("evaluable", True) else f"not evaluated: {NOT_EVALUABLE}") + " |"
               for f, v in result["conditions"]["2"]["by_fault"].items()]
     lines += ["", "## Descriptive only (not Gate criteria)", "",
               f"- Coverage (SPEC Gate \"收尾或改題\"; no threshold): {cov['coverage']} of {cov['n_failures']} failures"
@@ -965,6 +982,14 @@ def _gate_md(result: dict) -> str:
         lines += [f"- Leave one fault out ({result['method']} - {b}, origin_top1 lower bound): "
                   + (", ".join(f"{f} {'-' if r['ci95'] is None else format(r['ci95'][0], '.3f')}" for f, r in (by or {}).items())
                      or "-") + "."]
+    for b, by in result["descriptive"]["fault_directions"].items():
+        lines += ["", f"### origin_top1 by fault: right k of K, {result['method']} and {b} (decision 023 §7 robustness "
+                      "report; descriptive only)", "",
+                  f"direction: the sign of {result['method']} - {b} over the fault's incidents scored for both "
+                  "(no direction without one).", "",
+                  f"| fault | {result['method']} right / K | {b} right / K | paired | direction |", "|---|---:|---:|---:|---|"]
+        lines += [f"| {f} | {v['a']['right']} / {v['a']['k']} | {v['b']['right']} / {v['b']['k']} | {v['n_paired']} | "
+                  f"{v['direction'] or '-'} |" for f, v in by.items()]
     for m, table in result["descriptive"]["per_fault"].items():
         lines += ["", f"### {m}"] + _fault_lines(table)[2:]
     if "heldout" in result:

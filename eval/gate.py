@@ -25,26 +25,32 @@ def condition_1(compares: dict[str, dict]) -> dict:
     return {"metric": GATE_METRIC, "by_baseline": by, "met": bool(by) and all(v["met"] for v in by.values())}
 
 
-def condition_2(rows: list[dict], k_of: dict[str, int]) -> dict:
+PILOT_MIN_K = 2  # a fault scored once on the Pilot cannot show a reproducible failure (023 "Gate 計算" note 4)
+
+
+def condition_2(rows: list[dict], k_of: dict[str, int], *, min_k: int = 1) -> dict:
     """A reproducible stable failure (023 §7): a fault whose origin_top1 is wrong on >= ceil(K/2) of its incidents, with
     more than half of those failures in one decision-022 category. `k_of`: fault -> K (eval.runner.gate_methods: the
-    design's slots on the held-out set, the scored count on the Pilot)."""
+    design's slots on the held-out set, the scored count on the Pilot). A fault with K < `min_k` is not evaluated and
+    never met (the Pilot passes PILOT_MIN_K; the held-out set keeps 023 §7 as written)."""
     by = {}
     for fault in sorted(k_of):
         mine = [r for r in rows if r["fault"] == fault]
         wrong = [r for r in mine if r["origin_top1"] != 1]  # an abstention scores 0 (013 §2) and counts
         if any(r["failure"] is None for r in wrong):
             raise ValueError(f"{fault}: a wrong origin without a failure category (decision 022): score the method again")
-        cats = [r["failure"] for r in wrong]
+        cats = [r["failure"] for r in wrong]  # "these failures": the origin-wrong ones only
         counts = {c: cats.count(c) for c in sorted(set(cats))}
         majority = next((c for c, n in counts.items() if 2 * n > len(cats)), None)
         k = k_of[fault]
         threshold = math.ceil(k / 2)
+        evaluable = k >= min_k
         by[fault] = {"k": k, "threshold": threshold, "n_scored": len(mine), "origin_wrong": len(wrong),
-                     "categories": counts, "majority_category": majority,
-                     "met": len(wrong) >= threshold and len(wrong) > 0 and majority is not None}
+                     "categories": counts, "majority_category": majority, "evaluable": evaluable,
+                     "met": evaluable and len(wrong) >= threshold and len(wrong) > 0 and majority is not None}
     met = [f for f, v in by.items() if v["met"]]
-    return {"by_fault": by, "faults_met": met, "met": bool(met)}
+    return {"by_fault": by, "faults_met": met, "not_evaluable": [f for f, v in by.items() if not v["evaluable"]],
+            "met": bool(met)}
 
 
 def condition_3(rows: list[dict]) -> dict:
@@ -82,6 +88,23 @@ def per_fault(rows: list[dict], expected: dict[str, int | None], missing: list[d
             "equal_weight": {"n_faults": len(present), "means": {m: mean([v["means"][m] for v in present]) for m in metrics}},
             "incident_mean": {m: mean([r[m] for r in rows]) for m in metrics},
             "missing": missing}
+
+
+def fault_directions(a_rows: list[dict], b_rows: list[dict], k_a: dict[str, int], k_b: dict[str, int]) -> dict:
+    """023 §7 robustness report, descriptive only: per fault, each method's origin_top1 right k of K (over its own scored
+    incidents; K from its per-fault table) and the direction (+, 0, -) of a - b over the fault's incidents scored for
+    both; no direction without one."""
+    out = {}
+    for fault in sorted(set(k_a) | set(k_b) | {r["fault"] for r in a_rows + b_rows}):
+        a = {r["incident_id"]: r[GATE_METRIC] for r in a_rows if r["fault"] == fault}
+        b = {r["incident_id"]: r[GATE_METRIC] for r in b_rows if r["fault"] == fault}
+        common = sorted(set(a) & set(b))
+        diff = sum(a[i] - b[i] for i in common)
+        out[fault] = {"a": {"right": sum(v == 1 for v in a.values()), "scored": len(a), "k": k_a.get(fault, len(a))},
+                      "b": {"right": sum(v == 1 for v in b.values()), "scored": len(b), "k": k_b.get(fault, len(b))},
+                      "n_paired": len(common), "mean_diff": diff / len(common) if common else None,
+                      "direction": None if not common else "+" if diff > 0 else "-" if diff < 0 else "0"}
+    return out
 
 
 STATEMENTS = {

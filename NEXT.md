@@ -79,6 +79,10 @@
   條件 1 讀 compare 的 origin_top1 paired 下界（對每個統計 baseline，compare 現在記錄 scores 的 sha，過期就拒絕）；條件 2（held-out 的 K 用 slot 數，缺格不降低 ⌈K/2⌉）；
   條件 3；coverage 比例與各 fault 等權平均 / 缺格清單只描述（每個 `eval score` 也列出）。held-out 才是 Gate 判定，Pilot 只是診斷、不是 Gate 判定；
   Agent 沒有分數（A1）時 exit 2、不寫檔。026 解讀 27 的 freeze 前項目中，Gate 條件 2 / 3 與等權 / 缺格表已完成。測試 866 passed。
+  **review 修正（2026-10-10）**：held-out 的 gate.json 原本經由關閉的 slot 列出 incident id，與 023 的說明不符，現在只列 slot、fault 與原因；
+  補上 §7 穩健性報告的「各 fault 的 k/K 與差異方向」（只描述）；各 fault 表的欄位改名為「scored / K」，避免和 k/K 混淆；Pilot 上 K < 2 的 fault 不評估條件 2
+  （單一 incident 無法顯示可重現性；held-out 不變，023 解讀 4，**請使用者確認這個 Pilot 診斷的讀法**）；gate.md 與 gate.json 先產生完再 atomic 寫入，gate.json 最後；
+  補測試：只重新評分 baseline 時拒絕過期的 compare、條件 2 過半只看 origin 答錯、第二個統計 baseline、held-out `only_in_one`、scores.json 的 set 與反向 compare。測試 872 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成
