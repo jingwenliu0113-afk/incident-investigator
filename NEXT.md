@@ -55,6 +55,12 @@
   之後自動 leakage → stat-anomaly。只是把既有步驟串起來，不改任何協定；重新啟動時先補處理「有效但還沒有 label」的 incident。測試 615 passed。**今晚不執行**（電力模式，A7）。
 - **decision 025**：run record 與 manifest 記錄收集開始時的電源與 `pmset` 電力設定（唯讀，不改任何設定）；`collect status` 列出每個有效 run 的模式。
   要用哪一種模式收集是使用者的決定（A5）。測試 608 passed。
+- **held-out 工具（decision 023 實作說明、026；分支 `heldout-protocol`，Pilot loop 結束、main checkout 閒置後才合併）**：
+  `collect heldout-plan` → `heldout-freeze` → 每個 slot `next` → `run --set heldout`（不接受 `--seed`）→ `process` → `eval leakage --set heldout`
+  → review → `collect heldout-list` → `eval run|score --set heldout`。沒有 freeze 紀錄時所有 held-out 收集與方法執行一律拒絕；
+  **plan、freeze 與收集都被 A1 擋住**（要求 LLM 方法已批准並在 Pilot 上跑過）。freeze 之前必須 commit：API adapter、Gate 條件 2 / 3 的程式、
+  各 fault 等權平均與缺格表、013 正式版、需要乾淨 checkout 的 review 說明；freeze 之後只能改 NEXT.md 與新增 decision 檔。
+  待人處理的 slot 只記 slot id 與非 valid 的 run group id。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成

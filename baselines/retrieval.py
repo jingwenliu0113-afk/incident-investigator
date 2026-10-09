@@ -11,7 +11,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from agent.harness import finish, submit_round
+from agent.harness import CallError, finish, submit_round, usage_so_far
 from agent.prompt import SYSTEM, task_prompt
 from agent.tools import MAX_SECONDS, MAX_TEXT
 from baselines.overview import overview
@@ -93,6 +93,16 @@ def retrieval(snapshot, incident_id: str, model, *, method: dict, cache_root: Pa
               price_per_mtok: dict | None = None):
     t_start = time.monotonic()
     tokens = {"input": 0, "output": 0}
+    try:
+        return _retrieval(snapshot, incident_id, model, method=method, cache_root=cache_root, q=q, k=k,
+                          price_per_mtok=price_per_mtok, tokens=tokens, t_start=t_start)
+    except CallError as e:  # decision 023 §5: the attempt is recorded with what it used
+        e.usage = usage_so_far(tokens, t_start, price_per_mtok)
+        raise
+
+
+def _retrieval(snapshot, incident_id: str, model, *, method: dict, cache_root: Path, q: int, k: int,
+               price_per_mtok: dict | None, tokens: dict, t_start: float):
     view = overview(snapshot)
     ask = (task_prompt(snapshot) + "\n\n# Data\n\n" + view + "\n\nFirst call propose_queries with up to "
            f"{q} queries; each returns up to {k} records. Then you will submit your diagnosis.")

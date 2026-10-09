@@ -12,7 +12,7 @@ import heapq
 import time
 from collections import defaultdict
 
-from agent.harness import finish, submit_round
+from agent.harness import CallError, finish, submit_round, usage_so_far
 from agent.prompt import SYSTEM, task_prompt
 from baselines.overview import overview
 from collect.snapshot import _rel, proxy_tokens, render
@@ -106,7 +106,11 @@ def dump_all(snapshot, incident_id: str, model, *, method: dict, budget: int, pr
     packed, stats = pack(snapshot, incident_id, budget=budget)
     messages = [{"role": "user", "content": [{"type": "text", "text": task_prompt(snapshot) + "\n\n# Data\n\n" + packed}]}]
     tokens = {"input": 0, "output": 0}
-    pred, stop = submit_round(model, SYSTEM, messages, snapshot, incident_id, method, tokens)
+    try:
+        pred, stop = submit_round(model, SYSTEM, messages, snapshot, incident_id, method, tokens)
+    except CallError as e:  # decision 023 §5: the attempt is recorded with what it used
+        e.usage = usage_so_far(tokens, t_start, price_per_mtok)
+        raise
     pred = finish(pred, incident_id, method, tokens, proxy=stats["proxy_tokens"], tool_calls=0, retrievals=0,
                   t_start=t_start, price_per_mtok=price_per_mtok)
     exposure = _overview_exposure(stats) + [line.split(" ", 1)[0] for line in packed.splitlines() if line[:2] in ("s-", "l-")]

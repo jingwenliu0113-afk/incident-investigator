@@ -49,24 +49,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         if ns.command == "leakage":
             from eval.runner import audit_set
 
-            print(json.dumps(audit_set(layout, ns.split, out), indent=2))
+            print(json.dumps(audit_set(layout, ns.split, out, project_dir=PROJECT_DIR), indent=2))
         elif ns.command == "gold-todo":
             from eval.runner import gold_todo_set
 
-            print(json.dumps(gold_todo_set(layout, ns.split, out), indent=2))
+            print(json.dumps(gold_todo_set(layout, ns.split, out, project_dir=PROJECT_DIR), indent=2))
         elif ns.command == "gold-add":
             from eval.runner import gold_add
 
             print(json.dumps(gold_add(layout, ns.incident, ns.file, annotator=ns.annotator,
-                                      now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))))
+                                      now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), project_dir=PROJECT_DIR)))
         elif ns.command == "compare":
             from eval.runner import compare_methods
 
-            print(json.dumps(compare_methods(ns.split, ns.method, ns.against, out)["paired"], indent=2))
+            print(json.dumps(compare_methods(ns.split, ns.method, ns.against, out, layout=layout,
+                                             project_dir=PROJECT_DIR)["paired"], indent=2))
         elif ns.command == "run":
-            print(json.dumps({"predictions": [str(p) for p in run_method(layout, ns.method, ns.split, out)]}, indent=2))
+            done = run_method(layout, ns.method, ns.split, out, project_dir=PROJECT_DIR)
+            key = "without_prediction" if ns.split == "heldout" else "predictions"  # decision 023 §5
+            print(json.dumps({key: [str(p) for p in done]}, indent=2))
         else:
-            result = score_method(layout, ns.method, ns.split, out)
+            result = score_method(layout, ns.method, ns.split, out, project_dir=PROJECT_DIR)
             print(json.dumps({"aggregate": result["aggregate"], "evidence": result["evidence"]}, indent=2))
     except (ValueError, OSError, LookupError, RuntimeError) as e:
         print(f"error: {e}", file=sys.stderr)

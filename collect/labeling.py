@@ -58,11 +58,12 @@ def catalog_label(layout: DataLayout, incident_id: str, *, origin: str, affected
     return label
 
 
-def catalog_label_from_plan(layout: DataLayout, incident_id: str, *, labeler: str, now: str) -> dict:
-    """The catalog label registered for this incident's fault in its set's plan (decision 016), never typed afresh."""
+def catalog_label_from_plan(layout: DataLayout, incident_id: str, *, labeler: str, now: str, project_dir=None) -> dict:
+    """The catalog label registered for this incident's fault in its set's plan (decision 016), never typed afresh.
+    `project_dir`: where the held-out plan is read from (decision 023 §1)."""
     injection = json.loads(layout.injection_path(find_run(layout, incident_id)["run_group_id"]).read_text())
     split, fault = injection["split"], injection["fault"]
-    entry = planned(split, fault["flag"], fault["variant"])
+    entry = planned(split, fault["flag"], fault["variant"], project_dir=project_dir)
     if entry is None:
         raise LookupError(f"{fault['flag']} {fault['variant']} is not in the {split} plan (decision 016)")
     return catalog_label(layout, incident_id, origin=entry["origin"], affected=entry["affected"],

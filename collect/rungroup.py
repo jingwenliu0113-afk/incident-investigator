@@ -44,6 +44,23 @@ class Plan:
     interval: float = 15  # seconds between state samples; Locust and memcg every 4th
     confirm_timeout: float = 10  # seconds for flagd to serve the new variant
     split: str = "pilot"  # fixed at collection: pilot incidents never enter the held-out test (SPEC §5, §10)
+    slot: str | None = None  # held-out only: the slot of the frozen slot list this run group fills (decision 023 §4)
+    freeze_sha256: str | None = None  # held-out only: the freeze record in force (decision 023 §6)
+
+    def __post_init__(self):
+        """Held-out ⇔ a slot and a freeze record; a Pilot run group carries neither (decision 023 §4, SPEC §10)."""
+        if self.split not in ("pilot", "heldout"):
+            raise ValueError(f"unknown set {self.split!r}")
+        both = self.slot is not None and self.freeze_sha256 is not None
+        neither = self.slot is None and self.freeze_sha256 is None
+        if (self.split == "heldout" and not both) or (self.split != "heldout" and not neither):
+            raise ValueError(f"a {self.split} run group must {'name' if self.split == 'heldout' else 'not name'} "
+                             f"a held-out slot and freeze record (slot {self.slot!r}, freeze {self.freeze_sha256!r})")
+
+
+def plan_record(plan: Plan) -> dict:
+    """The plan as run.json records it: the held-out keys only on held-out plans, so Pilot records keep their shape."""
+    return {k: v for k, v in asdict(plan).items() if v is not None or k not in ("slot", "freeze_sha256")}
 
 
 MAX_CLOCK_DRIFT = 1.0  # seconds the host <-> VM offset may move during a run (decision 009, amended)
@@ -130,7 +147,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
 
     record: dict = {
         "run_group_id": plan.run_group_id,
-        "plan": {**asdict(plan), "normal_minutes": round(normal_minutes(plan), 3),
+        "plan": {**plan_record(plan), "normal_minutes": round(normal_minutes(plan), 3),
                  "recovery_minutes": round(recovery_minutes(plan), 3)},
         "status": None,
         "reasons": [],

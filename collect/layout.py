@@ -85,6 +85,11 @@ class DataLayout:
         return (self.ground_truth_root / "incidents" / _checked(incident_id, INCIDENT_ID, "incident id")
                 / "normalize_report.json")
 
+    @property
+    def heldout_incidents_path(self) -> Path:
+        """The verified held-out incident list (decision 023 §5.5): ground-truth side, written once."""
+        return self.ground_truth_root / "heldout_incidents.json"
+
     def label_path(self, incident_id: str) -> Path:
         return (self.ground_truth_root / "incidents" / _checked(incident_id, INCIDENT_ID, "incident id")
                 / "label.json")

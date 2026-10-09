@@ -37,12 +37,12 @@ def test_every_entry_is_a_core_fault_that_injects_and_names_snapshot_services(en
     assert entry["symptom_kinds"] == ["none"] or "none" not in entry["symptom_kinds"]
 
 
-def test_planned_finds_only_the_registered_variant():
+def test_planned_finds_only_the_registered_variant(tmp_path):
     assert planned("pilot", "cartFailure", "100%")["origin"] == "cart"
     assert planned("pilot", "cartFailure", "10%") is None
     assert planned("pilot", "kafkaQueueProblems", "on") is None
     with pytest.raises(LookupError, match="no fault plan"):
-        planned("heldout", "paymentFailure", "100%")  # held-out waits for its own protocol
+        planned("heldout", "paymentFailure", "100%", project_dir=tmp_path)  # written after the Pilot review (023 §1)
 
 
 def stored(root, flag, variant):

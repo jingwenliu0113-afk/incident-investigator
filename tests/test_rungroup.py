@@ -497,3 +497,34 @@ def test_the_window_end_is_checked_with_the_second_offset_like_the_published_sna
     record = {"clock_offset_seconds": [119.6, 120.5], "reasons": []}
     _judge(record, [], [], raw, {"normal_start": "2026-10-08T12:05:00Z", "end": "2026-10-08T12:35:00Z"})
     assert record["container_metric_gaps"] and all(v == ["12:36"] for v in record["container_metric_gaps"].values())
+
+
+PILOT_PLAN_KEYS = {"run_group_id", "seed", "flag", "variant", "fault_minutes", "recovery_base_minutes",
+                   "recovery_jitter_minutes", "warmup_minutes", "gate_extra_minutes", "normal_base_minutes",
+                   "normal_jitter_minutes", "drain_minutes", "interval", "confirm_timeout", "split", "normal_minutes",
+                   "recovery_minutes"}
+
+
+@pytest.mark.parametrize("over", [
+    {"split": "heldout"},  # no slot, no freeze record
+    {"split": "heldout", "slot": "H01"},
+    {"split": "heldout", "freeze_sha256": "sha256:" + "f" * 64},
+    {"slot": "H01"},  # a Pilot run group never fills a held-out slot
+    {"freeze_sha256": "sha256:" + "f" * 64},
+    {"split": "test"},
+], ids=str)
+def test_a_heldout_plan_names_its_slot_and_freeze_and_no_other_plan_does(over):
+    # decision 023 §4 / SPEC §10: the set, the slot and the freeze in force are fixed when the run group is planned
+    with pytest.raises(ValueError):
+        plan(**over)
+
+
+def test_a_pilot_run_record_keeps_todays_plan_keys_and_a_heldout_one_adds_slot_and_freeze(tmp_path, flag_path):
+    clock = Clock()
+    rec = go(Stack(clock, flag_path), clock, flag_path, tmp_path)
+    assert set(rec["plan"]) == PILOT_PLAN_KEYS  # Pilot records keep exactly their shape
+    clock = Clock()
+    rec = go(Stack(clock, flag_path), clock, flag_path, tmp_path / "h", split="heldout", slot="H07",
+             freeze_sha256="sha256:" + "f" * 64)
+    assert set(rec["plan"]) == PILOT_PLAN_KEYS | {"slot", "freeze_sha256"}
+    assert rec["plan"]["slot"] == "H07" and rec["plan"]["split"] == "heldout"

@@ -130,3 +130,44 @@ def test_a_metric_point_cited_at_the_millisecond_it_was_shown_resolves():
     e = pred["evidence"][0]
     point = start + 724_230_157_594  # shown as +012:04.230
     assert e["t0"] <= point <= e["t1"] and e["t1"] - e["t0"] == 999_999
+
+
+class Failing(Scripted):
+    """A scripted model whose call number `at` fails the way an adapter reports an API or transport error."""
+
+    def __init__(self, at, *turns, reason="api_error"):
+        super().__init__(*turns)
+        self.at, self.reason = at, reason
+
+    def complete(self, system, messages, tools):
+        if len(self.calls) + 1 == self.at:
+            from agent.harness import CallError
+
+            self.calls.append({"failed": True})
+            raise CallError(self.reason, "HTTP 529 overloaded")
+        return super().complete(system, messages, tools)
+
+
+def test_a_failed_model_call_carries_the_usage_so_far(tmp_path):
+    # decision 023 §5: only API / transport errors are retried, decided by the stop reason, and every attempt is recorded
+    from agent.harness import CallError
+
+    model = Failing(3, [tool("search_spans", {"status": "error"})], [tool("search_spans", {"status": "error"}, "t2")])
+    with pytest.raises(CallError) as e:
+        run(tmp_path, model, price_per_mtok={"input": 3.0, "output": 15.0})
+    assert e.value.reason == "api_error" and e.value.detail == "HTTP 529 overloaded"
+    usage = e.value.usage
+    assert usage["tokens_in"] == 200 and usage["tokens_out"] == 20  # turns 1-2; turn 3 failed
+    assert usage["cost_usd"] == pytest.approx((200 * 3.0 + 20 * 15.0) / 1e6) and usage["latency_s"] >= 0
+    with pytest.raises(CallError) as e:
+        run(tmp_path, Failing(1, reason="transport_error"))
+    assert e.value.usage == {"tokens_in": 0, "tokens_out": 0, "cost_usd": None, "latency_s": e.value.usage["latency_s"]}
+
+
+def test_other_errors_are_not_wrapped(tmp_path):
+    class Broken(Scripted):
+        def complete(self, system, messages, tools):
+            raise KeyError("content")
+
+    with pytest.raises(KeyError):
+        run(tmp_path, Broken())

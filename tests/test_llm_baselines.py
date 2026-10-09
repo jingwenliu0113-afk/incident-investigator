@@ -2,6 +2,8 @@
 
 import re
 
+import pytest
+
 from baselines.dump_all import dump_all, pack
 from baselines.retrieval import retrieval, search
 from collect.snapshot import proxy_tokens
@@ -115,3 +117,39 @@ def test_every_text_the_llm_baselines_send_passes_the_lexicon_and_says_nothing_a
         text = _model_facing_text(model.calls)
         assert load_policy().lexicon_hit(text) == 0
         assert not re.search(r"flag|inject|chaos|run group|seed|fault window", text, re.IGNORECASE)
+
+
+def test_dump_all_and_retrieval_attach_the_usage_so_far_to_a_failed_call(tmp_path):
+    from agent.harness import CallError
+    from test_agent_harness import Failing
+
+    try:
+        dump_all(Snap(), "INC-001", Failing(1), method=METHOD, budget=100_000)
+    except CallError as e:
+        assert e.usage["tokens_in"] == 0 and e.usage["cost_usd"] is None
+    else:
+        raise AssertionError("no CallError")
+    model = Failing(2, [tool("propose_queries", {"queries": [{"text": "failed"}]})], reason="transport_error")
+    try:
+        retrieval(Snap(), "INC-001", model, method=METHOD, cache_root=tmp_path / "cache", q=8, k=5,
+                  price_per_mtok={"input": 1.0, "output": 1.0})
+    except CallError as e:
+        assert e.reason == "transport_error" and e.usage["tokens_in"] == 100 and e.usage["tokens_out"] == 10
+        assert e.usage["cost_usd"] == pytest.approx(110 / 1e6)
+    else:
+        raise AssertionError("no CallError")
+
+
+def test_no_text_any_llm_method_sends_names_the_incident_id(tmp_path):
+    # decision 023 §4: ids are assigned in collection order and slots.json is committed, so the id never reaches a model
+    from agent.harness import investigate
+
+    dumped = Scripted([tool("submit_diagnosis", ANSWER)])
+    dump_all(Snap(), "INC-042", dumped, method=METHOD, budget=100_000)
+    asked = Scripted([tool("propose_queries", {"queries": [{"text": "failed"}]})], [tool("submit_diagnosis", ANSWER, "t2")])
+    retrieval(Snap(), "INC-042", asked, method=METHOD, cache_root=tmp_path / "cache", q=8, k=5)
+    agent = Scripted([tool("search_spans", {"status": "error"})], [tool("submit_diagnosis", ANSWER, "t2")])
+    investigate(Snap(), "INC-042", agent, cache_root=tmp_path / "cache", method=METHOD)
+    for model in (dumped, asked, agent):
+        text = _model_facing_text(model.calls)
+        assert "INC-042" not in text

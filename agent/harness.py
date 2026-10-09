@@ -15,6 +15,24 @@ from collect.labels import FAULT_TYPES
 from eval.score import check_prediction
 
 MAX_CORRECTIONS = 2
+
+
+class CallError(Exception):
+    """A model.complete call that failed (decision 023 §5). The adapter raises it for API and transport errors only, with
+    `reason` taken from the stop reason it saw (HTTP status or error type, never the output content); the method entry
+    points set `usage` to what was used before the failure (tokens_in, tokens_out, cost_usd, latency_s) and re-raise.
+    It can only come before a prediction is accepted: every method stops calling once one is."""
+
+    def __init__(self, reason: str, detail: str = "", usage: dict | None = None):
+        super().__init__(f"{reason}: {detail}" if detail else reason)
+        self.reason, self.detail, self.usage = reason, detail, usage
+
+
+def usage_so_far(tokens: dict, t_start: float, price_per_mtok: dict | None) -> dict:
+    cost = None if price_per_mtok is None else (tokens["input"] * price_per_mtok["input"]
+                                               + tokens["output"] * price_per_mtok["output"]) / 1e6
+    return {"tokens_in": tokens["input"], "tokens_out": tokens["output"], "cost_usd": cost,
+            "latency_s": round(time.monotonic() - t_start, 3)}
 SUBMIT_NOW = ("You have reached the limit of this investigation. Call submit_diagnosis now with your best answer; "
               "no more tool calls will be answered.")
 
@@ -83,7 +101,11 @@ def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: 
     tokens = {"input": 0, "output": 0}
     turns, corrections, final_chance, limit_reason, stop, pred = 0, 0, False, None, None, None
     while stop is None:
-        response = model.complete(SYSTEM, messages, tools)
+        try:
+            response = model.complete(SYSTEM, messages, tools)
+        except CallError as e:
+            e.usage = usage_so_far(tokens, t_start, price_per_mtok)
+            raise
         turns += 1
         tokens["input"] += response.get("usage", {}).get("input_tokens", 0)
         tokens["output"] += response.get("usage", {}).get("output_tokens", 0)

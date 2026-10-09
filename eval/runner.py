@@ -85,8 +85,174 @@ def incidents_in(layout: DataLayout, split: str) -> list[tuple[str, str]]:
     return sorted(out)
 
 
-def run_method(layout: DataLayout, method: str, split: str, out_root: Path) -> list[Path]:
-    """Predictions of `method` for every incident of `split`, written to out_root/<split>/<method>/<INC>.json."""
+RETRYABLE = ("api_error", "transport_error")  # decision 023 §5: by the stop reason only
+HELDOUT_MAX_ATTEMPTS = 2  # attempts in all per (method, incident)
+LEDGER_USAGE = ("tokens_in", "tokens_out", "cost_usd", "latency_s")
+
+
+def heldout_guard(layout: DataLayout, project_dir: Path | None, *, need_list: bool = True) -> tuple[dict, dict | None]:
+    """The first statement of every held-out path (decision 023 §5, §6): a passing freeze check and, unless only the
+    freeze is needed, the verified heldout_incidents.json. Raises PermissionError (an OSError: the CLI exits 2) before
+    anything is created or written. Returns ({record, sha256}, {doc, sha256} | None)."""
+    if project_dir is None:
+        raise PermissionError("held-out evaluation needs the project directory to check the freeze record (decision 023 §6)")
+    from collect import freeze
+    from collect.heldout import load_heldout_incidents
+    from env.lock import sha256_path
+
+    record, problems = freeze.check_freeze(project_dir)
+    if problems:
+        raise PermissionError("held-out evaluation is refused: " + "; ".join(problems))
+    info = {"record": record, "sha256": freeze.freeze_sha256(project_dir)}
+    if not need_list:
+        return info, None
+    doc = load_heldout_incidents(layout, freeze_sha=info["sha256"])
+    return info, {"doc": doc, "sha256": sha256_path(layout.heldout_incidents_path)}
+
+
+def _now() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _ledger(out_dir: Path) -> dict[str, list[dict]]:
+    path = out_dir / "attempts.jsonl"
+    events: dict[str, list[dict]] = {}
+    for line in path.read_text().splitlines() if path.exists() else []:
+        if line.strip():
+            e = json.loads(line)
+            events.setdefault(e["incident_id"], []).append(e)
+    return events
+
+
+def _append(out_dir: Path, event: dict) -> None:
+    import os
+
+    with (out_dir / "attempts.jsonl").open("a") as f:
+        f.write(json.dumps(event) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def _closed(events: list[dict]) -> bool:
+    """No further attempt (decision 023 §5): one was interrupted (start without end), ended with anything but a
+    retryable error, or HELDOUT_MAX_ATTEMPTS were made."""
+    starts = {e["attempt"] for e in events if e["event"] == "start"}
+    ends = {e["attempt"]: e for e in events if e["event"] == "end"}
+    return bool(starts - set(ends)) or any(e["outcome"] not in RETRYABLE for e in ends.values()) \
+        or len(starts) >= HELDOUT_MAX_ATTEMPTS
+
+
+def _outcomes(events: list[dict]) -> list[str]:
+    ends = {e["attempt"]: e["outcome"] for e in events if e["event"] == "end"}
+    return [ends.get(a, "interrupted") for a in sorted({e["attempt"] for e in events if e["event"] == "start"})]
+
+
+def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: Path | None) -> list[str]:
+    """decision 023 §5: each listed incident once per method (no trial runs); retries only after a CallError whose reason
+    is an API / transport error, at most HELDOUT_MAX_ATTEMPTS attempts in all, every attempt in attempts.jsonl with its
+    usage; predictions written atomically and never overwritten. Returns the listed incidents left without a prediction."""
+    import os
+    import secrets
+
+    from agent.harness import CallError
+    from collect.faults import write_atomic
+    from collect.heldout import write_once
+
+    freeze, listing = heldout_guard(layout, project_dir)
+    config = load_llm_config() if method in LLM_METHODS else None  # still refuses: not approved, no adapter
+    out_dir = Path(out_root) / "heldout" / method
+    out_dir.mkdir(parents=True, exist_ok=True)
+    lock = out_dir / "run.lock"
+    token = secrets.token_hex(8)
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+    except FileExistsError:
+        raise FileExistsError(f"{lock} exists: another held-out run of {method} is going or was killed; a person checks it "
+                              "and removes the lock (decision 023 §5: each method and incident once)") from None
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps({"pid": os.getpid(), "token": token, "started_at": _now()}) + "\n")
+    try:
+        run_config = {"method": method, "split": "heldout", "model": config["model"] if config else None,
+                      "budgets": method_budgets(method, config), "scope": SCOPES.get(method),
+                      "freeze_sha256": freeze["sha256"], "heldout_incidents_sha256": listing["sha256"]}
+        path = out_dir / "run_config.json"
+        if path.exists():
+            if json.loads(path.read_text()) != run_config:
+                raise ValueError(f"{path} differs from this run's configuration: a resumed held-out run is the same run "
+                                 "(decision 023 §5, 024)")
+        else:
+            write_once(path, run_config)
+        ledger = _ledger(out_dir)
+        for item in listing["doc"]["incidents"]:  # never an excluded incident or a closed slot
+            inc = item["incident_id"]
+            pred_path, transcript_path = out_dir / f"{inc}.json", out_dir / f"{inc}.transcript.json"
+            events = ledger.get(inc, [])
+            if pred_path.exists() or _closed(events):
+                continue
+            snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
+            attempt = len({e["attempt"] for e in events if e["event"] == "start"})
+            while attempt < HELDOUT_MAX_ATTEMPTS:
+                attempt += 1
+                _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "start", "at": _now()})
+
+                def end(outcome: str, detail: str = "", usage: dict | None = None) -> None:
+                    _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "end", "outcome": outcome,
+                                      "detail": detail[:300], "usage": usage, "at": _now()})
+
+                try:
+                    out = METHODS[method](snapshot, inc)
+                except CallError as e:
+                    if e.reason in RETRYABLE:
+                        end(e.reason, e.detail, e.usage)
+                        continue
+                    end("error", f"CallError {e.reason}: {e.detail}", e.usage)
+                    raise
+                except Exception as e:
+                    end("error", f"{type(e).__name__}: {e}")
+                    raise
+                pred, transcript = out if isinstance(out, tuple) else (out, None)
+                usage = (pred.get("usage") or {}) if isinstance(pred, dict) else {}
+                if problems := check_prediction(pred):
+                    end("invalid_prediction", "; ".join(problems[:5]), {k: usage.get(k) for k in LEDGER_USAGE})
+                    raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
+                for target, doc in ((pred_path, pred), (transcript_path, transcript)):
+                    if doc is None:
+                        continue
+                    if target.exists():
+                        raise FileExistsError(f"{target} exists: a held-out prediction is never overwritten")
+                    write_atomic(target, doc)
+                end("ok", usage={k: usage.get(k) for k in LEDGER_USAGE})
+                break
+        return [i["incident_id"] for i in listing["doc"]["incidents"]
+                if not (out_dir / f"{i['incident_id']}.json").exists()]
+    finally:
+        try:
+            if json.loads(lock.read_text()).get("token") == token:  # only this process's own lock
+                lock.unlink()
+        except (OSError, ValueError):
+            pass
+
+
+def _is_heldout_incident(layout: DataLayout, incident_id: str) -> bool:
+    """Does either record of the incident's run group say held-out? Unknown incidents are left to the caller."""
+    from collect.heldout import run_split
+    from collect.incident import find_run
+
+    try:
+        run = find_run(layout, incident_id)
+    except LookupError:
+        return False
+    injection = layout.injection_path(run["run_group_id"])
+    return run_split(run) == "heldout" or (injection.exists() and json.loads(injection.read_text()).get("split") == "heldout")
+
+
+def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, project_dir: Path | None = None) -> list:
+    """Predictions of `method` for every incident of `split`, written to out_root/<split>/<method>/<INC>.json. The
+    held-out set (decision 023 §5) returns the listed incidents left without a prediction instead of the paths."""
+    if split == "heldout":
+        return _run_heldout(layout, method, out_root, project_dir)
     config = load_llm_config() if method in LLM_METHODS else None  # refuses before any snapshot is opened
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -210,7 +376,39 @@ def _evidence_aggregate(rows: list[dict]) -> dict:
 REPORTED_ONLY = ("difficulty", "fault", "failure", "label_reviewed", "saw_method_outputs", "usage", "stop_reason", "exposure")
 
 
-def score_method(layout: DataLayout, method: str, split: str, out_root: Path) -> dict:
+def _heldout_scoring(layout: DataLayout, method: str, out_root: Path, project_dir: Path | None) -> dict:
+    """What score_method needs on the held-out set: the verified list, a finished run of this freeze and list, and the
+    ledger (an incident without a prediction is scored only once its attempts are over)."""
+    freeze, listing = heldout_guard(layout, project_dir)
+    out_dir = Path(out_root) / "heldout" / method
+    path = out_dir / "run_config.json"
+    if not path.exists():
+        raise LookupError(f"{method} has not run on the held-out set: `python -m eval run --method {method} --set heldout`")
+    config = json.loads(path.read_text())
+    if (config.get("freeze_sha256"), config.get("heldout_incidents_sha256")) != (freeze["sha256"], listing["sha256"]):
+        raise PermissionError(f"the held-out run of {method} used another freeze record or incident list")
+    ledger = _ledger(out_dir)
+    pairs = [(i["incident_id"], i["run_group_id"]) for i in listing["doc"]["incidents"]]
+    if waiting := [inc for inc, _ in pairs if not (out_dir / f"{inc}.json").exists() and not _closed(ledger.get(inc, []))]:
+        raise LookupError(f"run not finished: {waiting} have no prediction and may still be attempted "
+                          f"(`python -m eval run --method {method} --set heldout`)")
+    failed = [e for events in ledger.values() for e in events if e["event"] == "end" and e["outcome"] != "ok"]
+
+    def total(key):
+        values = [(e.get("usage") or {}).get(key) for e in failed]
+        return None if None in values else round(sum(values), 6)
+
+    doc = listing["doc"]
+    return {"pairs": pairs, "ledger": ledger,
+            "report": {"freeze_sha256": freeze["sha256"], "heldout_incidents_sha256": listing["sha256"],
+                       "excluded": doc["excluded"], "closed_slots": doc["closed_slots"],
+                       "removed_faults": doc["removed_faults"], "unanswered": []},
+            "failed_attempts": {"count": len(failed), **{k: total(k) for k in LEDGER_USAGE}}}
+
+
+def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *, project_dir: Path | None = None) -> dict:
+    held = _heldout_scoring(layout, method, out_root, project_dir) if split == "heldout" else None
+    from agent.harness import _abstain
     from collect.review import effective_label
     from eval.failures import CATEGORIES, classify
     from eval.relevance import gold_score, weak_score
@@ -218,7 +416,7 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     rows, excluded, reviewed, differences = [], [], 0, {}
-    for inc, rg in incidents_in(layout, split):
+    for inc, rg in (held["pairs"] if held else incidents_in(layout, split)):
         audit_path = layout.label_path(inc).with_name("leakage_audit.json")
         if not audit_path.exists():
             raise LookupError(f"{inc} has no leakage audit: run `python -m eval leakage --set {split}` first (decision 015)")
@@ -231,7 +429,12 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
             excluded.append({"incident_id": inc, "reason": why})
             continue
         reviewed += label["labeling"]["method"] == "catalog+review"
-        pred = json.loads((out_dir / f"{inc}.json").read_text())
+        pred_path = out_dir / f"{inc}.json"
+        if held and not pred_path.exists():  # attempts over, no prediction: an abstention in the denominator (013 §2)
+            pred = {**_abstain(inc, {"name": method, "version": "none"}), "usage": {}}
+            held["report"]["unanswered"].append({"incident_id": inc, "attempts": _outcomes(held["ledger"].get(inc, []))})
+        else:
+            pred = json.loads(pred_path.read_text())
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
         tpath = out_dir / f"{inc}.transcript.json"
         transcript = json.loads(tpath.read_text()) if tpath.exists() else None
@@ -272,6 +475,9 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path) ->
               "review_differences": differences,
               "run_config": json.loads(config_path.read_text()) if config_path.exists() else None,
               "usage": _usage_aggregate(rows)}
+    if held:  # decision 023 §5, §6: what the list left out and what the run could not answer
+        result["heldout"] = held["report"]
+        result["usage"]["failed_attempts"] = held["failed_attempts"]
     (out_dir / "scores.json").write_text(json.dumps(result, indent=2) + "\n")
     (out_dir / "table.md").write_text(_table(result))
     return result
@@ -327,7 +533,30 @@ def _table(result: dict) -> str:
             lines.append(f"| {names[key]} | 0 | - | - |")
         else:
             lines.append(f"| {names[key]} | {m['n']} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
-    return "\n".join(lines + _usage_lines(result)) + "\n"
+    return "\n".join(lines + _heldout_lines(result) + _usage_lines(result)) + "\n"
+
+
+def _heldout_lines(result: dict) -> list[str]:
+    held = result.get("heldout")
+    if held is None:
+        return []
+    lines = ["", "## Held-out set (decision 023)", "",
+             f"Freeze record {held['freeze_sha256']}; incident list {held['heldout_incidents_sha256']}."]
+    if held["removed_faults"]:
+        lines.append("Faults removed after the Pilot: " + ", ".join(f"{r['flag']} {r['variant']} ({r['basis']}: {r['reason']})"
+                                                                 for r in held["removed_faults"]) + ".")
+    if held["closed_slots"]:
+        lines.append("Slots closed (fault not exercised twice): " + ", ".join(f"{c['slot']} {c['flag']} {c['variant']}"
+                                                                            for c in held["closed_slots"]) + ".")
+    if held["excluded"]:
+        lines.append("Not listed: " + ", ".join(f"{e['incident_id']} ({e['reason']})" for e in held["excluded"]) + ".")
+    if held["unanswered"]:
+        lines.append("Scored as abstentions (no prediction after the retry rule): " + ", ".join(
+            f"{u['incident_id']} ({', '.join(u['attempts']) or 'no attempt'})" for u in held["unanswered"]) + ".")
+    f = result["usage"]["failed_attempts"]
+    lines.append(f"Failed attempts: {f['count']} (tokens in {f['tokens_in']}, out {f['tokens_out']}, cost USD {f['cost_usd']}, "
+                 f"latency s {f['latency_s']}).")
+    return lines
 
 
 def _fmt(x) -> str:
@@ -359,15 +588,18 @@ def _usage_lines(result: dict) -> list[str]:
     return lines
 
 
-def gold_todo_set(layout: DataLayout, split: str, out_root: Path) -> dict:
+def gold_todo_set(layout: DataLayout, split: str, out_root: Path, *, project_dir: Path | None = None) -> dict:
     """Blind gold worksheets (decision 017 §3): per incident of `split`, the pooled citations of every method's predictions
     still to judge, written to the ground-truth side as evidence_gold_todo.json (record text and label, no method)."""
+    listing = heldout_guard(layout, project_dir)[1] if split == "heldout" else None
     from collect.review import effective_label
     from collect.snapshot import _rel
     from eval.relevance import _ns, gold_sample, key, resolved_unique
 
     rows = []
-    for inc, _ in incidents_in(layout, split):
+    pairs = ([(i["incident_id"], i["run_group_id"]) for i in listing["doc"]["incidents"]] if listing
+             else incidents_in(layout, split))
+    for inc, _ in pairs:
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
         cited = {}
         for path in sorted(Path(out_root, split).glob(f"*/{inc}.json")):
@@ -413,8 +645,13 @@ def _render(snapshot, e: dict, limit: int = 20) -> list[str]:
     return lines
 
 
-def gold_add(layout: DataLayout, incident_id: str, sheet_path: Path, *, annotator: str, now: str) -> dict:
+def gold_add(layout: DataLayout, incident_id: str, sheet_path: Path, *, annotator: str, now: str,
+             project_dir: Path | None = None) -> dict:
     """Merge the judged items of a filled worksheet into evidence_gold.json (append-only, decision 017 §3)."""
+    if _is_heldout_incident(layout, incident_id):
+        listing = heldout_guard(layout, project_dir)[1]
+        if incident_id not in {i["incident_id"] for i in listing["doc"]["incidents"]}:
+            raise PermissionError(f"{incident_id} is a held-out incident outside heldout_incidents.json's list: no gold judgment")
     from eval.relevance import merge_gold
 
     sheet = json.loads(Path(sheet_path).read_text())
@@ -428,14 +665,25 @@ def gold_add(layout: DataLayout, incident_id: str, sheet_path: Path, *, annotato
     return {"added": len(doc["items"]) - len((before or {}).get("items", [])), "unjudged": len(items) - len(judged)}
 
 
-def audit_set(layout: DataLayout, split: str, out_root: Path) -> dict:
+def audit_set(layout: DataLayout, split: str, out_root: Path, *, project_dir: Path | None = None) -> dict:
     """Leakage audit of every incident of `split` (decision 015): per-incident JSON on the ground-truth side,
     a summary table under out_root/<split>/leakage.md (difficulty and counts only, no templates)."""
+    pairs = None
+    if split == "heldout":
+        heldout_guard(layout, project_dir, need_list=False)
+        if layout.heldout_incidents_path.exists():
+            raise PermissionError("heldout_incidents.json exists and has pinned every audit: held-out audits are never rewritten "
+                                  "(decision 023 §5.5)")
+        from collect.heldout import heldout_runs
+
+        pairs = sorted((inc, r["run_group_id"]) for r in heldout_runs(layout) if r.get("status") == "valid"
+                       for inc in r.get("incident_ids") or []
+                       if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists())
     from collect.review import effective_label
     from eval.leakage import audit
 
     rows = []
-    for inc, _ in incidents_in(layout, split):
+    for inc, _ in pairs if pairs is not None else incidents_in(layout, split):
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
         label = effective_label(layout, inc)[0]
         report = json.loads(layout.normalize_report_path(inc).read_text())
@@ -455,20 +703,34 @@ def audit_set(layout: DataLayout, split: str, out_root: Path) -> dict:
 
 
 def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tuple = MAIN_METRICS,
-                    resamples: int = 10_000) -> dict:
+                    resamples: int = 10_000, layout: DataLayout | None = None, project_dir: Path | None = None) -> dict:
     """Paired differences a - b on the incidents both were scored on (decision 023 §7), with LOFO bounds; written to
     out_root/<split>/compare-<a>-vs-<b>.json / .md. Reads only the two methods' scores.json."""
+    current = None
+    if split == "heldout":
+        if layout is None:
+            raise PermissionError("held-out comparison needs the data layout to verify the incident list (decision 023 §5)")
+        freeze, listing = heldout_guard(layout, project_dir)
+        current = (freeze["sha256"], listing["sha256"])
     from eval.compare import lofo, paired
 
-    scored = {}
+    scored, held = {}, None
     for m in (a, b):
         path = Path(out_root) / split / m / "scores.json"
         if not path.exists():
             raise LookupError(f"{m} has no scores on the {split} set: run `python -m eval score --method {m} --set {split}`")
-        scored[m] = json.loads(path.read_text())["incidents"]
+        doc = json.loads(path.read_text())
+        if current is not None:
+            held = doc.get("heldout") or {}
+            if (held.get("freeze_sha256"), held.get("heldout_incidents_sha256")) != current:
+                raise PermissionError(f"{m}'s held-out scores are not of the current freeze record and incident list")
+        scored[m] = doc["incidents"]
     result = {"split": split, "a": a, "b": b,
               "paired": {m: paired(scored[a], scored[b], m, resamples=resamples) for m in metrics},
               "lofo": {m: lofo(scored[a], scored[b], m, resamples=resamples) for m in metrics}}
+    if held is not None:
+        result["heldout"] = {k: held[k] for k in ("freeze_sha256", "heldout_incidents_sha256", "removed_faults",
+                                                  "closed_slots", "excluded")}
     base = Path(out_root) / split / f"compare-{a}-vs-{b}"
     base.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
     lines = [f"# {a} - {b} on the {split} set (decision 023 §7; paired run-group cluster bootstrap)", "",
@@ -479,5 +741,9 @@ def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tupl
               "| metric | fault left out | n | mean difference | lower bound |", "|---|---|---:|---:|---:|"]
     lines += [f"| {m} | {f} | {r['n']} | " + ("- | - |" if r["mean_diff"] is None else f"{r['mean_diff']:.3f} | {r['ci95'][0]:.3f} |")
               for m, by in result["lofo"].items() for f, r in by.items()]
+    if held is not None:
+        lines += ["", "Faults removed after the Pilot: " + (", ".join(f"{r['flag']} {r['variant']}" for r in held["removed_faults"])
+                                                            or "none") + ".",
+                  "Slots closed: " + (", ".join(c["slot"] for c in held["closed_slots"]) or "none") + "."]
     base.with_suffix(".md").write_text("\n".join(lines) + "\n")
     return result

@@ -259,3 +259,76 @@
 7. **方法 bug 修正後的重跑**：只作探索性結果；重跑的付費用量另行批准（預設）。
 - 另外：真實 incident snapshot 的 sample 不進 git；需要範例時用 synthetic / tiny generated fixture。
 - 標「Pilot 後定稿」的項目（§1 的 fault 清單與 `PLANS["heldout"]`、§6 的 freeze 紀錄內容）仍在 Pilot 收集與 review 完成後、第一個 held-out run group 之前定稿一次。
+
+## 實作說明（2026-10-09）
+
+本節只記錄「對實驗的影響 / 程式」已實作的內容，不改上面任何規則；每一項解讀的理由與放棄的替代方案在 decision 026。
+「Pilot 後定稿」的內容（實際的 fault 清單、`PLANS["heldout"]`、slot 清單、freeze 紀錄）**都還沒有產生**，只寫好產生它們的指令；
+在 freeze 紀錄存在之前，所有 held-out 收集與方法執行一律拒絕。
+
+### 已實作
+
+- `collect/heldout.py`：plan 的建立與檢查（`build_heldout_plan`、`pilot_evidence`、`pilot_problems`）、slot 清單（`heldout_slots`）、
+  以 slot 計算的進度（`slot_status`、`next_slot`）、`fresh_seed`、清單（`heldout_incidents`、`load_heldout_incidents`）。不執行 git。
+- `collect/freeze.py`：freeze 紀錄（`freeze_record`）、預設拒絕的檢查（`observe`、`freeze_problems`、`check_freeze`、`commit_problems`）、
+  兩個 writer（`write_heldout_plan`、`write_freeze`）與共用的前置檢查（`post_pilot_problems`）。只用唯讀的 git 指令。
+- `collect/rungroup.py`：`Plan.slot`、`Plan.freeze_sha256`；held-out ⇔ 兩者都有，Pilot 兩者都沒有（Pilot 的 run.json 形狀不變）。
+- `collect/__main__.py`：`run|next|status --set heldout`、`heldout-plan`、`heldout-freeze`、`heldout-list`；incident 指令的 freeze 檢查；freeze 後 Pilot 關閉。
+- `agent/harness.py`：`CallError`（adapter 依停止原因設定 reason）；`investigate`、dump-all、retrieval 在重新拋出前附上失敗前的用量。
+- `eval/runner.py`：`heldout_guard`、嘗試紀錄、執行鎖、只跑一次與重試、放棄作答的評分、報告中的排除 / 關閉 slot / 移除的 fault / 失敗嘗試的用量、
+  gold-add 與 compare 的檢查。paired bootstrap、LOFO、難度層區間在這之前已完成（§7）。
+
+### 指令（依序）
+
+1. `collect heldout-plan --amendments <file>`：寫一次 `docs/heldout/plan.json`；人檢查後 commit。
+2. `collect heldout-freeze --pilot-revisions <file>`：在乾淨、plan 已 commit 的 checkout 上寫一次 `slots.json` 與 `freeze.json`；**只把這兩個檔案 commit 成一個 commit**。
+3. 每個 slot：`collect next --set heldout` → `./tools/with-mac-lock uv run python -m collect run --set heldout --flag F --variant V`（不接受 `--seed`）
+   → `collect process --incident <INC> --labeler …`。
+4. 全部 slot 收完：`eval leakage --set heldout` → 使用者 review（`collect review-sheet` / `collect review`，`saw_method_outputs = false`）→ 未觸發的 slot 重收一次。
+5. `collect heldout-list`：寫一次 `heldout_incidents.json`（只印數量）。
+6. `eval run|score --method <m> --set heldout`、`eval compare --set heldout`。進度：`collect status --set heldout`。
+
+### 檔案格式（摘要）
+
+- **修正輸入**（不進 git）：`{"amend": [{"flag", "variant", "field": "affected_services" | "user_symptom" | "notes", "value", "reason"}],
+  "remove": [{"flag", "variant", "basis": "not_exercised" | "invalid_rate" | "lexicon_hits" | "pipeline" | "label", "reason", "decision"?}]}`。
+- **`docs/heldout/plan.json`**：`entries`（PILOT 的形狀與順序）、`amended`（a priori、held-out 值、理由、review 數）、`not_absorbed`（只有計數與原因）、
+  `removed`（依據、理由、decision、證據計數）、`methods_with_pilot_results`。
+- **Pilot 修訂宣告**（嵌入 freeze）：`{"011" … "022": {"status": "used", "decision": <file>} | {"status": "waived"}}`。
+- **`docs/heldout/slots.json`**：`master_seed`、`k`、`plan_sha256`、`faults`、`slots`（H01…：block、flag、variant）。
+- **`docs/heldout/freeze.json`**：`frozen_at`、`frozen_from_commit`、`frozen_tree`、`decisions`（blob）、`env_lock_sha256`、`policy`、`llm`、
+  `pilot_revisions`、`plan`、`k`、`master_seed`、`slots`。
+- **`heldout_incidents.json`**（ground-truth 側）：`incidents`（slot、id、8 個檔案的 sha）、`excluded`、`closed_slots`、`removed_faults`、`run_groups`、`by_fault`。
+- **`attempts.jsonl`**：每次嘗試一行 start、一行 end（outcome：ok | api_error | transport_error | invalid_prediction | error，含用量）。
+  held-out 的 `run_config.json` 另記 `freeze_sha256` 與 `heldout_incidents_sha256`。
+
+### 解讀（理由見 026 §2 的同一編號）
+
+1. `PLANS["heldout"]` = 進 git 的 `docs/heldout/plan.json`，只從明確的專案目錄讀。
+2. plan 與 freeze 都要等 Pilot 收集、review、audit 與 LLM 方法試跑完成 → 目前被 NEXT A1 擋住。
+3. 只吸收所有 exercised 且沒看過方法輸出的 review 一致發現、且與 a priori 不同的值；每項要理由；修正後仍符合 PILOT entry 規則。
+4. 進 git 的文字不得有 `INC-` / `RG-` id。
+5. 移除只依 Pilot 驗證失敗，每種依據對照 Pilot 資料；pipeline / label 需要 HEAD 上的 decision 檔；永不依分數。
+6. 進入條件：至少一個 reviewed 且 `fault_exercised = true` 的 Pilot incident；review 完成 = 每個 valid Pilot incident 都有兩個 review 檔。
+7. freeze 預設拒絕：只允許 `M NEXT.md`、新增 slots / freeze、新增 decision 檔；freeze 後既有 decision 不再修改。
+8. env lock、policy、llm 的 sha 寫入紀錄並由 diff 釘住；資料端仍逐筆比對。
+9. freeze 要求 llm 已 approved 且 model、model_version、temperature 非 null。
+10. 「Pilot 上修訂一次」：011、013–015、017、019–022 各宣告 used / waived；013 必須 used；011 隨 policy 版本。
+11. slot 的無效上限累計所有非 valid 的 run group。
+12. 狀態優先：filled > needs_person > closed > open；損壞或不符的紀錄 exit 2，需要人 exit 3。
+13. 未觸發重收一次，再未觸發就關閉；詞彙命中排除、不重收。
+14. `run --set heldout` 自己算下一個 slot；slot 與 freeze sha 只寫進 run.json。
+15. held-out 拒絕 `--seed`，seed 由 SystemRandom 抽且不與任何 run group 重複。
+16. slot 順序只由 `Random(20261009).random()` 決定，可重新產生驗證。
+17. 只對 api_error / transport_error 重試，每個（方法, incident）最多 2 次，全部記錄用量。
+18. 每個（方法, incident）只跑一次；續跑需要相同設定；O_EXCL 執行鎖；prediction 原子寫入、不覆寫。
+19. 重試後仍無 prediction → 放棄作答，留在分母、`no_answer`、列出；使用者可在 freeze 前推翻。
+20. 每個 held-out eval 路徑先過 `heldout_guard`；清單存在後 leakage 拒絕。
+21. 作用在 held-out incident 的 collect 指令要求 freeze 檢查通過。
+22. freeze 之後 `collect run --set pilot` 拒絕。
+23. held-out 的輸出不顯示 incident id 與 valid run group id。
+24. `heldout_incidents.json` 寫一次、釘住 8 個檔案與所有 held-out run group，並檢查每個 run group 來自凍結的程式、在 freeze 之後。
+25. 使用者決定 6：任何 policy / env lock 不符都 fail closed；將來的修訂指令必須排除、不混用。
+26. 依收集順序配發的 id 加上進 git 的 slot 清單，仍可讓人對應 id 與 fault；方法看不到，接受。
+27. held-out 需要的程式（API adapter、Gate 2 / 3、等權表、013 正式版）都要在 freeze 前 commit。
+28. 這一批不做 held-out loop。

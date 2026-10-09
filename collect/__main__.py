@@ -1,6 +1,9 @@
 """python -m collect run — collect one run group under the Mac heavy lock (decision 009).
 
     ./tools/with-mac-lock uv run python -m collect run --set pilot --flag paymentFailure --variant 100%
+
+Held-out (decisions 023, 026): heldout-plan -> heldout-freeze -> per slot next / run --set heldout / process -> heldout-list;
+every held-out step is refused without a passing freeze record.
 """
 
 from __future__ import annotations
@@ -22,24 +25,89 @@ from env.lock import PROJECT_DIR
 UPSTREAM_DIR = PROJECT_DIR / "env/upstream/opentelemetry-demo"
 FLAG_FILE = UPSTREAM_DIR / "src/flagd/demo.flagd.json"
 PILOT_FAULT_MINUTES = 10  # decision 009 (amended): every Pilot fault lasts the same, so window length tells nothing
+HELDOUT_FAULT_MINUTES = PILOT_FAULT_MINUTES  # decision 023 §3: the held-out faults last as long as the Pilot ones
 
 
 class UsageError(Exception):
     pass
 
 
-def _check_args(ns: argparse.Namespace) -> None:
-    if ns.split == "heldout":
-        raise UsageError("held-out collection needs its own protocol decision first (fault list, durations, split); "
-                         "only --set pilot is collected for now")
+def _freeze_problems() -> list[str]:
+    from collect import freeze
+
+    return freeze.check_freeze(PROJECT_DIR)[1]
+
+
+def _heldout_docs() -> tuple[dict, dict]:
+    from collect.heldout import PLAN_FILE, SLOTS_FILE
+
+    return json.loads((PROJECT_DIR / PLAN_FILE).read_text()), json.loads((PROJECT_DIR / SLOTS_FILE).read_text())
+
+
+def _heldout_slot(ns: argparse.Namespace, layout: DataLayout) -> dict:
+    """decision 023 §4: a held-out run needs a passing freeze, a complete and reviewed Pilot, and must be the next slot."""
+    from collect import freeze
+    from collect.heldout import next_slot, pilot_problems
+
+    if problems := freeze.check_freeze(PROJECT_DIR)[1]:
+        raise UsageError("held-out collection is refused: " + "; ".join(problems))
+    try:
+        plan_doc, slots_doc = _heldout_docs()
+        removed = {(r["flag"], r["variant"]) for r in plan_doc["removed"]}
+        if problems := pilot_problems(layout, removed):
+            raise UsageError("held-out collection waits for the Pilot and its review (decision 023 §4): " + "; ".join(problems))
+        sha = freeze.freeze_sha256(PROJECT_DIR)
+        slot = next_slot(layout, slots_doc, freeze_sha=sha)
+    except (ValueError, RuntimeError, OSError, KeyError) as e:
+        raise UsageError(f"held-out collection is refused: {e}") from e
+    if slot is None:
+        raise UsageError("every held-out slot is filled or closed: no added collection (decision 023 §2)")
+    if (ns.flag, ns.variant) != (slot["flag"], slot["variant"]):
+        raise UsageError(f"{ns.flag} {ns.variant} is not the next slot ({slot['slot']}: {slot['flag']} {slot['variant']}): "
+                         "run `collect next --set heldout`")
+    if planned("heldout", ns.flag, ns.variant, project_dir=PROJECT_DIR) is None:
+        raise UsageError(f"{ns.flag} {ns.variant} is not on the held-out plan (decision 023 §1)")
+    return {"slot": slot["slot"], "freeze_sha256": sha}
+
+
+def _check_args(ns: argparse.Namespace, layout: DataLayout) -> dict:
+    """The plan fields the set fixes ({} for the Pilot; slot and freeze sha for the held-out set, decision 023 §4)."""
+    from collect.heldout import FREEZE_FILE
+
+    if ns.split == "heldout" and ns.seed is not None:
+        raise UsageError("--seed is refused for the held-out set: every run group draws a fresh SystemRandom seed, recorded "
+                         "on the ground-truth side only (decision 023 §4)")
     if ns.flag not in FLAG_FAULT_TYPES:
         raise UsageError(f"flag {ns.flag!r} is not a Core fault (decision 006)")
     catalog = load_flag_catalog(FLAG_FILE)
     if ns.variant not in catalog[ns.flag]["variants"] or ns.variant == catalog[ns.flag]["default"]:
         raise UsageError(f"flag {ns.flag!r} has no variant {ns.variant!r} that injects a fault")
+    if ns.split == "heldout":
+        return _heldout_slot(ns, layout)
+    if (PROJECT_DIR / FREEZE_FILE).exists():
+        raise UsageError("the Pilot is closed at the held-out freeze (decision 023 §6): no Pilot run group after it")
     if planned(ns.split, ns.flag, ns.variant) is None:
         raise UsageError(f"{ns.flag} {ns.variant} is not on the {ns.split} plan (decision 016): "
                          "a set collects only its pre-registered faults")
+    return {}
+
+
+INCIDENT_COMMANDS = ("normalize", "replay", "label", "process", "review-sheet", "review")
+
+
+def _heldout_incident_guard(layout: DataLayout, incident: str) -> None:
+    """decision 023 §4 / §6: a held-out incident is processed only by the frozen code (a passing freeze check)."""
+    from collect.heldout import run_split
+    from collect.incident import find_run
+
+    try:
+        run = find_run(layout, incident)
+    except LookupError:
+        return  # unknown incident: the command's own error path reports it
+    injection = layout.injection_path(run["run_group_id"])
+    heldout = run_split(run) == "heldout" or (injection.exists() and json.loads(injection.read_text()).get("split") == "heldout")
+    if heldout and (problems := _freeze_problems()):
+        raise PermissionError(f"{incident} is a held-out incident and the freeze check fails: " + "; ".join(problems))
 
 
 def _normalize(layout: DataLayout, incident: str) -> dict:
@@ -71,9 +139,88 @@ def _label(layout: DataLayout, incident: str, labeler: str) -> dict:
 
     from collect.labeling import catalog_label_from_plan
 
-    label = catalog_label_from_plan(layout, incident, labeler=labeler, now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    label = catalog_label_from_plan(layout, incident, labeler=labeler, now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                    project_dir=PROJECT_DIR)
     # the label is ground truth: only say where it went
     return {"incident_id": incident, "label": "written", "method": label["labeling"]["method"]}
+
+
+def _heldout_progress(command: str) -> int:
+    """`next|status --set heldout`: slots, faults, states, counts, non-valid run-group ids and power settings only (never an
+    incident id or a valid run-group id). next: exit 2 on a failing freeze, an incomplete Pilot or a corrupt record, 3 when a
+    person is needed."""
+    from collect import freeze
+    from collect.heldout import FREEZE_FILE, next_slot, pilot_problems, slot_status
+
+    layout = DataLayout(PROJECT_DIR / "data/external")
+    if command == "status":
+        if not (PROJECT_DIR / FREEZE_FILE).exists():
+            print(f"error: {freeze.NO_FREEZE}", file=sys.stderr)
+            return 2
+        problems = freeze.check_freeze(PROJECT_DIR)[1]
+        try:
+            rows = slot_status(layout, _heldout_docs()[1], freeze_sha=freeze.freeze_sha256(PROJECT_DIR))
+        except (ValueError, OSError, KeyError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        summary = {state: sum(r["state"] == state for r in rows) for state in ("filled", "open", "closed", "needs_person")}
+        print(json.dumps({"slots": rows, "summary": summary, "freeze_problems": problems}, indent=2))
+        return 0
+    if problems := freeze.check_freeze(PROJECT_DIR)[1]:
+        print("error: " + "; ".join(problems), file=sys.stderr)
+        return 2
+    try:
+        plan_doc, slots_doc = _heldout_docs()
+        if problems := pilot_problems(layout, {(r["flag"], r["variant"]) for r in plan_doc["removed"]}):
+            print("error: held-out collection waits for the Pilot and its review: " + "; ".join(problems), file=sys.stderr)
+            return 2
+        slot = next_slot(layout, slots_doc, freeze_sha=freeze.freeze_sha256(PROJECT_DIR))
+    except RuntimeError as e:  # slots wait for a person (decision 023 §4)
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    except (ValueError, OSError, KeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    if slot is not None:
+        print(f"--flag {slot['flag']} --variant {slot['variant']}")
+        print(json.dumps({"slot": slot["slot"], "skipped_needs_person": slot["skipped"]}), file=sys.stderr)
+    return 0
+
+
+def _heldout_writer(ns: argparse.Namespace) -> int:
+    """heldout-plan / heldout-freeze (written once, after the Pilot; decision 023 line 6) and heldout-list (§5.5)."""
+    import subprocess
+    from datetime import UTC, datetime
+
+    from collect import freeze
+    from eval.runner import METHODS
+
+    layout = DataLayout(PROJECT_DIR / "data/external")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    kw = {"methods": sorted(METHODS), "results_root": layout.root / "results"}
+    try:
+        if ns.command == "heldout-plan":
+            out = freeze.write_heldout_plan(PROJECT_DIR, layout, json.loads(ns.amendments.read_text()), **kw)
+        elif ns.command == "heldout-freeze":
+            out = freeze.write_freeze(PROJECT_DIR, layout, json.loads(ns.pilot_revisions.read_text()), now=now, **kw)
+        else:
+            from collect.heldout import heldout_incidents, write_once
+
+            record, problems = freeze.check_freeze(PROJECT_DIR)
+            if problems:
+                raise PermissionError("the held-out list is refused: " + "; ".join(problems))
+            plan_doc, slots_doc = _heldout_docs()
+            doc = heldout_incidents(layout, slots_doc, plan_doc, freeze=record, freeze_sha=freeze.freeze_sha256(PROJECT_DIR),
+                                    results_root=kw["results_root"], now=now,
+                                    commit_check=lambda commit: freeze.commit_problems(PROJECT_DIR, record, commit))
+            sha = write_once(layout.heldout_incidents_path, doc)
+            out = {"listed": len(doc["incidents"]), "excluded": len(doc["excluded"]), "closed_slots": len(doc["closed_slots"]),
+                   "removed_faults": len(doc["removed_faults"]), "sha256": sha}
+    except (ValueError, LookupError, OSError, KeyError, subprocess.CalledProcessError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(out, indent=2))
+    return 0
 
 
 # normal covers the statistical baseline's 10-minute reference: with less, it abstains by design and checks nothing
@@ -164,9 +311,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     lp.add_argument("--labeler", required=True, help="who writes the a priori labels, e.g. agent:claude-code")
     lp.add_argument("--max-runs", type=int, help="stop after this many run groups")
     sta = sub.add_parser("status", help="decision 016: run groups and incidents of every planned fault of a set")
-    sta.add_argument("--set", dest="split", required=True, choices=["pilot"])
+    sta.add_argument("--set", dest="split", required=True, choices=["pilot", "heldout"])
     nxt = sub.add_parser("next", help="the next planned fault to collect, as `--flag F --variant V` (nothing when complete)")
-    nxt.add_argument("--set", dest="split", required=True, choices=["pilot"])
+    nxt.add_argument("--set", dest="split", required=True, choices=["pilot", "heldout"])
+    hpl = sub.add_parser("heldout-plan", help="decision 023 §1: write docs/heldout/plan.json once, from the Pilot plan, the Pilot "
+                                              "review evidence and a person's amendments and removals (after the Pilot)")
+    hpl.add_argument("--amendments", type=Path, required=True, help='{"amend": [...], "remove": [...]} (decision 026)')
+    hfz = sub.add_parser("heldout-freeze", help="decision 023 §4, §6: write docs/heldout/slots.json and freeze.json once, on a "
+                                                "clean checkout with the plan committed; commit exactly those two files next")
+    hfz.add_argument("--pilot-revisions", type=Path, required=True, help="used / waived for each decision's one Pilot revision")
+    sub.add_parser("heldout-list", help="decision 023 §5.5: write heldout_incidents.json once (ground-truth side), after every "
+                                        "slot is filled or closed, processed, audited and reviewed; prints counts only")
     pro = sub.add_parser("process", help="after a valid run: normalize, replay and the a priori label (steps already done are skipped)")
     pro.add_argument("--incident", required=True)
     pro.add_argument("--labeler", required=True, help="who writes the a priori label, e.g. agent:claude-code")
@@ -179,6 +334,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     rev.add_argument("--reviewer", required=True, help="human:<name>")
     ns = parser.parse_args(argv)
 
+    if ns.command in INCIDENT_COMMANDS:
+        try:
+            _heldout_incident_guard(DataLayout(PROJECT_DIR / "data/external"), ns.incident)
+        except (PermissionError, ValueError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
     if ns.command == "replay":
         import subprocess
 
@@ -213,6 +374,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         out = pilot_loop(layout, labeler=ns.labeler, log_dir=layout.root / "logs" / "pilot-loop", max_runs=ns.max_runs)
         print(json.dumps(out, indent=2))
         return {"complete": 0, "max_runs": 0, "needs_person": 3, "lock_busy": 75}.get(out["stopped"], 1)
+    if ns.command in ("status", "next") and ns.split == "heldout":
+        return _heldout_progress(ns.command)
+    if ns.command in ("heldout-plan", "heldout-freeze", "heldout-list"):
+        return _heldout_writer(ns)
     if ns.command in ("status", "next"):
         from collect.pilot import next_planned, plan_status
 
@@ -301,8 +466,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                           "seconds": result["seconds"], "max_rss_bytes": result["max_rss_bytes"]}, indent=2))
         return 0 if result["freeze_check"]["pass"] else 1
 
+    layout = DataLayout(PROJECT_DIR / "data/external")
     try:
-        _check_args(ns)
+        fixed = _check_args(ns, layout)
     except UsageError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -310,11 +476,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     from collect.live import LiveStack, RealClock  # Docker-backed; imported only for a real run
     from env.lock import verify_against_disk
 
-    layout = DataLayout(PROJECT_DIR / "data/external")
+    if ns.split == "heldout":
+        from collect.heldout import fresh_seed
+
+        seed, minutes = fresh_seed(layout), HELDOUT_FAULT_MINUTES  # decision 023 §3, §4
+    else:
+        seed, minutes = ns.seed if ns.seed is not None else random.SystemRandom().randrange(2**31), PILOT_FAULT_MINUTES
     rg = next_id(layout, "RG")
-    seed = ns.seed if ns.seed is not None else random.SystemRandom().randrange(2**31)
-    plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=PILOT_FAULT_MINUTES,
-                split=ns.split)
+    plan = Plan(run_group_id=rg, seed=seed, flag=ns.flag, variant=ns.variant, fault_minutes=minutes, split=ns.split, **fixed)
     stack = LiveStack(PROJECT_DIR, UPSTREAM_DIR, layout.root)
     work = layout.root / "staging" / rg
     import signal

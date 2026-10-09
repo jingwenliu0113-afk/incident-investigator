@@ -102,7 +102,26 @@ uv run python -m eval score --method stat-anomaly --set pilot
 
 正式收集需要 Mac heavy lock（`MACHINE_POLICY.md`）；完整 telemetry、raw 與結果都在 `data/external/`，不進 git。
 
+### Held-out（decision 023、026）
+
+Pilot 收完、review、leakage audit 完成，而且 LLM 方法已批准並在 Pilot 上跑過之後才能開始（目前被 NEXT A1 擋住）。
+沒有 freeze 紀錄時，所有 `--set heldout` 的收集與方法執行一律拒絕。
+
+```bash
+uv run python -m collect heldout-plan --amendments <amendments.json>       # 寫一次 docs/heldout/plan.json，之後 commit
+uv run python -m collect heldout-freeze --pilot-revisions <revisions.json> # 寫一次 slots.json 與 freeze.json，只把這兩個檔案 commit 成一個 commit
+uv run python -m collect next --set heldout                                # 下一個 slot（stderr 是 slot 與待人處理的 slot）
+./tools/with-mac-lock uv run python -m collect run --set heldout --flag F --variant V   # 不接受 --seed
+uv run python -m collect process --incident <INC> --labeler agent:claude-code
+uv run python -m eval leakage --set heldout                                # 全部 slot 收完、process 之後
+uv run python -m collect review-sheet --incident <INC>                    # 使用者 review，saw_method_outputs 必須是 false
+uv run python -m collect heldout-list                                      # 寫一次 heldout_incidents.json（只印數量）
+uv run python -m eval run --method stat-anomaly --set heldout              # 每個方法、每個 incident 只跑一次
+uv run python -m eval score --method stat-anomaly --set heldout
+uv run python -m collect status --set heldout
+```
+
 ## Repo
 
 `env/`（版本鎖定、soak）、`collect/`（收集、normalize、label、review）、`eval/`（評分、leakage、relevance、失敗分類、比較）、
-`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`docs/decisions/`（001–025）、`tests/`。
+`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`docs/decisions/`（001–026）、`docs/heldout/`（held-out 的 plan、slot 清單、freeze 紀錄；Pilot 後才產生）、`tests/`。

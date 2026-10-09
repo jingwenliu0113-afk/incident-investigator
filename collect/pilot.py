@@ -65,11 +65,20 @@ PILOT: tuple[dict, ...] = (
 PLANS: dict[str, tuple[dict, ...]] = {"pilot": PILOT}
 
 
-def planned(split: str, flag: str, variant: str) -> dict | None:
-    """The registered entry of `split` for this flag and variant, or None when it is not on the plan."""
-    if split not in PLANS:
+def planned(split: str, flag: str, variant: str, *, project_dir=None) -> dict | None:
+    """The registered entry of `split` for this flag and variant, or None when it is not on the plan. The held-out plan
+    is docs/heldout/plan.json, read only from an explicit project directory (decision 023 §1)."""
+    if split == "heldout":
+        if project_dir is None:
+            raise LookupError("no fault plan for the 'heldout' set without a project directory (decision 023 §1)")
+        from collect.heldout import plan_entries
+
+        entries = plan_entries(project_dir)
+    elif split in PLANS:
+        entries = PLANS[split]
+    else:
         raise LookupError(f"no fault plan for the {split!r} set yet (it needs its own protocol decision)")
-    return next((e for e in PLANS[split] if e["flag"] == flag and e["variant"] == variant), None)
+    return next((e for e in entries if e["flag"] == flag and e["variant"] == variant), None)
 
 # decision 016 §5: what the review must look at for each fault, beyond the general checks (decision 018 §5)
 REVIEW_CHECKS: dict[str, list[str]] = {
