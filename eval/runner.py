@@ -75,13 +75,15 @@ DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 
 
 def incidents_in(layout: DataLayout, split: str) -> list[tuple[str, str]]:
-    """(incident id, run group id) of every incident of `split` that has a published snapshot."""
-    out = []
+    """(incident id, run group id) of every incident of `split` that has a published snapshot and was not withdrawn."""
+    from collect.pilot import withdrawn
+
+    gone, out = withdrawn(layout), []
     for path in sorted((layout.ground_truth_root / "run_groups").glob("RG-*/injection.json")):
         inj = json.loads(path.read_text())
         if inj.get("split") == split:
             out += [(inc, inj["run_group_id"]) for inc in inj["incident_ids"]
-                    if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists()]
+                    if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists() and inc not in gone]
     return sorted(out)
 
 
@@ -416,6 +418,14 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *,
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     rows, excluded, reviewed, differences = [], [], 0, {}
+    if held is None:  # held-out: the verified list left withdrawn incidents out and lists them with their reason
+        from collect.pilot import withdrawn
+
+        gone = withdrawn(layout)  # decision 025 revision 3: kept on disk, listed, never scored
+        for path in sorted((layout.ground_truth_root / "run_groups").glob("RG-*/injection.json")):
+            inj = json.loads(path.read_text())
+            if inj.get("split") == split:
+                excluded += [{"incident_id": i, "reason": f"withdrawn: {gone[i]}"} for i in inj["incident_ids"] if i in gone]
     for inc, rg in (held["pairs"] if held else incidents_in(layout, split)):
         audit_path = layout.label_path(inc).with_name("leakage_audit.json")
         if not audit_path.exists():

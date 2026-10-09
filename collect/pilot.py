@@ -106,6 +106,35 @@ GENERAL_CHECKS = [
 MAX_INVALID_ATTEMPTS = 3  # run groups of one fault that ended without an incident before a person must look
 
 
+WITHDRAWAL = "withdrawn.json"  # ground-truth side, next to run.json (decision 025 revision 3)
+
+
+def withdraw(layout, run_group_id: str, *, reason: str, decided_by: str, now: str) -> dict:
+    """Withdraw a valid run group by a person's decision: everything stays on disk, its incidents count for no set."""
+    path = layout.run_group_truth_dir(run_group_id) / "run.json"
+    if not path.exists():
+        raise ValueError(f"{run_group_id}: no run record")
+    run = json.loads(path.read_text())
+    if run.get("status") != "valid":
+        raise ValueError(f"{run_group_id} is {run.get('status')}: only a valid run group has an incident to withdraw")
+    target = path.with_name(WITHDRAWAL)
+    if target.exists():
+        raise ValueError(f"{run_group_id} is already withdrawn")
+    record = {"run_group_id": run_group_id, "incident_ids": run.get("incident_ids") or [], "reason": reason,
+              "decided_by": decided_by, "withdrawn_at": now}
+    target.write_text(json.dumps(record, indent=2) + "\n")
+    return record
+
+
+def withdrawn(layout) -> dict[str, str]:
+    """incident id -> reason, for every withdrawn run group."""
+    out = {}
+    for path in sorted((layout.ground_truth_root / "run_groups").glob(f"RG-*/{WITHDRAWAL}")):
+        w = json.loads(path.read_text())
+        out.update({inc: w["reason"] for inc in w["incident_ids"]})
+    return out
+
+
 def plan_status(layout, split: str) -> list[dict]:
     """Per planned fault, in plan order: its run groups (id, status), its usable incident, its excluded incidents and the
     power settings each valid run group was collected under (decision 025).
@@ -119,19 +148,22 @@ def plan_status(layout, split: str) -> list[dict]:
             power = ((r.get("provenance") or {}).get("machine") or {}).get("power")  # decision 025; None: not recorded
             runs.append((r["run_group_id"], r.get("status"), plan.get("flag"), plan.get("variant"), r.get("incident_ids") or [],
                          power))
-    out = []
+    out, withdrawals = [], withdrawn(layout)
     for e in PLANS[split]:
         mine = [r for r in runs if (r[2], r[3]) == (e["flag"], e["variant"])]
-        usable, excluded = None, []
+        usable, excluded, gone = None, [], []
         for _, status, _, _, incs, _ in mine:
             for inc in incs if status == "valid" else []:
                 review = layout.label_path(inc).with_name("label_review.json")
-                if review.exists() and json.loads(review.read_text()).get("fault_exercised") is False:
+                if inc in withdrawals:
+                    gone.append(inc)
+                elif review.exists() and json.loads(review.read_text()).get("fault_exercised") is False:
                     excluded.append(inc)
                 elif usable is None:
                     usable = inc
         out.append({"flag": e["flag"], "variant": e["variant"], "run_groups": [(r[0], r[1]) for r in mine],
-                    "incident": usable, "excluded": excluded, "power": {r[0]: r[5] for r in mine if r[1] == "valid"}})
+                    "incident": usable, "excluded": excluded, "withdrawn": gone,
+                    "power": {r[0]: r[5] for r in mine if r[1] == "valid"}})
     return out
 
 

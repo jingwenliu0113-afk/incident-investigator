@@ -24,6 +24,7 @@ from collect.normalize import host_to_data_ns
 from collect.rawexport import SIGNALS, build_raw_export, check_raw_export, raw_flags
 from collect.records import _schema_problems, canonical_json_sha256
 from collect.policy import load_policy
+from collect.provenance import power_problems
 from collect.validity import container_metric_gaps, gate, period_observations
 
 
@@ -170,7 +171,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
     def run_until(deadline: float) -> None:
         i = 0
         while clock.monotonic() < deadline:
-            take(("state",) + (("locust", "memcg") if i % 4 == 0 else ()))
+            take(("state",) + (("locust", "memcg", "power") if i % 4 == 0 else ()))
             clock.sleep(min(plan.interval, max(deadline - clock.monotonic(), 0)))
             i += 1
 
@@ -360,6 +361,13 @@ def _judge(record: dict, samples: list[dict], events: list[dict] | None, raw: di
             record["reasons"].append("container_metrics_missing")  # decision 012
     if len(offsets) == 2 and abs(offsets[1] - offsets[0]) > MAX_CLOCK_DRIFT:
         record["reasons"].append("clock_drift")  # the window cannot be mapped onto the data clock reliably
+    if {"normal_start", "end"} <= times.keys():  # decision 025 revision 2: the whole window on the formal power
+        power = [s for s in samples if s["kind"] == "power" and times["normal_start"] <= s["ts"] <= times["end"]]
+        record["power_samples"] = len(power)
+        if off := [s for s in power if power_problems(s.get("power"))]:
+            record["power_not_formal"] = [{"ts": s["ts"], "power": s.get("power")} for s in off[:20]]
+        if off or not power:
+            record["reasons"].append("power_not_formal")
     if errors := [s for s in samples if s["kind"] == "error"]:
         record["sampling_errors"] = errors[:20]  # all of them are kept for the label review
         # decision 009 §4: only the normal period decides validity, and only state / Locust samples judge it

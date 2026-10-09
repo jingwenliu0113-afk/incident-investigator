@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from collect import faults
+from collect.provenance import power_problems  # noqa: F401 - the preflight's power rule (decision 025)
 from env import compose, soak
 from env.cli import _engine_platform, _load_lock, cmd_compose_exec, cmd_verify_running
 from env.lock import lock_sha256, verify_against_disk
@@ -62,22 +63,6 @@ def project_tree_problems(state: dict) -> list[str]:
         problems.append("project has no git commit; a formal run needs one")
     if state.get("dirty"):
         problems.append("project checkout is dirty; commit first (a formal manifest needs a clean tree)")
-    return problems
-
-
-FORMAL_POWER = {"source": "AC Power", "powermode": "0"}  # decision 025 revision 1: automatic power mode on AC power
-
-
-def power_problems(power: dict | None) -> list[str]:
-    """Every formal run is collected on AC power in the automatic power mode (decision 025 revision 1)."""
-    if power is None:
-        return ["power state unreadable (pmset); a formal run needs automatic power mode on AC power (decision 025)"]
-    problems, settings = [], power.get("settings") or {}
-    if power.get("source") != FORMAL_POWER["source"]:
-        problems.append(f"power source is {power.get('source')!r}; a formal run needs AC power (decision 025)")
-    if settings.get("powermode") != FORMAL_POWER["powermode"] or settings.get("lowpowermode", "0") != "0":
-        problems.append(f"power settings are {settings}; a formal run needs the automatic power mode, powermode 0 "
-                        "(decision 025)")
     return problems
 
 
@@ -163,6 +148,10 @@ class LiveStack:
         return saved
 
     def sample(self, kind: str) -> dict:
+        if kind == "power":  # decision 025 revision 2: pmset, read only; None when unreadable
+            from collect.provenance import power_facts
+
+            return {"kind": "power", "ts": RealClock().now(), "power": power_facts()}
         try:
             return getattr(self.sampler, kind)()
         except (subprocess.CalledProcessError, ValueError, KeyError, StopIteration, AttributeError) as e:

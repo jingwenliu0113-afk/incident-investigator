@@ -48,8 +48,9 @@ class Watch:
 class Stack:
     """Fake locked stack. `restart_at` / `fivexx_until` / `confirm` script its behaviour in clock minutes."""
 
-    def __init__(self, clock, flag_path, *, restart_at=None, fivexx_until=0.0, confirm=True):
+    def __init__(self, clock, flag_path, *, restart_at=None, fivexx_until=0.0, confirm=True, power_at=None):
         self.clock, self.flag_path = clock, flag_path
+        self.power_at = power_at or {}  # minute -> power facts from then on (decision 025 revision 2)
         self.restart_at, self.fivexx_until, self.confirm = restart_at, fivexx_until, confirm
         self.calls, self.events, self.n5xx, self.flag_writes = [], [], 0, []
         self.unseen = set()  # containers docker_stats never reported (decision 012)
@@ -97,6 +98,12 @@ class Stack:
             if self.minute() < self.fivexx_until:
                 self.n5xx += 1
             return {"kind": "locust", "ts": ts, "requests": 100, "failures": self.n5xx, "errors": {E504: self.n5xx}}
+        if kind == "power":
+            power = {"source": "AC Power", "settings": {"powermode": "2"}}
+            for minute in sorted(self.power_at):
+                if self.minute() >= minute:
+                    power = self.power_at[minute]
+            return {"kind": "power", "ts": ts, "power": power}
         return {"kind": "memcg", "ts": ts, "cgroups": {}}
 
     def ofrep(self, flag, context):
@@ -237,6 +244,23 @@ def test_restart_during_the_fault_is_recorded_but_keeps_the_run_valid(tmp_path, 
     rec = go(stack, clock, flag_path, tmp_path)
     assert rec["status"] == "valid"
     assert rec["fault_and_recovery"]["new_restarts"] == {"checkout": 1}
+
+
+def test_a_power_mode_change_during_the_window_invalidates_the_run(tmp_path, flag_path):
+    # decision 025 revisions 2, 3: the whole incident window is collected on AC power in the high power mode
+    clock = Clock()
+    stack = Stack(clock, flag_path, power_at={22: {"source": "AC Power", "settings": {"powermode": "0"}}})
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "invalid" and rec["reasons"] == ["power_not_formal"]
+    assert rec["power_not_formal"][0]["power"]["settings"] == {"powermode": "0"}
+    clock = Clock()
+    stack = Stack(clock, flag_path, power_at={22: None})  # pmset unreadable: never assumed formal
+    assert "power_not_formal" in go(stack, clock, flag_path, tmp_path / "b")["reasons"]
+    clock = Clock()  # before the window (warm-up): not judged; the preflight checks the start
+    stack = Stack(clock, flag_path, power_at={1: {"source": "Battery Power", "settings": {"powermode": "2"}},
+                                              4: {"source": "AC Power", "settings": {"powermode": "2"}}})
+    rec = go(stack, clock, flag_path, tmp_path / "c")
+    assert rec["status"] == "valid" and rec["power_samples"] >= 25  # about one a minute over 25-35 minutes
 
 
 def test_unconfirmed_flag_change_invalidates_and_skips_the_fault(tmp_path, flag_path):

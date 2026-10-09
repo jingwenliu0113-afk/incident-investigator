@@ -1,9 +1,11 @@
 # NEXT
 
-## 目前位置（2026-10-09 01:40Z，台北 09:40）
+## 目前位置（2026-10-09 02:35Z，台北 10:35）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集已開始（`collect pilot-loop`，背景執行，約 8 小時）。**
-- **正式收集**：使用者解除電力限制並決定固定自動電力模式 + AC 供電（decision 025 修訂 1，preflight 檢查）。
+**Core 的工具鏈都已完成並測試；Pilot 正式收集進行中（`collect pilot-loop`，高效能模式 + AC）。**
+- **Pilot 進度**：使用者決定正式收集改用高效能模式 + AC（decision 025 修訂 3）。RG-002（INC-001，自動模式開始）撤回並重收；
+  RG-002 的檔案保留，但不算 Pilot、不評分。迴圈從 paymentFailure 100% 重新開始，每個 fault 約 40–50 分鐘，全部約 7–8 小時。
+- **正式收集**：固定高效能模式 + AC 供電（decision 025 修訂 3；preflight 與時間窗內每分鐘取樣都檢查，不符就拒絕 / 判無效）。
   收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
 - **LLM 方法**：付費 API 由使用者決定先延後（A1）；程式已就緒。
 - **已完成的 Core 範圍**：
@@ -200,7 +202,7 @@
    與 evidence gold 標註（decision 017，`python -m eval gold-todo --set pilot`）。
 3. **decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
 
-已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定自動電力模式 + AC 供電（decision 025 修訂 1，preflight 檢查）；
+已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定高效能模式 + AC 供電（decision 025 修訂 3；原本的自動模式由使用者改掉，RG-002 撤回重收）；
 真實 snapshot sample 不進 git（需要時用 synthetic fixture）；`/usr/bin/git` 已由使用者修好；電力模式限制解除。
 
 ### B. LLM 方法的估算（第 A1 項用）
@@ -222,7 +224,7 @@
 
 ### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
 - 目前沒有。heavy lock 被其他 Project 占用時，`collect pilot-loop` 每 5 分鐘重試（最多 4 小時），不搶、不刪。
-- 已解除：`/usr/bin/git` 失效（2026-10-08 17:05Z 起，使用者已處理）；Mac 自動電力模式下延後正式收集（2026-10-09 使用者解除，並決定正式收集固定用自動模式 + AC）。
+- 已解除：`/usr/bin/git` 失效（2026-10-08 17:05Z 起，使用者已處理）；Mac 自動電力模式下延後正式收集（2026-10-09 使用者解除；正式收集條件後來改為高效能模式 + AC，decision 025 修訂 3）。
 
 ### D. 歷史紀錄與環境狀態
 - （歷史）soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。

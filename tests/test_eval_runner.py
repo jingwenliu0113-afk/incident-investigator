@@ -341,3 +341,18 @@ def test_each_run_keeps_its_budgets_and_the_table_reports_usage_and_what_was_see
     (out / "pilot" / "looked" / "run_config.json").unlink()  # an older result: never filled in from today's settings
     score_method(layout, "looked", "pilot", out)
     assert "not recorded" in (out / "pilot" / "looked" / "table.md").read_text()
+
+
+def test_a_withdrawn_incident_is_neither_run_nor_scored_and_the_table_says_why(tmp_path):
+    from collect.pilot import withdraw
+
+    layout = stored(tmp_path / "data")
+    truth = layout.run_group_truth_dir("RG-001")
+    (truth / "run.json").write_text(json.dumps({"run_group_id": "RG-001", "status": "valid", "incident_ids": ["INC-001"],
+                                                "plan": {"split": "pilot"}}))
+    withdraw(layout, "RG-001", reason="collected in the automatic power mode", decided_by="user", now="2026-10-09T03:00:00Z")
+    assert incidents_in(layout, "pilot") == []
+    out = tmp_path / "results"
+    assert run_method(layout, "stat-anomaly", "pilot", out) == []
+    result = score_method(layout, "stat-anomaly", "pilot", out)
+    assert result["excluded"] == [{"incident_id": "INC-001", "reason": "withdrawn: collected in the automatic power mode"}]
