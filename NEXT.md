@@ -8,6 +8,7 @@
 - 本地分支 `heldout-protocol`（`11dcf31`，含 gate-analysis 與 synthetic-sample，917 passed）尚未合併：Pilot 收完、main 閒置後再合併並 push。
 - **Pilot 有效 incident（高效能模式 + AC）**：INC-002 paymentFailure（RG-003）、INC-003 productCatalogFailure（RG-007）、INC-004 paymentUnreachable（RG-008）、
   INC-005 cartFailure（RG-010；RG-009 無效）。RG-002（INC-001）撤回。剩 intlShippingSlowdown 與之後 5 個 fault。
+- **leakage audit（4 個有效 incident，2026-10-09 17:50Z，只寫 ground-truth 側、沒有方法輸出）**：詞彙命中全部 0；難度全部 easy（origin 自己發出只在 fault 期間出現的 error 等級訊息）。label review 工作表已產生（`label_review_todo.json` 與好讀版 `.md`）。
 - **兩種失敗原因**：
   1. **grafana 下載 plugin 逾時**（RG-004–006、RG-011、RG-012）：暖機前 aborted_unstable，只浪費約 5 分鐘、不影響資料；網路慢時發生（grafana.com 3–9 s）。
   2. **fault 關閉沒生效**（RG-009 cartFailure、RG-013 intlShippingSlowdown，`flag_unconfirmed`）：開啟都在 0.1–0.7 s 內確認，關閉在 10 s 內沒確認；
