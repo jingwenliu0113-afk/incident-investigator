@@ -2,7 +2,8 @@
 20261009, numbered H01..; regenerated identically, so the committed order cannot be hand-edited."""
 
 import collect.__main__ as cli
-from collect.heldout import FAULT_MINUTES, HELDOUT_K, HELDOUT_MASTER_SEED, heldout_slots
+from collect.heldout import FAULT_MINUTES, HELDOUT_K, HELDOUT_MASTER_SEED, MAX_SLOTS_NEEDING_PERSON, heldout_slots
+from collect.pilot import MAX_INVALID_ATTEMPTS
 
 FAULTS = [[f"f{i}", "on"] for i in range(10)]
 
@@ -30,4 +31,5 @@ def test_the_order_is_fixed_by_the_master_seed():
 def test_the_count_follows_the_faults_kept_and_the_constants_are_the_user_decisions():
     assert len(heldout_slots(FAULTS[:8])) == 40 and heldout_slots(FAULTS[:8])[-1]["slot"] == "H40"
     assert HELDOUT_K == 5 and HELDOUT_MASTER_SEED == 20261009  # user decision 2026-10-09; decision 023 §4
+    assert MAX_SLOTS_NEEDING_PERSON == 3 and MAX_INVALID_ATTEMPTS == 3  # 023 §4: 3 slots stop it all; 3 invalid per slot
     assert FAULT_MINUTES == cli.HELDOUT_FAULT_MINUTES == cli.PILOT_FAULT_MINUTES == 10  # decision 023 §3

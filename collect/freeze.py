@@ -329,13 +329,12 @@ def post_pilot_problems(project_dir: Path, layout, removed: set, *, methods, res
 def write_heldout_plan(project_dir: Path, layout, amendments: dict, *, methods, results_root: Path,
                        run: Run | None = None) -> dict:
     """docs/heldout/plan.json (decision 023 §1), written once from the Pilot evidence and a person's amendments."""
-    from collect.heldout import build_heldout_plan, pilot_evidence, write_once
+    from collect.heldout import amendment_lists, build_heldout_plan, pilot_evidence, write_once
 
     project_dir, run = Path(project_dir), run or _run
     if (project_dir / PLAN_FILE).exists():
         raise FileExistsError(f"{PLAN_FILE} exists: the held-out plan is written once (decision 023 §1)")
-    removes = (amendments.get("remove") if isinstance(amendments, dict) else None) or []
-    removed = {(r.get("flag"), r.get("variant")) for r in removes if isinstance(r, dict)}
+    removed = {(r["flag"], r["variant"]) for r in amendment_lists(amendments)[1]}
     if problems := post_pilot_problems(project_dir, layout, removed, methods=methods, results_root=results_root):
         raise ValueError("held-out plan refused: " + "; ".join(problems))
     with_results = [m for m in methods if (Path(results_root) / "pilot" / m / "scores.json").exists()]

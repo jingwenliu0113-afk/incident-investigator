@@ -147,7 +147,7 @@ def run_args(slot, *extra):
     return ["run", "--set", "heldout", "--flag", slot["flag"], "--variant", slot["variant"], *extra]
 
 
-def test_a_heldout_run_is_the_next_slot_of_a_passing_freeze_with_a_fresh_seed(tmp_path, monkeypatch, capsys):
+def test_a_heldout_run_is_the_next_slot_of_a_passing_freeze_and_takes_no_seed(tmp_path, monkeypatch, capsys):
     import argparse
 
     import collect.__main__ as cli
@@ -158,11 +158,90 @@ def test_a_heldout_run_is_the_next_slot_of_a_passing_freeze_with_a_fresh_seed(tm
     assert main(run_args(slots[0], "--seed", "7")) == 2 and "seed" in capsys.readouterr().err  # 023 §4
     assert main(run_args(slots[1])) == 2 and "next slot" in capsys.readouterr().err
     assert main(["run", "--set", "heldout", "--flag", "adHighCpu", "--variant", "on"]) == 2  # removed from the plan
+    assert "not the next slot" in capsys.readouterr().err
+
+
+def test_a_heldout_run_of_a_slot_whose_fault_is_not_on_the_plan_is_refused(tmp_path, monkeypatch, capsys):
+    # decision 023 §1: the run's fault must be on the committed held-out plan, whatever the slot list says
+    import json
+
+    layout, slots, sha = heldout_project(tmp_path, monkeypatch)
+    plan_path = tmp_path / "docs/heldout/plan.json"
+    plan = json.loads(plan_path.read_text())
+    plan["entries"] = [e for e in plan["entries"] if (e["flag"], e["variant"]) != (slots[0]["flag"], slots[0]["variant"])]
+    plan_path.write_text(json.dumps(plan))
+    assert main(run_args(slots[0])) == 2 and "not on the held-out plan" in capsys.readouterr().err
+
+
+def test_a_heldout_run_records_the_next_open_slot_its_freeze_and_a_seed_no_run_group_used(tmp_path, monkeypatch, capsys):
+    # decision 023 §4 / 026 #14, #15: the slot is the next open one (never the first slot of the fault), and the plan
+    # handed to run_group carries it, the freeze sha, 10 fault minutes and a fresh seed
+    import json
+    import signal
+
+    import collect.__main__ as cli
+    import collect.live as live
+
+    layout, slots, sha = heldout_project(tmp_path, monkeypatch)
+    fill(layout, slots[0], sha, 50)
+    fill(layout, slots[1], sha, 51)
+    nxt = slots[2]  # block 2: its fault already has a slot in block 1
+    assert nxt["slot"] == "H03" and (nxt["flag"], nxt["variant"]) in {(s["flag"], s["variant"]) for s in slots[:2]}
+    planned = []
+
+    class Stack:
+        lock_sha256 = "sha256:" + "1" * 64
+
+        def __init__(self, *args):
+            pass
+
+    def run_group(plan, stack, clock, **kw):
+        planned.append(plan)
+        raise RuntimeError("stopped by the test before anything starts")
+
+    monkeypatch.setattr(live, "LiveStack", Stack)
+    monkeypatch.setattr(cli, "run_group", run_group)
+    monkeypatch.setattr(signal, "signal", lambda *a: None)
+    assert main(run_args(nxt)) == 2 and "stopped by the test" in capsys.readouterr().err
+    (plan,) = planned
+    used = {json.loads(p.read_text())["plan"]["seed"] for p in layout.ground_truth_root.glob("run_groups/RG-*/run.json")}
+    assert (plan.split, plan.slot, plan.freeze_sha256, plan.flag, plan.variant) == (
+        "heldout", "H03", sha, nxt["flag"], nxt["variant"])
+    assert plan.fault_minutes == 10 and plan.seed not in used and 0 <= plan.seed < 2**31
 
 
 def test_a_heldout_run_waits_for_the_pilot_review(tmp_path, monkeypatch, capsys):
     layout, slots, _ = heldout_project(tmp_path, monkeypatch, reviewed=False)
     assert main(run_args(slots[0])) == 2 and "not reviewed" in capsys.readouterr().err
+    assert main(["next", "--set", "heldout"]) == 2 and "not reviewed" in capsys.readouterr().err
+
+
+NOT_CLEAN = "the checkout is not clean (untracked or modified files): held-out work needs a clean checkout"
+
+
+def test_a_failing_freeze_check_refuses_every_heldout_collect_step(tmp_path, monkeypatch, capsys):
+    # a freeze record exists and its check fails (here: a dirty checkout): nothing held-out goes ahead
+    import collect.__main__ as cli
+    import collect.freeze as freeze
+    import collect.live as live
+    from heldout_fixtures import freeze_record
+
+    layout, slots, sha = heldout_project(tmp_path, monkeypatch, k=1)
+    fill(layout, slots[0], sha, 50)  # a held-out incident for the incident commands
+    monkeypatch.setattr(freeze, "check_freeze", lambda project_dir, run=None: (freeze_record(), [NOT_CLEAN]))
+    monkeypatch.setattr(freeze, "commit_problems", lambda *a, **kw: pytest.fail("listed under a failing freeze check"))
+    monkeypatch.setattr(live, "LiveStack", lambda *a: pytest.fail("a run started under a failing freeze check"))
+    for name in ("_normalize", "_replay", "_label"):
+        monkeypatch.setattr(cli, name, lambda *a, **kw: pytest.fail("ran under a failing freeze check"))
+    incident = ["--incident", "INC-050"]
+    for args in (run_args(slots[1]), ["next", "--set", "heldout"], ["heldout-list"],
+                 ["normalize", *incident], ["replay", *incident], ["label", *incident, "--labeler", "agent:t"],
+                 ["process", *incident, "--labeler", "agent:t"], ["review-sheet", *incident],
+                 ["review", *incident, "--file", "x.json", "--reviewer", "human:jw"]):
+        assert main(args) == 2, args
+        err = capsys.readouterr().err
+        assert "not clean" in err and "Traceback" not in err, args
+    assert not layout.heldout_incidents_path.exists() and not (layout.root / "staging").exists()
 
 
 def test_a_full_set_or_three_slots_waiting_for_a_person_refuse_a_heldout_run(tmp_path, monkeypatch, capsys):
@@ -286,6 +365,31 @@ def test_heldout_plan_and_freeze_commands_write_once(tmp_path, monkeypatch, caps
     assert (repo / "docs/heldout/slots.json").exists() and (repo / "docs/heldout/freeze.json").exists()
 
 
+@pytest.mark.parametrize("amendments", [
+    {"remove": [{"flag": ["paymentFailure"], "variant": "100%", "basis": "pipeline", "reason": "r"}]},
+    {"amend": [{"flag": "paymentFailure", "variant": "100%", "field": ["notes"], "value": "x", "reason": "r"}]},
+    {"amend": [{"flag": ["paymentFailure"], "variant": "100%", "field": "notes", "value": "x", "reason": "r"}]},
+    {"amend": [{"flag": "paymentFailure", "variant": {"v": 1}, "field": "notes", "value": "x", "reason": "r"}]},
+], ids=["remove-flag-list", "amend-field-list", "amend-flag-list", "amend-variant-object"])
+def test_a_malformed_amendments_file_is_refused_with_exit_2_and_writes_nothing(tmp_path, monkeypatch, capsys, amendments):
+    import json
+
+    import collect.__main__ as cli
+    from eval.runner import METHODS
+    from test_heldout_freeze import project, write
+
+    repo, layout = project(tmp_path)
+    for m in METHODS:
+        write(layout.root, f"results/pilot/{m}/scores.json", "{}")
+    monkeypatch.setattr(cli, "PROJECT_DIR", repo)
+    path = tmp_path / "amend.json"
+    path.write_text(json.dumps(amendments))
+    assert main(["heldout-plan", "--amendments", str(path)]) == 2
+    err = capsys.readouterr().err
+    assert "flag, variant and field are strings" in err and "Traceback" not in err
+    assert not (repo / "docs/heldout/plan.json").exists()
+
+
 def test_heldout_list_command_writes_once_and_prints_counts_only(tmp_path, monkeypatch, capsys):
     import json
 
@@ -304,3 +408,27 @@ def test_heldout_list_command_writes_once_and_prints_counts_only(tmp_path, monke
     assert json.loads(out)["listed"] == 2 and "INC-" not in out and "RG-" not in out
     assert layout.heldout_incidents_path.exists()
     assert main(["heldout-list"]) == 2 and "File exists" in capsys.readouterr().err
+
+
+def test_heldout_list_command_checks_every_run_and_normalize_commit_against_the_freeze(tmp_path, monkeypatch, capsys):
+    # decision 023 §6 / 026 #24: the CLI wires collect.freeze.commit_problems with the record that passed the check
+    import collect.freeze as freeze
+    from heldout_fixtures import COMMIT, freeze_record, write_heldout_incident
+
+    layout, slots, sha = heldout_project(tmp_path, monkeypatch, k=1)
+    run_commit, normalize_commit = "d" * 40, "e" * 40
+    write_heldout_incident(layout, 50, slots[0], freeze_sha=sha)
+    write_heldout_incident(layout, 51, slots[1], freeze_sha=sha, commit=run_commit,
+                           code={"commit": normalize_commit, "dirty": False})
+    seen = []
+
+    def commit_problems(project_dir, record, commit, run=None):
+        seen.append((project_dir, record, commit))
+        return ["changes collect/x.py after the freeze"] if commit == normalize_commit else []
+
+    monkeypatch.setattr(freeze, "commit_problems", commit_problems)
+    assert main(["heldout-list"]) == 2
+    assert "normalize: changes collect/x.py after the freeze" in capsys.readouterr().err
+    assert not layout.heldout_incidents_path.exists()
+    assert {c for _, _, c in seen} == {COMMIT, run_commit, normalize_commit}
+    assert all(p == tmp_path and r == freeze_record() for p, r, _ in seen)

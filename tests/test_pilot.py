@@ -76,10 +76,48 @@ def test_an_incident_off_the_plan_gets_no_label(tmp_path):
     assert not layout.label_path("INC-001").exists()
 
 
-def test_a_pilot_run_must_be_on_the_plan(capsys):
+def test_a_pilot_run_must_be_on_the_plan(tmp_path, monkeypatch, capsys):
+    import collect.__main__ as cli
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)  # never the real checkout: it has a freeze record after the freeze
     assert main(["run", "--set", "pilot", "--flag", "cartFailure", "--variant", "10%"]) == 2
     assert "pilot plan" in capsys.readouterr().err
     assert main(["run", "--set", "pilot", "--flag", "kafkaQueueProblems", "--variant", "on"]) == 2
+    assert "pilot plan" in capsys.readouterr().err
+
+
+def test_no_cli_test_that_reaches_the_pilot_closed_check_reads_the_real_checkout():
+    # decision 026 #22: once docs/heldout/freeze.json is committed, `run --set pilot` refuses in the real checkout. A test
+    # whose run passes the flag and variant checks must use its own PROJECT_DIR, or it fails on the frozen code (023 §6)
+    import ast
+    from pathlib import Path
+
+    from collect.labels import FLAG_FAULT_TYPES
+    from collect.records import load_flag_catalog
+
+    catalog = load_flag_catalog(FLAG_FILE)
+    offenders = []
+    for path in sorted(Path(__file__).parent.glob("test_*.py")):
+        source = path.read_text()
+        functions = [fn for fn in ast.walk(ast.parse(source)) if isinstance(fn, ast.FunctionDef)]
+        patching = {fn.name for fn in functions if '"PROJECT_DIR"' in ast.get_source_segment(source, fn)}
+        for fn in functions:
+            if fn.name in patching or any(isinstance(c, ast.Call) and getattr(c.func, "id", None) in patching
+                                          for c in ast.walk(fn)):
+                continue  # its own project directory, directly or through a helper of the module
+            for call in ast.walk(fn):
+                if not (isinstance(call, ast.Call) and getattr(call.func, "id", getattr(call.func, "attr", None)) == "main"
+                        and call.args and isinstance(call.args[0], ast.List)):
+                    continue
+                words = [e.value if isinstance(e, ast.Constant) else None for e in call.args[0].elts]
+                if words[:1] != ["run"] or not {"--flag", "--variant"} <= set(words):
+                    continue
+                flag, variant = words[words.index("--flag") + 1], words[words.index("--variant") + 1]
+                options = {w for w in words if isinstance(w, str) and w.startswith("--")}
+                if (flag in FLAG_FAULT_TYPES and variant in catalog[flag]["variants"] and variant != catalog[flag]["default"]
+                        and options <= {"--set", "--flag", "--variant", "--seed"}):
+                    offenders.append(f"{path.name}::{fn.name}")
+    assert offenders == []
 
 
 def test_the_label_command_takes_the_answer_from_the_plan(tmp_path, monkeypatch, capsys):

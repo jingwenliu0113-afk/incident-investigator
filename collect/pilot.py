@@ -109,21 +109,26 @@ MAX_INVALID_ATTEMPTS = 3  # run groups of one fault that ended without an incide
 WITHDRAWAL = "withdrawn.json"  # ground-truth side, next to run.json (decision 025 revision 3)
 
 
+HELDOUT_NEVER_WITHDRAWN = ("a held-out run group is never withdrawn (decision 026 #30: 023 has no withdrawal, decision 025 "
+                           "revision 3 withdrew one Pilot run group); a person decides in a new decision")
+
+
 def withdraw(layout, run_group_id: str, *, reason: str, decided_by: str, now: str) -> dict:
-    """Withdraw a valid run group of any set by a person's decision: everything stays on disk, its incidents count for no
-    set. A held-out run group only before heldout_incidents.json exists (decision 023 §5.5, §6: the list never changes)."""
+    """Withdraw a valid Pilot run group by a person's decision (decision 025 revision 3): everything stays on disk, its
+    incidents count for no set. A held-out run group is never withdrawn (decision 026 #30)."""
     path = layout.run_group_truth_dir(run_group_id) / "run.json"
     if not path.exists():
         raise ValueError(f"{run_group_id}: no run record")
     run = json.loads(path.read_text())
+    injection = layout.injection_path(run_group_id)
+    if (run.get("plan") or {}).get("split") == "heldout" or (
+            injection.exists() and json.loads(injection.read_text()).get("split") == "heldout"):
+        raise ValueError(f"{run_group_id}: {HELDOUT_NEVER_WITHDRAWN}")
     if run.get("status") != "valid":
         raise ValueError(f"{run_group_id} is {run.get('status')}: only a valid run group has an incident to withdraw")
     target = path.with_name(WITHDRAWAL)
     if target.exists():
         raise ValueError(f"{run_group_id} is already withdrawn")
-    if (run.get("plan") or {}).get("split") == "heldout" and layout.heldout_incidents_path.exists():
-        raise ValueError(f"{run_group_id} is a held-out run group and heldout_incidents.json is written: the list never changes "
-                         "after it (decision 023 §5.5, §6); a person decides in a new decision")
     record = {"run_group_id": run_group_id, "incident_ids": run.get("incident_ids") or [], "reason": reason,
               "decided_by": decided_by, "withdrawn_at": now}
     target.write_text(json.dumps(record, indent=2) + "\n")

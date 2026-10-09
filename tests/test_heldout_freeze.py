@@ -110,9 +110,14 @@ SWAPPED["slots"][0], SWAPPED["slots"][1] = ({**SWAPPED["slots"][1], "slot": "H01
     (rebuilt(revisions=REVISIONS | {"019": {"status": "used", "decision": "docs/decisions/099-missing.md"}}), "019"),
     (rebuilt(llm={**LLM, "model_version": None}), "model_version"),
     (rebuilt(llm={**LLM, "status": "proposed"}), "approved"),
+    (edit(lambda r, o: o["log"].update({F: [["f" * 40, [FREEZE_COMMIT]]]})), "one commit"),  # slots and freeze apart
+    (edit(lambda r, o: o["policy"].update(sha256="sha256:other")), "policy"),
+    (edit(lambda r, o: o["llm"].update(config_sha256="sha256:other")), "llm_methods.json"),
+    (edit(lambda r, o: o.update(slots_sha256="sha256:other")), "slot list the record names"),
+    (edit(lambda r, o: o.update(base_tree="0" * 40)), "frozen_tree"),
 ], ids=["dirty", "flagged", "ignored", "ancestor", "code", "decision", "readme", "deleted", "two-commits", "parent",
         "uncommitted", "plan-blob", "plan-sha", "decision-blob", "env-lock", "order", "k", "seed", "013", "011", "019",
-        "model-version", "llm"])
+        "model-version", "llm", "slots-and-freeze-apart", "policy-sha", "llm-drift", "slots-sha", "frozen-tree"])
 def test_each_departure_from_the_frozen_state_is_one_named_problem(make, needle):
     record, observed = make()
     problems = freeze_problems(record, observed)
@@ -203,6 +208,8 @@ def test_a_real_freeze_commit_passes_and_only_allowed_changes_keep_it_passing(tm
     assert record["frozen_from_commit"] == base == git(repo, "rev-parse", "HEAD^") and head not in json.dumps(record)
     assert commit_problems(repo, record, head) == []
     assert commit_problems(repo, record, base) != []  # before the freeze record existed
+    orphan = git(repo, "commit-tree", "HEAD^{tree}", "-m", "the same files without the frozen history")
+    assert commit_problems(repo, record, orphan) == [f"commit {orphan[:12]} does not descend from the frozen commit"]
 
     write(repo, "NEXT.md", "# NEXT\n- held-out: H01 filled\n")
     git(repo, "commit", "-q", "-am", "next")
@@ -218,6 +225,30 @@ def test_a_real_freeze_commit_passes_and_only_allowed_changes_keep_it_passing(tm
     problems = check_freeze(repo)[1]
     assert problems and all("collect/x.py" in p for p in problems)
     assert any("collect/x.py" in p for p in commit_problems(repo, record, git(repo, "rev-parse", "HEAD")))
+
+
+def hide_an_edit(repo, flag):
+    git(repo, "update-index", flag, "collect/x.py")
+    write(repo, "collect/x.py", "X = 2\n")
+
+
+def ignored_code(repo):
+    with (repo / ".git/info/exclude").open("a") as f:
+        f.write("extra.py\n")
+    write(repo, "eval/extra.py", "Y = 1\n")
+
+
+@pytest.mark.parametrize("hide, needle", [
+    (lambda repo: hide_an_edit(repo, "--assume-unchanged"), "collect/x.py"),
+    (lambda repo: hide_an_edit(repo, "--skip-worktree"), "collect/x.py"),
+    (ignored_code, "eval/extra.py"),
+], ids=["assume-unchanged", "skip-worktree", "ignored"])
+def test_code_that_git_status_does_not_show_still_fails_the_check_of_a_real_checkout(tmp_path, hide, needle):
+    repo, _ = frozen_repo(tmp_path)
+    hide(repo)
+    assert git(repo, "status", "--porcelain", "--untracked-files=all") == ""  # git itself shows nothing
+    problems = check_freeze(repo)[1]
+    assert len(problems) == 1 and needle in problems[0], problems
 
 
 # ---------------------------------------------------------------- the two writers (after the Pilot, blocked by A1 today)
@@ -352,6 +383,35 @@ def test_the_freeze_needs_declared_revisions_a_committed_plan_and_one_that_still
     git(repo, "commit", "-q", "-am", "edit")
     with pytest.raises(ValueError, match="rebuil"):
         freeze_it(repo, layout)
+    assert not (repo / S).exists() and not (repo / F).exists()
+
+
+def untracked(repo):
+    write(repo, "notes.txt", "scratch\n")
+
+
+def assume_unchanged(repo):
+    git(repo, "update-index", "--assume-unchanged", "NEXT.md")
+    write(repo, "NEXT.md", "# NEXT\nedited, hidden from git status\n")
+
+
+def ignored(repo):
+    with (repo / ".git/info/exclude").open("a") as f:
+        f.write("extra.py\n")
+    write(repo, "eval/extra.py", "Y = 1\n")
+
+
+@pytest.mark.parametrize("dirt", [untracked, assume_unchanged, ignored], ids=["untracked", "assume-unchanged", "ignored"])
+def test_the_freeze_is_written_only_from_a_clean_checkout(tmp_path, dirt):
+    repo, layout = project(tmp_path)
+    plan_it(repo, layout)
+    git(repo, "add", P)
+    git(repo, "commit", "-q", "-m", "held-out plan")
+    dirt(repo)
+    with pytest.raises(ValueError) as e:
+        freeze_it(repo, layout)
+    assert str(e.value) == ("held-out freeze refused: the checkout is not clean (status, assume-unchanged / skip-worktree "
+                            "flags, ignored code)")
     assert not (repo / S).exists() and not (repo / F).exists()
 
 

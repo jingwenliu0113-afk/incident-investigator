@@ -322,6 +322,23 @@ def test_a_second_interrupt_cannot_skip_down_and_signals_are_masked_during_teard
     assert info.value.run_record["status"] == "aborted_error"
 
 
+@pytest.mark.parametrize("error", [OSError("docker events did not start"), KeyboardInterrupt("signal 15")], ids=str)
+def test_a_run_that_fails_before_compose_up_still_records_when_it_started(tmp_path, flag_path, error):
+    # decision 009 §4: the stored record of every started run has its start time (held-out: after the freeze, 026 #24)
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+
+    def watch(path):
+        raise error
+
+    stack.watch = watch
+    with pytest.raises(type(error)) as info:
+        go(stack, clock, flag_path, tmp_path)
+    rec = info.value.run_record
+    assert rec["status"] == "aborted_error" and rec["up_at"] == clock.now()
+    assert ["up"] not in stack.calls and ["down", "--volumes"] not in stack.calls  # nothing was started
+
+
 def test_preflight_problems_refuse_to_start(tmp_path, flag_path):
     clock = Clock()
     stack = Stack(clock, flag_path)

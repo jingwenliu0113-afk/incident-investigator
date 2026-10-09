@@ -121,7 +121,7 @@ def test_status_shows_counts_non_valid_run_groups_and_power_but_no_incident_or_v
     good = held(layout, ids, SLOTS["slots"][0], power={"source": "AC Power", "settings": {"powermode": "2"}})
     (row,) = slot_status(layout, STATES, freeze_sha=FREEZE_SHA)
     assert row["state"] == "filled" and row["non_valid_run_groups"] == [bad]
-    assert row["counts"] == {"usable": 1, "unexercised": 0, "non_valid": 1, "withdrawn": 0}
+    assert row["counts"] == {"usable": 1, "unexercised": 0, "non_valid": 1}
     assert row["power"] == [{"source": "AC Power", "settings": {"powermode": "2"}}]
     text = json.dumps(row)
     assert good not in text and "INC-" not in text
@@ -133,9 +133,12 @@ def test_next_skips_slots_that_need_a_person_and_stops_at_three_or_when_nothing_
         bad = held(layout, ids, SLOTS["slots"][0], "invalid")
     nxt = next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)
     assert nxt["slot"] == "H02" and nxt["skipped"] == [{"slot": "H01", "non_valid_run_groups": ["RG-001", "RG-002", bad]}]
-    for slot in SLOTS["slots"][1:3]:
-        for _ in range(3):
-            held(layout, ids, slot, "aborted_unstable")
+    for _ in range(3):
+        held(layout, ids, SLOTS["slots"][1], "aborted_unstable")
+    nxt = next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)  # two slots wait for a person: collection goes on (023 §4)
+    assert nxt["slot"] == "H03" and [s["slot"] for s in nxt["skipped"]] == ["H01", "H02"]
+    for _ in range(3):
+        held(layout, ids, SLOTS["slots"][2], "aborted_unstable")
     with pytest.raises(RuntimeError, match="3 slots"):
         next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)
 
@@ -175,28 +178,38 @@ def test_a_fresh_seed_is_never_one_any_run_group_used(tmp_path):
 WITHDRAWN_AT = "2026-10-22T00:00:00Z"
 
 
-def test_a_withdrawn_run_group_neither_fills_its_slot_nor_counts_as_an_invalid_attempt(tmp_path):
-    # decision 025 revision 3 holds for the held-out set: kept on disk, counted for no set, not an invalid attempt
-    from collect.pilot import withdraw
+def hand_withdrawal(layout, rg, incident_ids):
+    """A withdrawn.json written by hand, as collect.pilot.withdraw would write it."""
+    from collect.pilot import WITHDRAWAL
+
+    (layout.run_group_truth_dir(rg) / WITHDRAWAL).write_text(json.dumps(
+        {"run_group_id": rg, "incident_ids": incident_ids, "reason": "by hand", "decided_by": "x",
+         "withdrawn_at": WITHDRAWN_AT}))
+
+
+@pytest.mark.parametrize("exercised", [True, False, None], ids=["exercised", "unexercised", "unreviewed"])
+def test_a_heldout_run_group_is_never_withdrawn(tmp_path, exercised):
+    # decision 026 #30: 023 has no withdrawal and decision 025 revision 3 withdrew one Pilot run group; a held-out
+    # withdrawal would reopen a filled, closed or lexicon-hit slot with no limit (023 §2, §4, §5.3)
+    from collect.pilot import WITHDRAWAL, withdraw
 
     layout, ids, slot = DataLayout(tmp_path), Counter(), SLOTS["slots"][0]
-    held(layout, ids, slot, "invalid")
-    held(layout, ids, slot, "invalid")
-    gone = held(layout, ids, slot, exercised=True)
-    withdraw(layout, gone, reason="the power mode changed in the window", decided_by="user", now=WITHDRAWN_AT)
-    (row,) = slot_status(layout, STATES, freeze_sha=FREEZE_SHA)
-    assert row["state"] == "open" and row["non_valid_run_groups"] == ["RG-001", "RG-002"]
-    assert row["counts"] == {"usable": 0, "unexercised": 0, "non_valid": 2, "withdrawn": 1} and row["power"] == []
-    assert gone not in json.dumps(row) and "INC-" not in json.dumps(row)  # a withdrawn run group's id is not shown either
-    assert next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)["slot"] == "H01"  # collected again, new run group, new seed
-    held(layout, ids, slot)
-    assert states(layout, STATES) == ["filled"]  # one usable incident: the withdrawn one is not a second
+    gone = held(layout, ids, slot, exercised=exercised)
+    before = states(layout, STATES)
+    with pytest.raises(ValueError, match="never withdrawn"):
+        withdraw(layout, gone, reason="the power mode changed in the window", decided_by="user", now=WITHDRAWN_AT)
+    assert not (layout.run_group_truth_dir(gone) / WITHDRAWAL).exists() and states(layout, STATES) == before
 
-    layout, ids = DataLayout(tmp_path / "b"), Counter()
-    first = held(layout, ids, slot, exercised=False)
-    withdraw(layout, first, reason="r", decided_by="user", now=WITHDRAWN_AT)
-    held(layout, ids, slot, exercised=False)
-    assert states(layout, STATES) == ["open"]  # one unexercised incident counts: recollected once more (016 §5)
-    for _ in range(3):
-        held(layout, ids, slot, "invalid")
-    assert states(layout, STATES) == ["needs_person"]  # the invalid ones still count, the withdrawn one does not
+
+@pytest.mark.parametrize("status, incident_ids", [("valid", None), ("valid", ["INC-009"]), ("invalid", [])],
+                         ids=["matching", "other-incident", "invalid-run-group"])
+def test_a_withdrawal_record_on_a_heldout_run_group_stops_every_heldout_step(tmp_path, status, incident_ids):
+    # written by hand anyway: fail closed (never filtered), a person decides in a new decision
+    layout, ids, slot = DataLayout(tmp_path), Counter(), SLOTS["slots"][0]
+    rg = held(layout, ids, slot, status, exercised=True if status == "valid" else None)
+    hand_withdrawal(layout, rg, incident_ids if incident_ids is not None else [rg.replace("RG", "INC")])
+    for check in (lambda: slot_status(layout, SLOTS, freeze_sha=FREEZE_SHA),
+                  lambda: next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA), lambda: heldout_runs(layout),
+                  lambda: fresh_seed(layout)):
+        with pytest.raises(ValueError, match="never withdrawn"):
+            check()

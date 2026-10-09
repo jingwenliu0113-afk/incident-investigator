@@ -102,20 +102,14 @@ def incident(layout, n, slot, sha, *, exercised=True):
     return inc
 
 
-def heldout_set(tmp_path, monkeypatch, *, withdrawn=None):
-    """PROJECT = tmp/proj (freeze record present and passing); data: H01, H02 listed, H03 closed; the list written.
-    `withdrawn`: H01 first held INC-049, withdrawn with this reason (decision 025 revision 3)."""
+def heldout_set(tmp_path, monkeypatch):
+    """PROJECT = tmp/proj (freeze record present and passing); data: H01, H02 listed, H03 closed; the list written."""
     project = tmp_path / "proj"
     (project / FREEZE_FILE).parent.mkdir(parents=True)
     (project / FREEZE_FILE).write_text(json.dumps(freeze_record()))
     passing_freeze(monkeypatch)
     sha = freeze_sha256(project)
     layout = DataLayout(tmp_path / "data")
-    if withdrawn is not None:
-        from collect.pilot import withdraw
-
-        incident(layout, 49, "H01", sha)
-        withdraw(layout, "RG-049", reason=withdrawn, decided_by="user", now="2026-10-23T00:00:00Z")
     incident(layout, 50, "H01", sha)
     incident(layout, 51, "H02", sha)
     incident(layout, 52, "H03", sha, exercised=False)
@@ -144,6 +138,36 @@ def counting(monkeypatch, name, behave):
 
     monkeypatch.setitem(METHODS, name, method)
     return calls
+
+
+NOT_CLEAN = "the checkout is not clean (untracked or modified files): held-out work needs a clean checkout"
+
+
+def test_a_failing_freeze_check_refuses_every_heldout_eval_command_and_changes_nothing(tmp_path, monkeypatch, capsys):
+    # a freeze record exists, the list is written, and the check fails (here: a dirty checkout)
+    import collect.freeze as freeze
+    import eval.__main__ as cli
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    root = tmp_path / "cli"
+    (root / "data").mkdir(parents=True)
+    (root / "data/external").symlink_to(layout.root, target_is_directory=True)  # the CLI's data/external is this layout
+    monkeypatch.setattr(cli, "PROJECT_DIR", root)
+    counting(monkeypatch, "stat-anomaly", lambda inc, n: pytest.fail("a method ran under a failing freeze check"))
+    monkeypatch.setattr(freeze, "check_freeze", lambda project_dir, run=None: (freeze_record(), [NOT_CLEAN]))
+    sheet = tmp_path / "sheet.json"
+    sheet.write_text(json.dumps({"incident_id": "INC-050", "items": []}))
+    before = tree(layout.root)
+    for args in (["run", "--method", "stat-anomaly", "--set", "heldout"],
+                 ["score", "--method", "stat-anomaly", "--set", "heldout"],
+                 ["leakage", "--set", "heldout"],
+                 ["gold-todo", "--set", "heldout"],
+                 ["compare", "--method", "agent", "--against", "stat-anomaly", "--set", "heldout"],
+                 ["gold-add", "--incident", "INC-050", "--file", str(sheet), "--annotator", "human:jw"]):
+        assert cli.main(args) == 2, args
+        err = capsys.readouterr().err
+        assert "not clean" in err and "Traceback" not in err, args
+    assert tree(layout.root) == before
 
 
 def test_without_the_list_or_with_an_unapproved_model_nothing_runs_or_is_written(tmp_path, monkeypatch):
@@ -267,6 +291,11 @@ def test_an_invalid_prediction_is_recorded_and_stops_the_run(tmp_path, monkeypat
     with pytest.raises(ValueError, match="invalid prediction"):
         run_method(layout, "fake", "heldout", out, project_dir=project)
     assert ledger(out, "fake")[-1]["outcome"] == "invalid_prediction" and not (out / "heldout/fake/INC-050.json").exists()
+    calls = counting(monkeypatch, "fake", lambda inc, n: None)  # the same method now answers validly
+    assert run_method(layout, "fake", "heldout", out, project_dir=project) == ["INC-050"]  # closed: no second attempt
+    assert calls == ["INC-051"]
+    unanswered = score_method(layout, "fake", "heldout", out, project_dir=project)["heldout"]["unanswered"]
+    assert unanswered == [{"incident_id": "INC-050", "attempts": ["invalid_prediction"]}]
 
 
 def test_the_real_harness_reaches_the_ledger_with_the_usage_before_a_failed_turn(tmp_path, monkeypatch):
@@ -324,6 +353,79 @@ def test_scoring_waits_while_a_listed_incident_may_still_be_attempted(tmp_path, 
         score_method(layout, "fake", "heldout", out, project_dir=project)
 
 
+@pytest.mark.parametrize("key", ["freeze_sha256", "heldout_incidents_sha256"])
+def test_scoring_needs_a_run_made_under_this_freeze_record_and_incident_list(tmp_path, monkeypatch, key):
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    counting(monkeypatch, "fake", lambda inc, n: None)
+    run_method(layout, "fake", "heldout", out, project_dir=project)
+    path = out / "heldout/fake/run_config.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), key: "sha256:old"}))
+    with pytest.raises(PermissionError, match="another freeze record or incident list"):
+        score_method(layout, "fake", "heldout", out, project_dir=project)
+    assert not (out / "heldout/fake/scores.json").exists()
+
+
+def test_heldout_gold_worksheets_are_written_for_the_listed_incidents_only(tmp_path, monkeypatch):
+    from eval.runner import gold_todo_set
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    assert [r["incident_id"] for r in gold_todo_set(layout, "heldout", out, project_dir=project)["incidents"]] == [
+        "INC-050", "INC-051"]
+    sheets = {inc for inc in ("INC-050", "INC-051", "INC-052", "INC-053")
+              if layout.label_path(inc).with_name("evidence_gold_todo.json").exists()}
+    assert sheets == {"INC-050", "INC-051"}  # never the excluded incidents of the closed slot H03
+
+
+def test_scoring_is_refused_while_a_heldout_run_of_the_method_holds_its_lock(tmp_path, monkeypatch):
+    # decision 026 #19: an attempt still in flight is not an interrupted one; a lock left by a killed run waits for a person
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    seen = []
+
+    def behave(inc, n):
+        if inc == "INC-051":  # the last listed incident: every other one already has its prediction
+            with pytest.raises(LookupError, match="run.lock"):
+                score_method(layout, "fake", "heldout", out, project_dir=project)
+            seen.append((out / "heldout/fake/scores.json").exists())
+
+    counting(monkeypatch, "fake", behave)
+    assert run_method(layout, "fake", "heldout", out, project_dir=project) == []
+    assert seen == [False]  # nothing scored while INC-051 was in flight
+    assert score_method(layout, "fake", "heldout", out, project_dir=project)["heldout"]["unanswered"] == []
+    (out / "heldout/fake/run.lock").write_text('{"pid": 1}\n')  # a killed run left its lock
+    with pytest.raises(LookupError, match="person"):
+        score_method(layout, "fake", "heldout", out, project_dir=project)
+
+
+def test_a_crash_between_the_two_files_of_an_attempt_leaves_no_prediction_and_an_abstention(tmp_path, monkeypatch):
+    # the prediction file is written last: it alone marks a complete attempt (decision 026 #18)
+    import collect.faults as faults
+    from baselines.statistical import predict
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    monkeypatch.setitem(METHODS, "llm-like", lambda snapshot, inc: (predict(snapshot, inc),
+                                                                    {"stop_reason": "submitted", "exposure": []}))
+    real, writes = faults.write_atomic, []
+
+    def killed_between(path, doc):
+        writes.append(path.name)
+        if len(writes) == 2:
+            raise KeyboardInterrupt  # SIGTERM between the attempt's two files
+        return real(path, doc)
+
+    monkeypatch.setattr(faults, "write_atomic", killed_between)
+    with pytest.raises(KeyboardInterrupt):
+        run_method(layout, "llm-like", "heldout", out, project_dir=project)
+    assert writes == ["INC-050.transcript.json", "INC-050.json"]
+    assert not (out / "heldout/llm-like/INC-050.json").exists() and not (out / "heldout/llm-like/run.lock").exists()
+    monkeypatch.setattr(faults, "write_atomic", real)
+    assert run_method(layout, "llm-like", "heldout", out, project_dir=project) == ["INC-050"]  # never attempted again
+    result = score_method(layout, "llm-like", "heldout", out, project_dir=project)
+    assert result["heldout"]["unanswered"] == [{"incident_id": "INC-050", "attempts": ["interrupted"]}]
+    row = next(r for r in result["incidents"] if r["incident_id"] == "INC-050")
+    # an abstention is scored as no answer: the transcript of its unfinished attempt describes nothing that was scored
+    assert row["failure"] == "no_answer" and row["stop_reason"] is None and row["exposure"] is None
+
+
 def test_leakage_needs_the_freeze_compare_the_same_list_and_gold_add_a_listed_incident(tmp_path, monkeypatch):
     from eval.runner import audit_set, compare_methods, gold_add
 
@@ -356,48 +458,39 @@ def test_leakage_needs_the_freeze_compare_the_same_list_and_gold_add_a_listed_in
     assert audit_set(layout2, "heldout", out / "x", project_dir=project)["incidents"][0]["incident_id"] == "INC-060"
 
 
-# ---------------------------------------------------------------- withdrawn run groups (decision 025 revision 3)
+# ---------------------------------------------------------------- no held-out withdrawal (decision 026 #30)
 
-def test_a_withdrawn_heldout_incident_is_never_audited_run_or_scored_and_the_table_says_why(tmp_path, monkeypatch):
+def hand_withdrawal(layout, rg, inc):
+    from collect.pilot import WITHDRAWAL
+
+    (layout.run_group_truth_dir(rg) / WITHDRAWAL).write_text(json.dumps(
+        {"run_group_id": rg, "incident_ids": [inc], "reason": "by hand", "decided_by": "x",
+         "withdrawn_at": "2026-10-26T00:00:00Z"}))
+
+
+def test_a_heldout_withdrawal_record_written_anyway_stops_the_audit_and_every_run_and_score(tmp_path, monkeypatch):
     from collect.pilot import withdraw
     from eval.runner import audit_set
-
-    reason = "the power mode changed in the window"
-    project, layout, out = heldout_set(tmp_path, monkeypatch, withdrawn=reason)
-    calls = counting(monkeypatch, "fake", lambda inc, n: None)
-    assert run_method(layout, "fake", "heldout", out, project_dir=project) == []
-    assert calls == ["INC-050", "INC-051"] and not (out / "heldout/fake/INC-049.json").exists()
-    assert "INC-049" not in (out / "heldout/fake/attempts.jsonl").read_text()
-    result = score_method(layout, "fake", "heldout", out, project_dir=project)
-    assert [r["incident_id"] for r in result["incidents"]] == ["INC-050", "INC-051"]
-    assert result["heldout"]["excluded"][0] == {"slot": "H01", "incident_id": "INC-049", "run_group_id": "RG-049",
-                                                "reason": f"withdrawn: {reason}"}
-    assert f"INC-049 (withdrawn: {reason})" in (out / "heldout/fake/table.md").read_text()
-
-    fresh = DataLayout(tmp_path / "fresh")  # before the list: the leakage audit skips it too
-    incident(fresh, 60, "H01", freeze_sha256(project))
-    incident(fresh, 61, "H02", freeze_sha256(project))
-    withdraw(fresh, "RG-061", reason=reason, decided_by="user", now="2026-10-23T00:00:00Z")
-    audit = fresh.label_path("INC-061").with_name("leakage_audit.json")
-    before = audit.read_bytes()
-    assert [r["incident_id"] for r in audit_set(fresh, "heldout", out / "x", project_dir=project)["incidents"]] == ["INC-060"]
-    assert audit.read_bytes() == before
-
-
-def test_a_withdrawal_written_after_the_list_stops_every_heldout_run_and_score(tmp_path, monkeypatch):
-    from collect.pilot import WITHDRAWAL, withdraw
 
     project, layout, out = heldout_set(tmp_path, monkeypatch)
     for name in ("ran", "fresh"):
         counting(monkeypatch, name, lambda inc, n: None)
     run_method(layout, "ran", "heldout", out, project_dir=project)
-    with pytest.raises(ValueError, match="heldout_incidents.json"):
+    with pytest.raises(ValueError, match="never withdrawn"):
         withdraw(layout, "RG-050", reason="r", decided_by="user", now="2026-10-26T00:00:00Z")
-    (layout.run_group_truth_dir("RG-050") / WITHDRAWAL).write_text(json.dumps(
-        {"run_group_id": "RG-050", "incident_ids": ["INC-050"], "reason": "by hand", "decided_by": "x",
-         "withdrawn_at": "2026-10-26T00:00:00Z"}))
+    hand_withdrawal(layout, "RG-050", "INC-050")
     before = tree(out)
     for fn, method in ((run_method, "fresh"), (score_method, "ran")):
-        with pytest.raises(PermissionError, match="withdrawn"):
+        with pytest.raises(PermissionError, match="never withdrawn"):
             fn(layout, method, "heldout", out, project_dir=project)
     assert tree(out) == before and not (out / "heldout/fresh").exists()
+
+    fresh = DataLayout(tmp_path / "fresh")  # before the list: the leakage audit stops too and rewrites nothing
+    incident(fresh, 60, "H01", freeze_sha256(project))
+    incident(fresh, 61, "H02", freeze_sha256(project))
+    hand_withdrawal(fresh, "RG-061", "INC-061")
+    audits = [fresh.label_path(i).with_name("leakage_audit.json") for i in ("INC-060", "INC-061")]
+    before = [a.read_bytes() for a in audits]
+    with pytest.raises(ValueError, match="never withdrawn"):
+        audit_set(fresh, "heldout", out / "x", project_dir=project)
+    assert [a.read_bytes() for a in audits] == before and not (out / "x").exists()

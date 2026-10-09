@@ -124,3 +124,17 @@ def test_a_restarted_loop_first_processes_valid_incidents_left_without_a_label(t
     run_group(DataLayout(tmp_path / "b"), "RG-001", "paymentFailure", "100%", "valid", inc="INC-001")
     out, _ = loop(tmp_path / "b", stack)
     assert out["stopped"] == "process_failed" and out["incident_id"] == "INC-001" and len(stack.calls) == 1
+
+
+def test_a_restarted_loop_never_processes_an_incident_of_a_withdrawn_run_group(tmp_path):
+    # decision 025 revision 3: a withdrawn incident counts for no set (the real RG-002 has no label and is withdrawn)
+    from collect.pilot import withdraw
+
+    layout = DataLayout(tmp_path)
+    run_group(layout, "RG-001", "paymentFailure", "100%", "valid", inc="INC-001")
+    withdraw(layout, "RG-001", reason="started in the automatic power mode", decided_by="user", now="2026-10-09T02:00:00Z")
+    stack = Stack(layout, ["valid"])
+    out, _ = loop(tmp_path, stack, max_runs=1)
+    assert not any(c[c.index("collect") + 1] == "process" and "INC-001" in c for c in stack.calls if "collect" in c)
+    first = stack.calls[0]
+    assert first[first.index("collect") + 1] == "run" and out["runs"][0]["flag"] == "paymentFailure"  # collected again

@@ -201,9 +201,9 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
 
     watch, raw, up_started, events, crashed = None, None, False, None, False
     times: dict[str, str] = {}
+    record["up_at"] = clock.now()  # before anything can fail: every stored record has its start time (026 #24)
     try:
         watch = stack.watch(work_dir / "docker-events.jsonl")
-        record["up_at"] = clock.now()
         up_started = True
         if (rc := stack.compose(["up"])) != 0:
             record["status"] = "aborted_up_failed"

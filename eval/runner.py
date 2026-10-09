@@ -219,12 +219,12 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
                 if problems := check_prediction(pred):
                     end("invalid_prediction", "; ".join(problems[:5]), {k: usage.get(k) for k in LEDGER_USAGE})
                     raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
-                for target, doc in ((pred_path, pred), (transcript_path, transcript)):
-                    if doc is None:
-                        continue
+                for target in (transcript_path, pred_path):
                     if target.exists():
                         raise FileExistsError(f"{target} exists: a held-out prediction is never overwritten")
-                    write_atomic(target, doc)
+                if transcript is not None:
+                    write_atomic(transcript_path, transcript)
+                write_atomic(pred_path, pred)  # last: the prediction file alone marks a complete attempt
                 end("ok", usage={k: usage.get(k) for k in LEDGER_USAGE})
                 break
         return [i["incident_id"] for i in listing["doc"]["incidents"]
@@ -380,9 +380,13 @@ REPORTED_ONLY = ("difficulty", "fault", "failure", "label_reviewed", "saw_method
 
 def _heldout_scoring(layout: DataLayout, method: str, out_root: Path, project_dir: Path | None) -> dict:
     """What score_method needs on the held-out set: the verified list, a finished run of this freeze and list, and the
-    ledger (an incident without a prediction is scored only once its attempts are over)."""
+    ledger (an incident without a prediction is scored only once its attempts are over). Refused while the method's
+    run.lock exists: an attempt in flight has a start and no end, like an interrupted one."""
     freeze, listing = heldout_guard(layout, project_dir)
     out_dir = Path(out_root) / "heldout" / method
+    if (out_dir / "run.lock").exists():
+        raise LookupError(f"{out_dir / 'run.lock'} exists: a held-out run of {method} is going on or was killed; scoring "
+                          "waits until it ends, or until a person checks a killed run and removes the lock (decision 023 §5)")
     path = out_dir / "run_config.json"
     if not path.exists():
         raise LookupError(f"{method} has not run on the held-out set: `python -m eval run --method {method} --set heldout`")
@@ -418,7 +422,7 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *,
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     rows, excluded, reviewed, differences = [], [], 0, {}
-    if held is None:  # held-out: the verified list left withdrawn incidents out and lists them with their reason
+    if held is None:  # the Pilot's withdrawn incidents (a held-out run group is never withdrawn, decision 026 #30)
         from collect.pilot import withdrawn
 
         gone = withdrawn(layout)  # decision 025 revision 3: kept on disk, listed, never scored
@@ -440,14 +444,16 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *,
             continue
         reviewed += label["labeling"]["method"] == "catalog+review"
         pred_path = out_dir / f"{inc}.json"
-        if held and not pred_path.exists():  # attempts over, no prediction: an abstention in the denominator (013 §2)
+        tpath = out_dir / f"{inc}.transcript.json"
+        abstained = bool(held) and not pred_path.exists()
+        if abstained:  # attempts over, no prediction: an abstention in the denominator (013 §2)
             pred = {**_abstain(inc, {"name": method, "version": "none"}), "usage": {}}
             held["report"]["unanswered"].append({"incident_id": inc, "attempts": _outcomes(held["ledger"].get(inc, []))})
         else:
             pred = json.loads(pred_path.read_text())
         snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        tpath = out_dir / f"{inc}.transcript.json"
-        transcript = json.loads(tpath.read_text()) if tpath.exists() else None
+        # an abstention's transcript, if an unfinished attempt left one, describes nothing that is scored
+        transcript = json.loads(tpath.read_text()) if tpath.exists() and not abstained else None
         scores = score_incident(pred, label)
         review_path = layout.label_path(inc).with_name("label_review.json")
         review = json.loads(review_path.read_text()) if review_path.exists() else None
@@ -685,12 +691,10 @@ def audit_set(layout: DataLayout, split: str, out_root: Path, *, project_dir: Pa
             raise PermissionError("heldout_incidents.json exists and has pinned every audit: held-out audits are never rewritten "
                                   "(decision 023 §5.5)")
         from collect.heldout import heldout_runs
-        from collect.pilot import withdrawn
 
-        gone = withdrawn(layout)  # decision 025 revision 3: never audited, listed, run or scored
         pairs = sorted((inc, r["run_group_id"]) for r in heldout_runs(layout) if r.get("status") == "valid"
-                       for inc in r.get("incident_ids") or []
-                       if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists() and inc not in gone)
+                       for inc in r.get("incident_ids") or []  # a held-out withdrawal record raises (decision 026 #30)
+                       if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists())
     from collect.review import effective_label
     from eval.leakage import audit
 
