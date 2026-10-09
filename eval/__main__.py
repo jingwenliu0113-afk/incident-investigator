@@ -5,6 +5,10 @@
     python -m eval gold-todo --set pilot          # blind worksheets of citations to judge (decision 017)
     python -m eval gold-add --incident INC-001 --file <worksheet> --annotator human:<name>
     python -m eval compare --method agent --against stat-anomaly --set pilot   # paired differences (decision 023 §7)
+    python -m eval gate --method agent --against stat-anomaly --set heldout    # SPEC Gate from written scores (023 §7)
+
+`gate` reads only scores.json and the compare outputs (it never runs a method) and writes gate.json / gate.md next to
+the Agent's scores: the Gate decision on the held-out set, a diagnostic only (NOT a Gate decision) on the Pilot.
 
 Predictions and scores go to data/external/results/<set>/<method>/ (gitignored); table.md there is the summary.
 Worksheets and gold judgments stay on the ground-truth side next to the label.
@@ -27,18 +31,19 @@ from eval.runner import METHODS, run_method, score_method
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["run", "score", "leakage", "gold-todo", "gold-add", "compare"])
-    parser.add_argument("--method", choices=sorted(METHODS), help="required for run / score")
+    parser.add_argument("command", choices=["run", "score", "leakage", "gold-todo", "gold-add", "compare", "gate"])
+    parser.add_argument("--method", choices=sorted(METHODS), help="required for run / score / compare / gate (gate: agent)")
     parser.add_argument("--set", dest="split", choices=["pilot", "heldout"], help="required except for gold-add")
-    parser.add_argument("--against", choices=sorted(METHODS), help="compare: the second method (difference = method - against)")
+    parser.add_argument("--against", choices=sorted(METHODS),
+                        help="compare: the second method (difference = method - against); gate: a statistical baseline")
     parser.add_argument("--incident", help="gold-add: the incident whose worksheet is filled")
     parser.add_argument("--file", type=Path, help="gold-add: the filled worksheet")
     parser.add_argument("--annotator", help="gold-add: human:<name> (gold judgments are made by a person)")
     ns = parser.parse_args(argv)
-    if ns.command in ("run", "score", "compare") and ns.method is None:
-        parser.error("--method is required for run / score / compare")
-    if ns.command == "compare" and ns.against is None:
-        parser.error("compare needs --against")
+    if ns.command in ("run", "score", "compare", "gate") and ns.method is None:
+        parser.error("--method is required for run / score / compare / gate")
+    if ns.command in ("compare", "gate") and ns.against is None:
+        parser.error(f"{ns.command} needs --against")
     if ns.command == "gold-add" and not (ns.incident and ns.file and ns.annotator):
         parser.error("gold-add needs --incident, --file and --annotator")
     if ns.command != "gold-add" and ns.split is None:
@@ -64,6 +69,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             print(json.dumps(compare_methods(ns.split, ns.method, ns.against, out, layout=layout,
                                              project_dir=PROJECT_DIR)["paired"], indent=2))
+        elif ns.command == "gate":
+            from eval.runner import gate_methods, gate_summary
+
+            result = gate_methods(ns.split, ns.method, ns.against, out, layout=layout, project_dir=PROJECT_DIR)
+            print(gate_summary(result, out / ns.split / ns.method))
         elif ns.command == "run":
             done = run_method(layout, ns.method, ns.split, out, project_dir=PROJECT_DIR)
             key = "without_prediction" if ns.split == "heldout" else "predictions"  # decision 023 §5

@@ -339,3 +339,51 @@
 
 023 與使用者決定沒有涵蓋的三件事（待人處理的 slot 如何解除、freeze 之後的修正路徑、held-out 撤回）列在 026「待使用者決定」：程式行為不變，
 使用者若要其中的機制，必須在 freeze 之前決定並 commit。
+
+## 實作說明：Gate 計算（2026-10-09）
+
+本節只記錄 §7 Gate 判準與描述性報告的程式，**不改上面任何規則、門檻、指標、切分或預算**；有歧義的地方取保守的一側（讓 Gate 更難通過、缺東西就拒絕），每一項列在下面。
+這補上 026 解讀 27 列為 freeze 前必須 commit 的「Gate 條件 2 / 3 的程式」與「各 fault 等權平均與缺格表」。付費 LLM 方法延後（NEXT A1），所以目前還沒有任何 Agent 結果，也沒有算過任何 Gate。
+
+### 指令
+
+1. `python -m eval score --method agent --set <set>`、`python -m eval score --method stat-anomaly --set <set>`（每個統計 baseline 都要）。
+2. `python -m eval compare --method agent --against stat-anomaly --set <set>`（條件 1 的 paired 差異，已存在；現在另記錄它讀到的兩份 scores.json 的 sha256）。
+3. `python -m eval gate --method agent --against stat-anomaly --set <set>`：只讀已寫好的 scores.json 與 compare 輸出，**不執行任何方法、不重抽 bootstrap**；
+   寫 `results/<set>/agent/gate.json` 與 `gate.md`，並印出摘要。held-out 上是本文 §7 的 Gate 判定；Pilot 上只是診斷，**不是 Gate 判定**。
+
+程式：`eval/gate.py`（純函式：三個條件、coverage 比例、各 fault 表）、`eval/runner.py`（`gate_methods`、`fault_table`、`STATISTICAL_BASELINES`、`GATE_METHOD`）、`eval/__main__.py`（`gate`）。
+
+### 輸出
+
+- `gate.json`：`kind`（held-out 為 `gate_decision`，Pilot 為 `diagnostic`）、`statement`、`all_met`、`decision`（held-out 為 `pass` / `not_passed`，Pilot 為 null）、
+  `conditions`（`1`：每個統計 baseline 的 n、平均差異、區間、下界；`2`：每個 fault 的 K、⌈K/2⌉、計分數、origin 答錯數、各類別次數、過半的類別；`3`：失敗數、not_seen / seen_misread 次數、比例）、
+  `descriptive`（coverage 比例、其他主要指標的 paired 差異、origin_top1 的 LOFO、Agent 與每個統計 baseline 的各 fault 表）、`inputs`（讀到的 scores.json 與 compare 的 sha256）；
+  held-out 另有 freeze 與清單的 sha、移除的 fault、關閉的 slot。held-out 的 gate 輸出不列 incident id。
+- 每個方法的 `eval score` 也在 scores.json 的 `by_fault` 與 table.md 的「Per fault」段列出各 fault 平均、等權平均與缺格清單。
+
+### 解讀
+
+1. **只讀、不重算條件 1**：條件 1 讀 `compare-agent-vs-<baseline>.json`（`eval.compare.paired`），不重新實作。只接受：由目前的 scores.json 算出（sha 相符）、set 與方法相符、
+   origin_top1 的 bootstrap 是 013 §3 的 10,000 次、seed 0。缺少、過期或設定不同 → exit 2，要求重跑 `eval compare`。下界 > 0 是嚴格的。
+2. **統計 baseline**：`eval/runner.py` 的 `STATISTICAL_BASELINES`（目前只有 stat-anomaly；測試保證每個登錄的方法不是 LLM 方法就是統計 baseline）。
+   Agent 必須對**每一個**登錄的統計 baseline 都成立（§7「多個統計 baseline」）；任何一個沒有分數或 compare 就拒絕，不略過、不當成通過。`--against` 必須是其中之一。
+3. **Gate 只針對 Agent**：`--method` 只接受 agent（SPEC Gate）；其他方法只用 score / compare 描述。
+4. **條件 2 的 K**：held-out 用驗證過的 `heldout_incidents.json` 中該 fault 的 slot 數（設計的 K = 5）；缺格（關閉的 slot、詞彙命中排除）**不降低**門檻 ⌈K/2⌉，
+   缺格不會讓條件 2 比較容易成立。Pilot 用該 fault 實際計分的 incident 數（由資料推得）。只看有計分 incident 的 fault。
+5. **條件 2 的「答錯」與「同一個類別」**：答錯 = origin_top1 = 0，包括放棄作答（013 §2、026 解讀 19）；只有 fault_type 錯（mechanism）不算。
+   依 §7 的文字，「同一個類別」是 022 六類中的任一類（包括 no_answer、coverage），輸出寫出是哪一類。「過半」是嚴格大於一半（2/4 不算）。
+6. **條件 3**：分母是 022 §1 的所有失敗（origin 或 fault_type 錯）；> 0.5 是嚴格的；沒有任何失敗時比例無定義，條件不成立。
+7. **判定只在 held-out**：三個條件都成立才是 `pass`。held-out 的輸出寫明這是 §7 的 Gate 判定，只用第一次執行的結果（§5、§6：每個（方法, incident）只跑一次，預測永不覆寫）。
+   Pilot 照樣計算三個條件，但 `decision` 是 null，輸出寫明「DIAGNOSTIC ONLY, NOT a Gate decision」（SPEC §5：Pilot 永不進 test）。
+8. **held-out 的前置檢查**：第一個陳述是 `heldout_guard`（026 解讀 20）；每份 scores.json 必須屬於目前的 freeze 與清單；兩個方法計分的 incident 必須相同
+   （compare 的 `only_in_one` 不是空的就拒絕；放棄作答本來就留在分母）。任何 set 上，scores.json 記錄的方法與 set 都必須與它的路徑相符。
+9. **coverage 比例只描述**（SPEC「收尾或改題」）：coverage 次數 / 失敗數，不設門檻、不下判斷；並列出沒有 review 就分類的失敗數（022 §2：這些無法判為 coverage）與失敗數 / 計分數。
+   「Agent 幾乎全對」沒有數值門檻，程式也不判斷。
+10. **各 fault 等權平均與缺格清單**（只描述，沒有區間）：等權平均 = 有計分 incident 的 fault 各自平均的平均；另列所有計分 incident 的平均（§7 的估計量）作對照。
+    缺格：held-out 是沒有計分 incident 的 slot（附原因：關閉或詞彙命中排除）與 Pilot 後移除的 fault；Pilot 是 Pilot 清單中沒有計分 incident 的 fault。
+11. fault_type 與另外兩個主要指標的 paired 差異、origin_top1 的 LOFO 下界從 compare 讀出，只列在描述段（§7：fault_type 與 LOFO 不是 Gate 條件）。
+12. **沒有分數就不寫**：Agent 沒有分數（付費 LLM 方法延後，NEXT A1）時，exit 2、印出「the Gate cannot be evaluated yet」、不寫任何檔案；
+    統計 baseline 沒有分數、compare 缺少或過期時也一樣。所有檢查都在寫入之前。
+13. gate 是決定性的，可以重跑。§6 的評分 bug 修正後重新評分，scores.json 會改變，要先重跑 compare 才能重跑 gate；修正前後兩組數字的並列報告不是這個指令做的事
+    （freeze 之後的修正路徑仍是 026「待使用者決定」2）。

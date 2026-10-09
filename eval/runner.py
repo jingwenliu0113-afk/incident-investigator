@@ -47,6 +47,8 @@ def _llm(kind: str):
 
 
 LLM_METHODS = ("dump-all", "retrieval", "agent")
+STATISTICAL_BASELINES = ("stat-anomaly",)  # decision 023 §7: the Agent must beat every one of them
+GATE_METHOD = "agent"  # SPEC Gate: the Agent against the statistical baselines
 METHODS = {"stat-anomaly": _stat, **{m: _llm(m) for m in LLM_METHODS}}
 SCOPES = {  # SPEC §7 "visible data" of each method (decision 024)
     "stat-anomaly": "every span, log and container metric of the snapshot, but only as per-service, per-minute aggregates "
@@ -405,7 +407,7 @@ def _heldout_scoring(layout: DataLayout, method: str, out_root: Path, project_di
         return None if None in values else round(sum(values), 6)
 
     doc = listing["doc"]
-    return {"pairs": pairs, "ledger": ledger,
+    return {"pairs": pairs, "ledger": ledger, "listing": doc,
             "report": {"freeze_sha256": freeze["sha256"], "heldout_incidents_sha256": listing["sha256"],
                        "excluded": doc["excluded"], "closed_slots": doc["closed_slots"],
                        "removed_faults": doc["removed_faults"], "unanswered": []},
@@ -487,7 +489,8 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *,
     config_path = out_dir / "run_config.json"
     result = {"method": method, "split": split, "labels": {"reviewed": reviewed, "a_priori": len(rows) - reviewed},
               "incidents": rows, "excluded": excluded, "aggregate": agg,
-              "by_difficulty": by_difficulty, "evidence": _evidence_aggregate(rows), "failures": failures,
+              "by_difficulty": by_difficulty, "by_fault": fault_table(split, rows, held["listing"] if held else None),
+              "evidence": _evidence_aggregate(rows), "failures": failures,
               "review_differences": differences,
               "run_config": json.loads(config_path.read_text()) if config_path.exists() else None,
               "usage": _usage_aggregate(rows)}
@@ -519,6 +522,7 @@ def _table(result: dict) -> str:
         cells = [f"{g['metrics'][m]:.3f}" + ("" if g["ci95"] is None else f" [{g['ci95'][m][0]:.3f}, {g['ci95'][m][1]:.3f}]")
                  for m in MAIN_METRICS]
         lines.append(f"| {d} | {g['n_incidents']} | " + " | ".join(cells) + " |")
+    lines += _fault_lines(result["by_fault"])
     if result["excluded"]:
         lines += ["", "Excluded from every score: " + ", ".join(f"{e['incident_id']} ({e['reason']})" for e in result["excluded"])]
     f = result["failures"]
@@ -550,6 +554,59 @@ def _table(result: dict) -> str:
         else:
             lines.append(f"| {names[key]} | {m['n']} | {m['mean']:.3f} | [{m['ci95'][0]:.3f}, {m['ci95'][1]:.3f}] |")
     return "\n".join(lines + _heldout_lines(result) + _usage_lines(result)) + "\n"
+
+
+def fault_table(split: str, rows: list[dict], listing: dict | None) -> dict:
+    """Per-fault means of the main metrics, their equal-weight mean and the missing cells (decision 023 §7; descriptive
+    only). Held-out (`listing` = the verified heldout_incidents.json): K is the fault's number of slots; a slot without a
+    scored incident and a fault removed after the Pilot are missing cells. Pilot: K is the scored count; a planned fault
+    without a scored incident is a missing cell."""
+    from eval.gate import per_fault
+
+    if listing is None:
+        from collect.pilot import PLANS
+
+        have = {r["fault"] for r in rows}
+        planned = [f"{e['flag']} {e['variant']}" for e in PLANS.get(split, ())]
+        missing = [{"fault": f, "slot": None, "reason": f"no scored incident on the {split} set"}
+                   for f in planned if f not in have]
+        return per_fault(rows, {}, missing, MAIN_METRICS)
+    scored = {r["incident_id"] for r in rows}
+    closed = {c["slot"]: c["reason"] for c in listing["closed_slots"]}
+    by_slot = {i["slot"]: i["incident_id"] for i in listing["incidents"]}
+    expected, missing = {}, []
+    for fault, b in listing["by_fault"].items():
+        expected[fault] = b["of"]
+        slots = set(b["missing_slots"]) | {i["slot"] for i in listing["incidents"] if f"{i['flag']} {i['variant']}" == fault}
+        for slot in sorted(slots):
+            inc = by_slot.get(slot)
+            if inc in scored:
+                continue
+            reason = ("listed but not scored (see the score's exclusions)" if inc is not None else closed.get(slot) or
+                      "; ".join(e["reason"] for e in listing["excluded"] if e["slot"] == slot) or "no listed incident")
+            missing.append({"fault": fault, "slot": slot, "reason": reason})
+    missing += [{"fault": f"{r['flag']} {r['variant']}", "slot": None,
+                 "reason": f"removed after the Pilot ({r['basis']}: {r['reason']})"} for r in listing["removed_faults"]]
+    return per_fault(rows, expected, missing, MAIN_METRICS)
+
+
+def _num(x) -> str:
+    return "-" if x is None else f"{x:.3f}"
+
+
+def _fault_lines(table: dict) -> list[str]:
+    eq = table["equal_weight"]
+    lines = ["", "## Per fault (decision 023 §7; descriptive only, no interval)", "",
+             f"equal weight: the mean of the per-fault means over the {eq['n_faults']} faults with a scored incident; "
+             "incidents: the mean over every scored incident (the reported estimate, decision 023 §7).", "",
+             "| fault | n / K | " + " | ".join(MAIN_METRICS) + " |", "|---|---:|" + "---:|" * len(MAIN_METRICS)]
+    lines += [f"| {f} | {v['n']} / {v['k']} | " + " | ".join(_num(v["means"][m]) for m in MAIN_METRICS) + " |"
+              for f, v in table["faults"].items()]
+    lines += [f"| equal weight ({eq['n_faults']} faults) | | " + " | ".join(_num(eq["means"][m]) for m in MAIN_METRICS) + " |",
+              "| incidents | | " + " | ".join(_num(table["incident_mean"][m]) for m in MAIN_METRICS) + " |"]
+    lines += ["", "Missing cells: " + ("; ".join(f"{m['fault']}" + (f" {m['slot']}" if m["slot"] else "") + f" ({m['reason']})"
+                                                for m in table["missing"]) or "none") + "."]
+    return lines
 
 
 def _heldout_lines(result: dict) -> list[str]:
@@ -718,10 +775,21 @@ def audit_set(layout: DataLayout, split: str, out_root: Path, *, project_dir: Pa
     return {"split": split, "incidents": rows}
 
 
+def _json_with_sha(path: Path) -> tuple[dict, str] | None:
+    """A written JSON result (scores.json, a comparison) and the sha256 of the bytes read; None when it does not exist."""
+    import hashlib
+
+    if not path.exists():
+        return None
+    raw = path.read_bytes()
+    return json.loads(raw), "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
 def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tuple = MAIN_METRICS,
                     resamples: int = 10_000, layout: DataLayout | None = None, project_dir: Path | None = None) -> dict:
     """Paired differences a - b on the incidents both were scored on (decision 023 §7), with LOFO bounds; written to
-    out_root/<split>/compare-<a>-vs-<b>.json / .md. Reads only the two methods' scores.json."""
+    out_root/<split>/compare-<a>-vs-<b>.json / .md with the sha256 of the two scores.json read (the Gate reads it only
+    while they are unchanged). Reads only the two methods' scores.json."""
     current = None
     if split == "heldout":
         if layout is None:
@@ -730,18 +798,18 @@ def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tupl
         current = (freeze["sha256"], listing["sha256"])
     from eval.compare import lofo, paired
 
-    scored, held = {}, None
+    scored, shas, held = {}, {}, None
     for m in (a, b):
-        path = Path(out_root) / split / m / "scores.json"
-        if not path.exists():
+        found = _json_with_sha(Path(out_root) / split / m / "scores.json")
+        if found is None:
             raise LookupError(f"{m} has no scores on the {split} set: run `python -m eval score --method {m} --set {split}`")
-        doc = json.loads(path.read_text())
+        doc, shas[m] = found
         if current is not None:
             held = doc.get("heldout") or {}
             if (held.get("freeze_sha256"), held.get("heldout_incidents_sha256")) != current:
                 raise PermissionError(f"{m}'s held-out scores are not of the current freeze record and incident list")
         scored[m] = doc["incidents"]
-    result = {"split": split, "a": a, "b": b,
+    result = {"split": split, "a": a, "b": b, "scores_sha256": shas,
               "paired": {m: paired(scored[a], scored[b], m, resamples=resamples) for m in metrics},
               "lofo": {m: lofo(scored[a], scored[b], m, resamples=resamples) for m in metrics}}
     if held is not None:
@@ -763,3 +831,156 @@ def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tupl
                   "Slots closed: " + (", ".join(c["slot"] for c in held["closed_slots"]) or "none") + "."]
     base.with_suffix(".md").write_text("\n".join(lines) + "\n")
     return result
+
+
+def gate_methods(split: str, method: str, against: str, out_root: Path, *, layout: DataLayout | None = None,
+                 project_dir: Path | None = None) -> dict:
+    """SPEC Gate (decision 023 §7) from what is already written, never running a method: condition 1 from each
+    compare-<method>-vs-<baseline>.json (written by compare_methods from the current scores.json, decision 013 §3
+    bootstrap), conditions 2 and 3 and the descriptive tables from the scores. Every statistical baseline is compared.
+    Writes out_root/<split>/<method>/gate.json and gate.md; anything missing or stale raises before a file is written.
+    A Gate decision on the held-out set only; on the Pilot a diagnostic."""
+    current = listing = None
+    if split == "heldout":
+        if layout is None:
+            raise PermissionError("the held-out Gate needs the data layout to verify the incident list (decision 023 §5)")
+        freeze, listing = heldout_guard(layout, project_dir)
+        current = (freeze["sha256"], listing["sha256"])
+    from eval.gate import GATE_BOOTSTRAP, GATE_METRIC, condition_1, condition_2, condition_3, coverage, verdict
+
+    if method != GATE_METHOD:
+        raise ValueError(f"the Gate is about the Agent (SPEC Gate): --method {GATE_METHOD}; other methods are described by "
+                         "eval score / compare")
+    if against not in STATISTICAL_BASELINES:
+        raise ValueError(f"--against must be a statistical baseline {list(STATISTICAL_BASELINES)} (decision 023 §7)")
+    baselines = [against] + [b for b in STATISTICAL_BASELINES if b != against]
+    root = Path(out_root) / split
+    docs = {}
+    for m in [method] + baselines:
+        found = _json_with_sha(root / m / "scores.json")
+        if found is None:
+            why = (f"`python -m eval run|score --method {m} --set {split}` once the paid LLM methods are approved, NEXT A1"
+                   if m in LLM_METHODS else
+                   f"`python -m eval score --method {m} --set {split}`; every statistical baseline is compared (decision 023 §7)")
+            raise LookupError(f"the Gate cannot be evaluated yet: {m} has no scores on the {split} set ({why}); "
+                              "nothing was written")
+        if (found[0].get("method"), found[0].get("split")) != (m, split):
+            raise ValueError(f"{split}/{m}/scores.json holds the scores of {found[0].get('method')} on the "
+                             f"{found[0].get('split')} set")
+        if current is not None:
+            held = found[0].get("heldout") or {}
+            if (held.get("freeze_sha256"), held.get("heldout_incidents_sha256")) != current:
+                raise PermissionError(f"{m}'s held-out scores are not of the current freeze record and incident list")
+        docs[m] = found
+    compares, compare_shas = {}, {}
+    for b in baselines:
+        path = root / f"compare-{method}-vs-{b}.json"
+        cmd = f"`python -m eval compare --method {method} --against {b} --set {split}`"
+        found = _json_with_sha(path)
+        if found is None:
+            raise LookupError(f"no paired comparison of {method} against {b} on the {split} set: run {cmd} (decision 023 "
+                              "§7); nothing was written")
+        doc, compare_shas[b] = found
+        if ((doc.get("split"), doc.get("a"), doc.get("b")) != (split, method, b)
+                or doc.get("scores_sha256") != {method: docs[method][1], b: docs[b][1]}):
+            raise LookupError(f"{path.name} was not computed from the current scores.json files: run {cmd} again")
+        p = (doc.get("paired") or {}).get(GATE_METRIC)
+        if p is None or p.get("bootstrap") != GATE_BOOTSTRAP:
+            raise ValueError(f"{path.name}: the Gate needs the {GATE_METRIC} difference with the decision 013 §3 bootstrap "
+                             f"({GATE_BOOTSTRAP['resamples']} resamples, seed {GATE_BOOTSTRAP['seed']}): run {cmd}")
+        if current is not None and p["only_in_one"]:
+            raise ValueError(f"{path.name}: on the held-out set both methods are scored on every listed incident "
+                             f"(abstentions included, decision 026 #19), but {len(p['only_in_one'])} are not")
+        compares[b] = doc
+    rows = docs[method][0]["incidents"]
+    tables = {m: fault_table(split, d["incidents"], listing["doc"] if listing else None) for m, (d, _) in docs.items()}
+    k_of = {f: v["k"] for f, v in tables[method]["faults"].items() if v["n"]}
+    c1, c2, c3 = condition_1(compares), condition_2(rows, k_of), condition_3(rows)
+    result = {"gate_version": 1, "split": split, "method": method, "baselines": baselines, **verdict(c1, c2, c3, split),
+              "conditions": {"1": c1, "2": c2, "3": c3},
+              "descriptive": {
+                  "coverage": coverage(rows),
+                  "paired_other_metrics": {b: {m: v for m, v in compares[b]["paired"].items() if m != GATE_METRIC}
+                                           for b in baselines},
+                  "lofo": {b: (compares[b].get("lofo") or {}).get(GATE_METRIC) for b in baselines},
+                  "per_fault": tables},
+              "inputs": {"scores_sha256": {m: sha for m, (_, sha) in docs.items()}, "compare_sha256": compare_shas}}
+    if current is not None:
+        result["heldout"] = {"freeze_sha256": current[0], "heldout_incidents_sha256": current[1],
+                             "removed_faults": listing["doc"]["removed_faults"], "closed_slots": listing["doc"]["closed_slots"]}
+    out_dir = root / method
+    (out_dir / "gate.json").write_text(json.dumps(result, indent=2) + "\n")
+    (out_dir / "gate.md").write_text(_gate_md(result))
+    return result
+
+
+def _condition_lines(result: dict) -> list[tuple[str, str, str]]:
+    """(condition, value, met) of the three Gate conditions, shared by gate.md and the CLI summary."""
+    c = result["conditions"]
+    one = "; ".join(f"{result['method']} - {b}: mean {r['mean_diff']:.3f}, 95% interval [{r['ci95'][0]:.3f}, "
+                    f"{r['ci95'][1]:.3f}], n {r['n']}" for b, r in c["1"]["by_baseline"].items())
+    two = "; ".join(f"{f}: {v['categories'][v['majority_category']]} of {v['origin_wrong']} wrong are "
+                    f"{v['majority_category']} (K {v['k']})" for f, v in c["2"]["by_fault"].items() if v["met"]) or \
+        "no fault"
+    s = c["3"]
+    three = ("no failure" if s["share"] is None else
+             f"{sum(s['by_category'].values())} of {s['n_failures']} failures = {s['share']:.2f}")
+    yes = {True: "met", False: "not met"}
+    return [(f"1: origin_top1 of {result['method']} minus each statistical baseline, paired 95% lower bound > 0",
+             one, yes[c["1"]["met"]]),
+            ("2: a fault with origin_top1 wrong on >= ceil(K/2) incidents, more than half of them in one decision-022 "
+             "category", two, yes[c["2"]["met"]]),
+            ("3: not_seen + seen_misread > 0.5 of the failures (decision 022)", three, yes[c["3"]["met"]])]
+
+
+def _outcome(result: dict) -> str:
+    if result["decision"] is not None:
+        return f"Gate decision: {'PASS' if result['decision'] == 'pass' else 'NOT PASSED'}."
+    return (f"All three conditions met on the Pilot: {'yes' if result['all_met'] else 'no'} "
+            "(diagnostic only, NOT a Gate decision).")
+
+
+def _gate_md(result: dict) -> str:
+    cov = result["descriptive"]["coverage"]
+    lines = [f"# Gate: {result['method']} on the {result['split']} set (SPEC Gate, decision 023 §7)", "",
+             f"**{result['statement']}**", "", _outcome(result), "",
+             "| condition | value | |", "|---|---|---|"]
+    lines += [f"| {a} | {b} | {c} |" for a, b, c in _condition_lines(result)]
+    lines += ["", "## Condition 2 by fault", "",
+              "| fault | scored | K | ceil(K/2) | origin wrong | categories of the wrong origins | met |",
+              "|---|---:|---:|---:|---:|---|---|"]
+    lines += [f"| {f} | {v['n_scored']} | {v['k']} | {v['threshold']} | {v['origin_wrong']} | "
+              + (", ".join(f"{c} {n}" for c, n in v["categories"].items()) or "-") + f" | {'yes' if v['met'] else 'no'} |"
+              for f, v in result["conditions"]["2"]["by_fault"].items()]
+    lines += ["", "## Descriptive only (not Gate criteria)", "",
+              f"- Coverage (SPEC Gate \"收尾或改題\"; no threshold): {cov['coverage']} of {cov['n_failures']} failures"
+              + ("" if cov["share"] is None else f" = {cov['share']:.2f}")
+              + f"; {cov['classified_without_review']} failures classified without a reviewed label (decision 022 §2); "
+              f"{cov['n_failures']} failures among {cov['n_scored']} scored incidents."]
+    for b, other in result["descriptive"]["paired_other_metrics"].items():
+        lines += [f"- {result['method']} - {b}, other main metrics (fault_type is never a Gate criterion, decision 023 §7): "
+                  + (", ".join(f"{m} {r['mean_diff']:.3f} [{r['ci95'][0]:.3f}, {r['ci95'][1]:.3f}]" for m, r in other.items())
+                     or "not in the comparison") + "."]
+    for b, by in result["descriptive"]["lofo"].items():
+        lines += [f"- Leave one fault out ({result['method']} - {b}, origin_top1 lower bound): "
+                  + (", ".join(f"{f} {'-' if r['ci95'] is None else format(r['ci95'][0], '.3f')}" for f, r in (by or {}).items())
+                     or "-") + "."]
+    for m, table in result["descriptive"]["per_fault"].items():
+        lines += ["", f"### {m}"] + _fault_lines(table)[2:]
+    if "heldout" in result:
+        h = result["heldout"]
+        lines += ["", f"Freeze record {h['freeze_sha256']}; incident list {h['heldout_incidents_sha256']}."]
+    lines += ["", "Inputs: " + ", ".join(f"{m} scores {sha}" for m, sha in result["inputs"]["scores_sha256"].items()) + "."]
+    return "\n".join(lines) + "\n"
+
+
+def gate_summary(result: dict, out_dir: Path) -> str:
+    """What `python -m eval gate` prints."""
+    lines = [result["statement"], _outcome(result)]
+    lines += [f"condition {a.split(':')[0]} ({a.split(': ', 1)[1]}): {c} ({b})" for a, b, c in _condition_lines(result)]
+    cov = result["descriptive"]["coverage"]
+    lines.append("coverage share of the failures (descriptive): "
+                 + ("no failure" if cov["share"] is None else f"{cov['coverage']}/{cov['n_failures']} = {cov['share']:.2f}")
+                 + f" ({cov['classified_without_review']} classified without a reviewed label)")
+    lines.append(f"written: {Path(out_dir) / 'gate.json'}, {Path(out_dir) / 'gate.md'}")
+    return "\n".join(lines)

@@ -38,6 +38,7 @@ def test_without_a_freeze_record_every_heldout_eval_path_refuses_and_changes_not
                  ["leakage", "--set", "heldout"],
                  ["gold-todo", "--set", "heldout"],
                  ["compare", "--method", "agent", "--against", "stat-anomaly", "--set", "heldout"],
+                 ["gate", "--method", "agent", "--against", "stat-anomaly", "--set", "heldout"],
                  ["gold-add", "--incident", "INC-001", "--file", str(sheet), "--annotator", "human:jw"]):
         assert cli.main(args) == 2, args
         err = capsys.readouterr().err
@@ -163,6 +164,7 @@ def test_a_failing_freeze_check_refuses_every_heldout_eval_command_and_changes_n
                  ["leakage", "--set", "heldout"],
                  ["gold-todo", "--set", "heldout"],
                  ["compare", "--method", "agent", "--against", "stat-anomaly", "--set", "heldout"],
+                 ["gate", "--method", "agent", "--against", "stat-anomaly", "--set", "heldout"],
                  ["gold-add", "--incident", "INC-050", "--file", str(sheet), "--annotator", "human:jw"]):
         assert cli.main(args) == 2, args
         err = capsys.readouterr().err

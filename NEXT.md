@@ -74,6 +74,11 @@
   方法的 `run.lock` 存在時拒絕評分；transcript 先寫、prediction 最後寫；`up_at` 在 run 任何可能失敗的步驟之前記錄。
   **freeze 之前要使用者決定**（026「待使用者決定」，程式行為不變）：(1) 待人處理的 slot 如何解除（現在一個卡住的 slot 就讓清單永遠寫不出來，
   估計約 55% 會發生）；(2) freeze 之後的修正路徑（現在 023 §6 的 bug 修正與使用者決定 6 的排除在 freeze 後都做不到）；(3) 是否要 held-out 撤回。測試 847 passed。
+- **Gate 計算（023「實作說明：Gate 計算」；分支 `gate-analysis`，與 `heldout-protocol` 一起在 Pilot 收完、main checkout 閒置後才合併）**：
+  `python -m eval gate --method agent --against stat-anomaly --set <set>` 只讀已寫好的 scores.json 與 `eval compare` 輸出（不跑方法），寫 `gate.json` / `gate.md`：
+  條件 1 讀 compare 的 origin_top1 paired 下界（對每個統計 baseline，compare 現在記錄 scores 的 sha，過期就拒絕）；條件 2（held-out 的 K 用 slot 數，缺格不降低 ⌈K/2⌉）；
+  條件 3；coverage 比例與各 fault 等權平均 / 缺格清單只描述（每個 `eval score` 也列出）。held-out 才是 Gate 判定，Pilot 只是診斷、不是 Gate 判定；
+  Agent 沒有分數（A1）時 exit 2、不寫檔。026 解讀 27 的 freeze 前項目中，Gate 條件 2 / 3 與等權 / 缺格表已完成。測試 866 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成
