@@ -301,8 +301,9 @@ def post_pilot_problems(project_dir: Path, layout, removed: set, *, methods, res
     """Why plan and freeze cannot be written yet: 023 line 6 waits for Pilot collection, review, leakage audit and the
     LLM trial runs; §6 wants the freeze before the first held-out run group. Shared by both writers (read only)."""
     from collect.heldout import _run_groups, heldout_runs, pilot_problems, run_split
+    from collect.pilot import withdrawn
 
-    problems = []
+    problems, gone = [], withdrawn(layout)  # a withdrawn Pilot incident is never audited (decision 025 revision 3)
     staging = layout.root / "staging"
     if staging.exists() and any(staging.iterdir()):
         problems.append(f"{staging} is not empty: a run or normalize is in progress or was left behind")
@@ -313,7 +314,7 @@ def post_pilot_problems(project_dir: Path, layout, removed: set, *, methods, res
         for run, _ in _run_groups(layout):
             if run_split(run) == "pilot" and run.get("status") == "valid":
                 problems += [f"Pilot incident {inc} has no leakage audit (decision 015)" for inc in run.get("incident_ids") or []
-                             if not layout.label_path(inc).with_name("leakage_audit.json").exists()]
+                             if inc not in gone and not layout.label_path(inc).with_name("leakage_audit.json").exists()]
     except ValueError as e:
         problems.append(str(e))
     problems += [f"{m} has no Pilot scores (results/pilot/{m}/scores.json): every method runs on the Pilot first "

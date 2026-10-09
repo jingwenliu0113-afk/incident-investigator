@@ -193,3 +193,21 @@ def test_pilot_problems_name_unreviewed_incidents_and_faults_never_exercised(tmp
     assert pilot_problems(layout, removed={SHIP}) == []
     write_run(layout, "RG-050", *CART, inc="INC-050")  # valid, not reviewed yet
     assert any("INC-050" in p and "review" in p for p in pilot_problems(layout, removed={SHIP}))
+
+
+def test_a_withdrawn_pilot_incident_is_no_pilot_evidence_and_needs_no_review(tmp_path):
+    # decision 025 revision 3: RG-002 of the real Pilot is withdrawn; it counts for no set and is not an invalid attempt
+    from collect.pilot import withdraw
+
+    layout = pilot(tmp_path, ship=())
+    write_run(layout, "RG-060", *SHIP, inc="INC-060")
+    write_review(layout, "INC-060", *SHIP)  # exercised and reviewed, then withdrawn: not evidence for the plan
+    write_audit(layout, "INC-060")
+    write_run(layout, "RG-061", *CART, inc="INC-061")  # never reviewed or audited
+    for rg in ("RG-060", "RG-061"):
+        withdraw(layout, rg, reason="collected in the automatic power mode", decided_by="user", now="2026-10-09T03:00:00Z")
+    assert pilot_problems(layout, removed=set()) == [
+        "intlShippingSlowdown 10sec: no reviewed Pilot incident with fault_exercised = true (decision 023 §1)"]
+    ev = pilot_evidence(layout)
+    assert ev[SHIP] == {"valid": [], "non_valid": [], "reviews": [], "unreviewed": [], "audits": {}}
+    assert "INC-061" not in ev[CART]["valid"] + ev[CART]["unreviewed"] and ev[CART]["non_valid"] == []

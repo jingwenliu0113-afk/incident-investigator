@@ -9,7 +9,7 @@ import pytest
 from collect.heldout import heldout_incidents, heldout_slots, load_heldout_incidents, write_once
 from collect.layout import DataLayout
 from collect.pilot import PILOT
-from heldout_fixtures import (BEFORE, FREEZE_SHA, complete_pilot, freeze_record, plan_doc, write_heldout_incident,
+from heldout_fixtures import (AFTER, BEFORE, FREEZE_SHA, complete_pilot, freeze_record, plan_doc, write_heldout_incident,
                               write_review, write_run)
 
 KEPT = PILOT[:2]
@@ -193,3 +193,110 @@ def test_the_loader_needs_the_list_of_this_freeze(tmp_path):
     write_once(layout.heldout_incidents_path, listing(layout))
     with pytest.raises(PermissionError, match="freeze"):
         load_heldout_incidents(layout, freeze_sha="sha256:" + "b" * 64)
+
+
+# ---------------------------------------------------------------- decision 025 revisions 2, 3 on the held-out set
+
+def test_a_withdrawn_run_group_is_listed_as_excluded_with_its_reason_and_needs_no_processing(tmp_path):
+    from collect.pilot import withdraw
+
+    layout = DataLayout(tmp_path / "data")
+    complete_pilot(layout, KEPT)
+    write_heldout_incident(layout, 50, SLOTS["slots"][0])  # processed, audited and reviewed, then withdrawn
+    withdraw(layout, "RG-050", reason="the power mode changed in the window", decided_by="user", now=NOW)
+    h02 = SLOTS["slots"][1]
+    write_run(layout, "RG-051", h02["flag"], h02["variant"], inc="INC-051", split="heldout", slot="H02",
+              freeze_sha=FREEZE_SHA)  # withdrawn before any processing: never audited or reviewed
+    withdraw(layout, "RG-051", reason="started in the automatic mode", decided_by="user", now=NOW)
+    with pytest.raises(ValueError, match="H01 is open"):  # a withdrawn run group fills no slot
+        listing(layout)
+    write_heldout_incident(layout, 52, SLOTS["slots"][0])
+    write_heldout_incident(layout, 53, h02)
+    doc = listing(layout)
+    assert [(i["slot"], i["incident_id"]) for i in doc["incidents"]] == [("H01", "INC-052"), ("H02", "INC-053")]
+    assert doc["excluded"] == [
+        {"slot": "H01", "incident_id": "INC-050", "run_group_id": "RG-050",
+         "reason": "withdrawn: the power mode changed in the window"},
+        {"slot": "H02", "incident_id": "INC-051", "run_group_id": "RG-051", "reason": "withdrawn: started in the automatic mode"}]
+    assert doc["withdrawn_run_groups"] == ["RG-050", "RG-051"] and doc["closed_slots"] == []
+    assert all(v["listed"] == v["of"] == 1 for v in doc["by_fault"].values())
+    write_once(layout.heldout_incidents_path, doc)
+    assert load_heldout_incidents(layout, freeze_sha=FREEZE_SHA) == doc
+
+
+def test_a_withdrawn_run_group_still_comes_from_the_frozen_code_after_the_freeze(tmp_path):
+    # withdrawal excuses no protocol check: the run group stays a held-out run group on disk
+    from collect.pilot import withdraw
+
+    layout = full(tmp_path)
+    write_run(layout, "RG-052", SLOTS["slots"][0]["flag"], SLOTS["slots"][0]["variant"], inc="INC-052", split="heldout",
+              slot="H01", freeze_sha=FREEZE_SHA, dirty=True)
+    withdraw(layout, "RG-052", reason="r", decided_by="user", now=NOW)
+    with pytest.raises(ValueError, match="RG-052: collected from a checkout that was not clean"):
+        listing(layout)
+
+
+def test_after_the_list_a_withdrawal_is_refused_and_one_written_or_removed_anyway_stops_the_loader(tmp_path):
+    from collect.pilot import WITHDRAWAL, withdraw
+
+    layout = full(tmp_path)
+    write_once(layout.heldout_incidents_path, listing(layout))
+    with pytest.raises(ValueError, match="heldout_incidents.json"):  # 023 §6: the list never changes after it is written
+        withdraw(layout, "RG-050", reason="r", decided_by="user", now=NOW)
+    target = layout.run_group_truth_dir("RG-050") / WITHDRAWAL
+    assert not target.exists()
+    target.write_text(json.dumps({"run_group_id": "RG-050", "incident_ids": ["INC-050"], "reason": "by hand",
+                                  "decided_by": "x", "withdrawn_at": NOW}))
+    with pytest.raises(PermissionError, match="withdrawn"):
+        load_heldout_incidents(layout, freeze_sha=FREEZE_SHA)
+
+    layout = full(tmp_path / "b")
+    write_run(layout, "RG-052", SLOTS["slots"][0]["flag"], SLOTS["slots"][0]["variant"], inc="INC-052", split="heldout",
+              slot="H01", freeze_sha=FREEZE_SHA)
+    withdraw(layout, "RG-052", reason="r", decided_by="user", now=NOW)
+    write_once(layout.heldout_incidents_path, listing(layout))
+    (layout.run_group_truth_dir("RG-052") / WITHDRAWAL).unlink()  # a withdrawal taken back: RG-052 would fill H01 twice
+    with pytest.raises(PermissionError, match="withdrawn"):
+        load_heldout_incidents(layout, freeze_sha=FREEZE_SHA)
+
+
+def power_invalid(layout, rg, slot):
+    """A held-out run group _judge found off the formal power in its window (decision 025 revision 2)."""
+    write_run(layout, rg, slot["flag"], slot["variant"], "invalid", split="heldout", slot=slot["slot"], freeze_sha=FREEZE_SHA)
+    path = layout.run_group_truth_dir(rg) / "run.json"
+    run = json.loads(path.read_text())
+    run.update(reasons=["power_not_formal"], power_samples=30,
+               power_not_formal=[{"ts": AFTER, "power": {"source": "AC Power", "settings": {"powermode": "0"}}}])
+    path.write_text(json.dumps(run))
+
+
+def test_a_run_group_invalid_for_power_is_an_invalid_attempt_of_its_slot_and_never_listed(tmp_path):
+    layout = DataLayout(tmp_path / "data")
+    complete_pilot(layout, KEPT)
+    write_heldout_incident(layout, 50, SLOTS["slots"][0])
+    for n in (51, 52, 53):
+        power_invalid(layout, f"RG-{n:03d}", SLOTS["slots"][1])
+    with pytest.raises(ValueError, match="H02 is needs_person"):
+        listing(layout)
+
+    layout = DataLayout(tmp_path / "b")
+    complete_pilot(layout, KEPT)
+    write_heldout_incident(layout, 50, SLOTS["slots"][0])
+    power_invalid(layout, "RG-051", SLOTS["slots"][1])
+    write_heldout_incident(layout, 52, SLOTS["slots"][1])
+    doc = listing(layout)
+    assert [i["run_group_id"] for i in doc["incidents"]] == ["RG-050", "RG-052"] and doc["excluded"] == []
+    assert ["RG-051", "invalid"] in doc["run_groups"]
+
+
+@pytest.mark.parametrize("first", [
+    {"power_samples": None},  # judged without window power samples
+    {"power_samples": 0},
+    {"power": {"source": "AC Power", "settings": {"powermode": "0"}}},  # started in the automatic mode
+    {"power": {"source": "Battery Power", "settings": {"powermode": "2"}}},
+    {"power": None},  # unreadable at the start: never assumed formal
+], ids=["no-samples", "zero-samples", "automatic", "battery", "unreadable"])
+def test_a_listed_run_group_carries_the_formal_power_evidence(tmp_path, first):
+    # decision 025 revisions 2, 3: every formal set; a valid record without that evidence was not judged by today's code
+    with pytest.raises(ValueError, match="RG-050: .*power"):
+        listing(full(tmp_path, **first))

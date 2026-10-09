@@ -180,6 +180,33 @@ def test_a_full_set_or_three_slots_waiting_for_a_person_refuse_a_heldout_run(tmp
     assert main(run_args(slots[3])) == 2 and "need a person" in capsys.readouterr().err
 
 
+def test_a_heldout_run_reaches_the_same_preflight_as_a_pilot_run(tmp_path, monkeypatch, capsys):
+    # decision 025: `run --set heldout` builds the same LiveStack and run_group; nothing starts off the formal power
+    import signal
+
+    import collect.live as live
+    from collect.heldout import heldout_runs
+    from collect.provenance import power_problems
+
+    layout, slots, sha = heldout_project(tmp_path, monkeypatch)
+    seen = []
+
+    class Stack:
+        lock_sha256 = "sha256:" + "1" * 64
+
+        def __init__(self, *args):
+            seen.append(args)
+
+        def preflight(self):
+            return power_problems({"source": "AC Power", "settings": {"powermode": "0"}})
+
+    monkeypatch.setattr(live, "LiveStack", Stack)
+    monkeypatch.setattr(signal, "signal", lambda *a: None)
+    assert main(run_args(slots[0])) == 2
+    assert "not starting" in (err := capsys.readouterr().err) and "high power mode" in err
+    assert len(seen) == 1 and not (layout.root / "staging").exists() and heldout_runs(layout) == []
+
+
 def test_the_pilot_is_closed_once_a_freeze_record_exists(tmp_path, monkeypatch, capsys):
     heldout_project(tmp_path, monkeypatch)
     assert main(["run", "--set", "pilot", "--flag", "cartFailure", "--variant", "100%"]) == 2

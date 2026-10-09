@@ -685,10 +685,12 @@ def audit_set(layout: DataLayout, split: str, out_root: Path, *, project_dir: Pa
             raise PermissionError("heldout_incidents.json exists and has pinned every audit: held-out audits are never rewritten "
                                   "(decision 023 §5.5)")
         from collect.heldout import heldout_runs
+        from collect.pilot import withdrawn
 
+        gone = withdrawn(layout)  # decision 025 revision 3: never audited, listed, run or scored
         pairs = sorted((inc, r["run_group_id"]) for r in heldout_runs(layout) if r.get("status") == "valid"
                        for inc in r.get("incident_ids") or []
-                       if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists())
+                       if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists() and inc not in gone)
     from collect.review import effective_label
     from eval.leakage import audit
 

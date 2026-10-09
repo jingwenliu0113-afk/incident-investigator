@@ -102,14 +102,20 @@ def incident(layout, n, slot, sha, *, exercised=True):
     return inc
 
 
-def heldout_set(tmp_path, monkeypatch):
-    """PROJECT = tmp/proj (freeze record present and passing); data: H01, H02 listed, H03 closed; the list written."""
+def heldout_set(tmp_path, monkeypatch, *, withdrawn=None):
+    """PROJECT = tmp/proj (freeze record present and passing); data: H01, H02 listed, H03 closed; the list written.
+    `withdrawn`: H01 first held INC-049, withdrawn with this reason (decision 025 revision 3)."""
     project = tmp_path / "proj"
     (project / FREEZE_FILE).parent.mkdir(parents=True)
     (project / FREEZE_FILE).write_text(json.dumps(freeze_record()))
     passing_freeze(monkeypatch)
     sha = freeze_sha256(project)
     layout = DataLayout(tmp_path / "data")
+    if withdrawn is not None:
+        from collect.pilot import withdraw
+
+        incident(layout, 49, "H01", sha)
+        withdraw(layout, "RG-049", reason=withdrawn, decided_by="user", now="2026-10-23T00:00:00Z")
     incident(layout, 50, "H01", sha)
     incident(layout, 51, "H02", sha)
     incident(layout, 52, "H03", sha, exercised=False)
@@ -348,3 +354,50 @@ def test_leakage_needs_the_freeze_compare_the_same_list_and_gold_add_a_listed_in
     layout2 = DataLayout(tmp_path / "fresh")
     incident(layout2, 60, "H01", freeze_sha256(project))
     assert audit_set(layout2, "heldout", out / "x", project_dir=project)["incidents"][0]["incident_id"] == "INC-060"
+
+
+# ---------------------------------------------------------------- withdrawn run groups (decision 025 revision 3)
+
+def test_a_withdrawn_heldout_incident_is_never_audited_run_or_scored_and_the_table_says_why(tmp_path, monkeypatch):
+    from collect.pilot import withdraw
+    from eval.runner import audit_set
+
+    reason = "the power mode changed in the window"
+    project, layout, out = heldout_set(tmp_path, monkeypatch, withdrawn=reason)
+    calls = counting(monkeypatch, "fake", lambda inc, n: None)
+    assert run_method(layout, "fake", "heldout", out, project_dir=project) == []
+    assert calls == ["INC-050", "INC-051"] and not (out / "heldout/fake/INC-049.json").exists()
+    assert "INC-049" not in (out / "heldout/fake/attempts.jsonl").read_text()
+    result = score_method(layout, "fake", "heldout", out, project_dir=project)
+    assert [r["incident_id"] for r in result["incidents"]] == ["INC-050", "INC-051"]
+    assert result["heldout"]["excluded"][0] == {"slot": "H01", "incident_id": "INC-049", "run_group_id": "RG-049",
+                                                "reason": f"withdrawn: {reason}"}
+    assert f"INC-049 (withdrawn: {reason})" in (out / "heldout/fake/table.md").read_text()
+
+    fresh = DataLayout(tmp_path / "fresh")  # before the list: the leakage audit skips it too
+    incident(fresh, 60, "H01", freeze_sha256(project))
+    incident(fresh, 61, "H02", freeze_sha256(project))
+    withdraw(fresh, "RG-061", reason=reason, decided_by="user", now="2026-10-23T00:00:00Z")
+    audit = fresh.label_path("INC-061").with_name("leakage_audit.json")
+    before = audit.read_bytes()
+    assert [r["incident_id"] for r in audit_set(fresh, "heldout", out / "x", project_dir=project)["incidents"]] == ["INC-060"]
+    assert audit.read_bytes() == before
+
+
+def test_a_withdrawal_written_after_the_list_stops_every_heldout_run_and_score(tmp_path, monkeypatch):
+    from collect.pilot import WITHDRAWAL, withdraw
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    for name in ("ran", "fresh"):
+        counting(monkeypatch, name, lambda inc, n: None)
+    run_method(layout, "ran", "heldout", out, project_dir=project)
+    with pytest.raises(ValueError, match="heldout_incidents.json"):
+        withdraw(layout, "RG-050", reason="r", decided_by="user", now="2026-10-26T00:00:00Z")
+    (layout.run_group_truth_dir("RG-050") / WITHDRAWAL).write_text(json.dumps(
+        {"run_group_id": "RG-050", "incident_ids": ["INC-050"], "reason": "by hand", "decided_by": "x",
+         "withdrawn_at": "2026-10-26T00:00:00Z"}))
+    before = tree(out)
+    for fn, method in ((run_method, "fresh"), (score_method, "ran")):
+        with pytest.raises(PermissionError, match="withdrawn"):
+            fn(layout, method, "heldout", out, project_dir=project)
+    assert tree(out) == before and not (out / "heldout/fresh").exists()

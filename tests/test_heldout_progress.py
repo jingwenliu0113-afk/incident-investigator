@@ -118,11 +118,11 @@ def test_slot_states_follow_filled_needs_person_closed_open(tmp_path, runs, stat
 def test_status_shows_counts_non_valid_run_groups_and_power_but_no_incident_or_valid_run_group_ids(tmp_path):
     layout, ids = DataLayout(tmp_path), Counter()
     bad = held(layout, ids, SLOTS["slots"][0], "invalid")
-    good = held(layout, ids, SLOTS["slots"][0], power={"source": "AC Power", "settings": {"powermode": "0"}})
+    good = held(layout, ids, SLOTS["slots"][0], power={"source": "AC Power", "settings": {"powermode": "2"}})
     (row,) = slot_status(layout, STATES, freeze_sha=FREEZE_SHA)
     assert row["state"] == "filled" and row["non_valid_run_groups"] == [bad]
-    assert row["counts"] == {"usable": 1, "unexercised": 0, "non_valid": 1}
-    assert row["power"] == [{"source": "AC Power", "settings": {"powermode": "0"}}]
+    assert row["counts"] == {"usable": 1, "unexercised": 0, "non_valid": 1, "withdrawn": 0}
+    assert row["power"] == [{"source": "AC Power", "settings": {"powermode": "2"}}]
     text = json.dumps(row)
     assert good not in text and "INC-" not in text
 
@@ -170,3 +170,33 @@ def test_a_fresh_seed_is_never_one_any_run_group_used(tmp_path):
     write_run(layout, "RG-002", "cartFailure", "100%", "invalid", seed=12, split="heldout", slot="H02", freeze_sha=FREEZE_SHA)
     assert fresh_seed(layout, Draws(11, 12, 13)) == 13
     assert 0 <= fresh_seed(layout) < 2**31
+
+
+WITHDRAWN_AT = "2026-10-22T00:00:00Z"
+
+
+def test_a_withdrawn_run_group_neither_fills_its_slot_nor_counts_as_an_invalid_attempt(tmp_path):
+    # decision 025 revision 3 holds for the held-out set: kept on disk, counted for no set, not an invalid attempt
+    from collect.pilot import withdraw
+
+    layout, ids, slot = DataLayout(tmp_path), Counter(), SLOTS["slots"][0]
+    held(layout, ids, slot, "invalid")
+    held(layout, ids, slot, "invalid")
+    gone = held(layout, ids, slot, exercised=True)
+    withdraw(layout, gone, reason="the power mode changed in the window", decided_by="user", now=WITHDRAWN_AT)
+    (row,) = slot_status(layout, STATES, freeze_sha=FREEZE_SHA)
+    assert row["state"] == "open" and row["non_valid_run_groups"] == ["RG-001", "RG-002"]
+    assert row["counts"] == {"usable": 0, "unexercised": 0, "non_valid": 2, "withdrawn": 1} and row["power"] == []
+    assert gone not in json.dumps(row) and "INC-" not in json.dumps(row)  # a withdrawn run group's id is not shown either
+    assert next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)["slot"] == "H01"  # collected again, new run group, new seed
+    held(layout, ids, slot)
+    assert states(layout, STATES) == ["filled"]  # one usable incident: the withdrawn one is not a second
+
+    layout, ids = DataLayout(tmp_path / "b"), Counter()
+    first = held(layout, ids, slot, exercised=False)
+    withdraw(layout, first, reason="r", decided_by="user", now=WITHDRAWN_AT)
+    held(layout, ids, slot, exercised=False)
+    assert states(layout, STATES) == ["open"]  # one unexercised incident counts: recollected once more (016 §5)
+    for _ in range(3):
+        held(layout, ids, slot, "invalid")
+    assert states(layout, STATES) == ["needs_person"]  # the invalid ones still count, the withdrawn one does not

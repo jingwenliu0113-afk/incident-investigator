@@ -353,3 +353,16 @@ def test_the_freeze_needs_declared_revisions_a_committed_plan_and_one_that_still
     with pytest.raises(ValueError, match="rebuil"):
         freeze_it(repo, layout)
     assert not (repo / S).exists() and not (repo / F).exists()
+
+
+def test_a_withdrawn_pilot_run_group_needs_no_review_or_audit_before_the_plan(tmp_path):
+    # decision 025 revision 3: a withdrawn Pilot incident is never audited (incidents_in skips it) nor reviewed
+    from collect.pilot import withdraw
+    from heldout_fixtures import write_run
+
+    repo, layout = project(tmp_path)
+    write_run(layout, "RG-020", "paymentFailure", "100%", inc="INC-020")
+    with pytest.raises(ValueError, match="INC-020"):
+        plan_it(repo, layout)
+    withdraw(layout, "RG-020", reason="collected in the automatic power mode", decided_by="user", now=NOW)
+    assert plan_it(repo, layout)["faults"] == 10

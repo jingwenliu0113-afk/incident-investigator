@@ -131,11 +131,13 @@ def _canon(field: str, value):
 def pilot_evidence(layout) -> dict:
     """Per Pilot fault (PILOT order): valid incidents, non-valid run groups, reviewed incidents (exercised, saw method
     outputs, final review-field values, recorded differences, lexicon hits), unreviewed incidents and audits. The ids
-    stay here: what goes into plan.json is counts only."""
-    from collect.pilot import PILOT
+    stay here: what goes into plan.json is counts only. A withdrawn incident is no evidence and no invalid attempt
+    (decision 025 revision 3)."""
+    from collect.pilot import PILOT, withdrawn
 
     ev = {(e["flag"], e["variant"]): {"valid": [], "non_valid": [], "reviews": [], "unreviewed": [], "audits": {}}
           for e in PILOT}
+    gone = withdrawn(layout)
     for run, _ in _run_groups(layout):
         plan = run.get("plan") or {}
         key = (plan.get("flag"), plan.get("variant"))
@@ -145,6 +147,8 @@ def pilot_evidence(layout) -> dict:
             ev[key]["non_valid"].append(run["run_group_id"])
             continue
         for inc in run.get("incident_ids") or []:
+            if inc in gone:
+                continue
             ev[key]["valid"].append(inc)
             ev[key]["audits"][inc] = _lexicon_hits(layout, inc)
             label_path, record_path = _review_paths(layout, inc)
@@ -162,14 +166,15 @@ def pilot_evidence(layout) -> dict:
 
 def pilot_problems(layout, removed: set) -> list[str]:
     """decision 023 §4 "Pilot or its review not complete": every valid Pilot incident has label.reviewed.json and
-    label_review.json; every Pilot fault not removed has a reviewed incident with fault_exercised = true (§1)."""
-    from collect.pilot import PILOT
+    label_review.json; every Pilot fault not removed has a reviewed incident with fault_exercised = true (§1). A withdrawn
+    incident counts for no set (decision 025 revision 3)."""
+    from collect.pilot import PILOT, withdrawn
 
-    problems = []
+    problems, gone = [], withdrawn(layout)
     for run, _ in _run_groups(layout):
         if run_split(run) == "pilot" and run.get("status") == "valid":
             for inc in run.get("incident_ids") or []:
-                if not all(p.exists() for p in _review_paths(layout, inc)):
+                if inc not in gone and not all(p.exists() for p in _review_paths(layout, inc)):
                     problems.append(f"Pilot incident {inc} is not reviewed yet (label.reviewed.json and label_review.json, "
                                     "decision 018)")
     ev = pilot_evidence(layout)
@@ -386,11 +391,14 @@ def heldout_slots(faults, k: int = HELDOUT_K, seed: int = HELDOUT_MASTER_SEED) -
 
 def _slot_detail(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
     """Per slot, in slot order: its state and, internally, the ids behind it. Raises ValueError on any corrupt or
-    mismatched held-out record, including one collected under another freeze record (fail closed, never filtered)."""
-    from collect.pilot import MAX_INVALID_ATTEMPTS
+    mismatched held-out record, including one collected under another freeze record (fail closed, never filtered).
+    A withdrawn run group (decision 025 revision 3) fills nothing and is no invalid attempt: its slot is collected again."""
+    from collect.pilot import MAX_INVALID_ATTEMPTS, withdrawals
 
     slots = {s["slot"]: s for s in slots_doc["slots"]}
-    detail = {name: {"usable": [], "unexercised": [], "non_valid": [], "valid": [], "power": []} for name in slots}
+    detail = {name: {"usable": [], "unexercised": [], "non_valid": [], "valid": [], "power": [], "withdrawn": []}
+              for name in slots}
+    gone = withdrawals(layout)
     for run, injection in _run_groups(layout):
         if run_split(run) != "heldout":
             continue
@@ -405,12 +413,19 @@ def _slot_detail(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
             raise ValueError(f"{rg} was collected under freeze record {plan.get('freeze_sha256')}, not the one in force "
                              f"({freeze_sha}): held-out work stops until a person decides (decision 023 §6)")
         d = detail[slot]
+        w = gone.get(rg)
+        if w is not None and (run.get("status") != "valid" or w.get("run_group_id") != rg
+                              or w.get("incident_ids") != (run.get("incident_ids") or [])):
+            raise ValueError(f"{rg}: its withdrawal record does not match its run record (decision 025 revision 3)")
         if run.get("status") != "valid":
             d["non_valid"].append(rg)  # invalid and every aborted_* status, counted cumulatively (decision 009 §4)
             continue
         fault = (injection or {}).get("fault") or {}
         if (fault.get("flag"), fault.get("variant")) != (s["flag"], s["variant"]):
             raise ValueError(f"{rg}: its injection record does not name slot {slot}'s fault")
+        if w is not None:  # kept on disk, counted for no set, not an invalid attempt
+            d["withdrawn"].append({"run_group_id": rg, "incident_ids": w["incident_ids"], "reason": w["reason"]})
+            continue
         d["valid"].append(rg)
         d["power"].append(((run.get("provenance") or {}).get("machine") or {}).get("power"))  # decision 025
         for inc in run.get("incident_ids") or []:
@@ -431,9 +446,10 @@ def _slot_detail(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
 
 def slot_status(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
     """Public per-slot progress: slot, fault, state, counts, non-valid run-group ids and the power settings of valid run
-    groups (decision 025). Never an incident id or a valid run-group id (held-out ids would map to faults)."""
+    groups (decision 025). Never an incident id or a valid (or withdrawn) run-group id (held-out ids would map to faults)."""
     return [{"slot": d["slot"], "block": d["block"], "flag": d["flag"], "variant": d["variant"], "state": d["state"],
-             "counts": {"usable": len(d["usable"]), "unexercised": len(d["unexercised"]), "non_valid": len(d["non_valid"])},
+             "counts": {"usable": len(d["usable"]), "unexercised": len(d["unexercised"]), "non_valid": len(d["non_valid"]),
+                        "withdrawn": len(d["withdrawn"])},
              "non_valid_run_groups": d["non_valid"], "power": d["power"]}
             for d in _slot_detail(layout, slots_doc, freeze_sha=freeze_sha)]
 
@@ -515,6 +531,19 @@ def _run_group_problems(run: dict, freeze: dict, commit_check, pilot_max: int) -
     return problems
 
 
+def _power_evidence_problems(run: dict) -> list[str]:
+    """decision 025 revisions 2, 3 hold for every formal set: a valid held-out run group started on the formal power and
+    _judge found its whole window on it (power samples taken, none off). A withdrawn run group is not checked."""
+    from collect.provenance import power_problems
+
+    rg = run["run_group_id"]
+    start = ((run.get("provenance") or {}).get("machine") or {}).get("power")
+    problems = [f"{rg}: started off the formal power: {p}" for p in power_problems(start)]
+    if not run.get("power_samples") or run.get("power_not_formal") or "power_not_formal" in (run.get("reasons") or []):
+        problems.append(f"{rg}: valid without window power samples all on the formal power (decision 025 revision 2)")
+    return problems
+
+
 def _incident_problems(layout, inc: str, rg: str, run: dict, entry: dict | None, freeze: dict, commit_check) -> list[str]:
     paths = pinned_paths(layout, inc, rg)
     missing = [name for name, p in paths.items() if not p.exists()]
@@ -559,8 +588,10 @@ def heldout_incidents(layout, slots_doc: dict, plan_doc: dict, *, freeze: dict, 
     runs = {r["run_group_id"]: r for r, _ in groups if run_split(r) == "heldout"}
     of = {inc: rg for rg, r in runs.items() for inc in r.get("incident_ids") or []}
     for run in runs.values():
-        problems += _run_group_problems(run, freeze, commit_check, pilot_max)
+        problems += _run_group_problems(run, freeze, commit_check, pilot_max)  # withdrawn ones too: no check is excused
     for d in detail:
+        for rg in d["valid"]:
+            problems += _power_evidence_problems(runs[rg])
         for inc in d["usable"] + d["unexercised"]:
             problems += _incident_problems(layout, inc, of[inc], runs[of[inc]], entries.get((d["flag"], d["variant"])),
                                            freeze, commit_check)
@@ -577,6 +608,9 @@ def heldout_incidents(layout, slots_doc: dict, plan_doc: dict, *, freeze: dict, 
 
     listed, excluded, closed = [], [], []
     for d in detail:
+        excluded += [{"slot": d["slot"], "incident_id": inc, "run_group_id": w["run_group_id"],
+                      "reason": f"withdrawn: {w['reason']}"}
+                     for w in d["withdrawn"] for inc in w["incident_ids"]]  # decision 025 revision 3
         excluded += [{"slot": d["slot"], "incident_id": inc, "run_group_id": of[inc], "reason": NOT_EXERCISED}
                      for inc in d["unexercised"]]
         if d["state"] == "filled":
@@ -602,12 +636,15 @@ def heldout_incidents(layout, slots_doc: dict, plan_doc: dict, *, freeze: dict, 
             "slots_sha256": freeze["slots"]["sha256"], "plan_sha256": freeze["plan"]["sha256"],
             "incidents": listed, "excluded": excluded, "closed_slots": closed,
             "removed_faults": [{k: r[k] for k in ("flag", "variant", "basis", "reason")} for r in plan_doc["removed"]],
-            "run_groups": [[rg, runs[rg].get("status")] for rg in sorted(runs)], "by_fault": by_fault}
+            "run_groups": [[rg, runs[rg].get("status")] for rg in sorted(runs)],
+            "withdrawn_run_groups": sorted(w["run_group_id"] for d in detail for w in d["withdrawn"]), "by_fault": by_fault}
 
 
 def load_heldout_incidents(layout, *, freeze_sha: str) -> dict:
     """The verified list: PermissionError when it is missing, belongs to another freeze, a pinned file changed, or the
-    held-out run groups on disk are not those it recorded (decision 023 §5: no method without the list)."""
+    held-out run groups on disk, or the withdrawn ones, are not those it recorded (decision 023 §5: no method without the
+    list; decision 025 revision 3)."""
+    from collect.pilot import withdrawals
     from env.lock import sha256_path
 
     path = layout.heldout_incidents_path
@@ -621,11 +658,15 @@ def load_heldout_incidents(layout, *, freeze_sha: str) -> dict:
                 for i in doc["incidents"] for name, p in pinned_paths(layout, i["incident_id"], i["run_group_id"]).items()
                 if not p.exists() or sha256_path(p) != i["sha256"].get(name)]
     try:
-        now = [[r["run_group_id"], r.get("status")] for r in sorted(heldout_runs(layout), key=lambda r: r["run_group_id"])]
+        runs = sorted(heldout_runs(layout), key=lambda r: r["run_group_id"])
     except ValueError as e:
         raise PermissionError(str(e)) from e
-    if now != doc["run_groups"]:
+    if [[r["run_group_id"], r.get("status")] for r in runs] != doc["run_groups"]:
         problems.append("the held-out run groups on disk are not those the list recorded (one was added or changed after it)")
+    held = {r["run_group_id"] for r in runs}
+    if sorted(rg for rg in withdrawals(layout) if rg in held) != doc.get("withdrawn_run_groups"):
+        problems.append("the withdrawn held-out run groups on disk are not those the list recorded (a withdrawal was added or "
+                        "taken back after it; decision 023 §5.5, §6)")
     if problems:
         raise PermissionError("heldout_incidents.json no longer verifies: " + "; ".join(problems))
     return doc

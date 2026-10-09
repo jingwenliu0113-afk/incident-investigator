@@ -298,7 +298,8 @@
 - **`docs/heldout/slots.json`**：`master_seed`、`k`、`plan_sha256`、`faults`、`slots`（H01…：block、flag、variant）。
 - **`docs/heldout/freeze.json`**：`frozen_at`、`frozen_from_commit`、`frozen_tree`、`decisions`（blob）、`env_lock_sha256`、`policy`、`llm`、
   `pilot_revisions`、`plan`、`k`、`master_seed`、`slots`。
-- **`heldout_incidents.json`**（ground-truth 側）：`incidents`（slot、id、8 個檔案的 sha）、`excluded`、`closed_slots`、`removed_faults`、`run_groups`、`by_fault`。
+- **`heldout_incidents.json`**（ground-truth 側）：`incidents`（slot、id、8 個檔案的 sha）、`excluded`（含撤回的 incident）、`closed_slots`、`removed_faults`、
+  `run_groups`、`withdrawn_run_groups`、`by_fault`。
 - **`attempts.jsonl`**：每次嘗試一行 start、一行 end（outcome：ok | api_error | transport_error | invalid_prediction | error，含用量）。
   held-out 的 `run_config.json` 另記 `freeze_sha256` 與 `heldout_incidents_sha256`。
 
@@ -332,3 +333,5 @@
 26. 依收集順序配發的 id 加上進 git 的 slot 清單，仍可讓人對應 id 與 fault；方法看不到，接受。
 27. held-out 需要的程式（API adapter、Gate 2 / 3、等權表、013 正式版）都要在 freeze 前 commit。
 28. 這一批不做 held-out loop。
+29. decision 025 修訂 2、3 的電力條件對 held-out 一樣成立（同一個 preflight 與時間窗判定）；`power_not_formal` 算 slot 的無效嘗試；清單時再查每個計入的 valid run group 的電力證據。
+30. decision 025 修訂 3 的撤回對 held-out 一樣成立：不填 slot、不算無效嘗試、列在清單的 `excluded`（`withdrawn: …`）、不執行不評分；清單寫出後不能再撤回 held-out run group；撤回的 Pilot incident 不是 plan 的證據。

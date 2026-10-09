@@ -110,7 +110,8 @@ WITHDRAWAL = "withdrawn.json"  # ground-truth side, next to run.json (decision 0
 
 
 def withdraw(layout, run_group_id: str, *, reason: str, decided_by: str, now: str) -> dict:
-    """Withdraw a valid run group by a person's decision: everything stays on disk, its incidents count for no set."""
+    """Withdraw a valid run group of any set by a person's decision: everything stays on disk, its incidents count for no
+    set. A held-out run group only before heldout_incidents.json exists (decision 023 §5.5, §6: the list never changes)."""
     path = layout.run_group_truth_dir(run_group_id) / "run.json"
     if not path.exists():
         raise ValueError(f"{run_group_id}: no run record")
@@ -120,17 +121,25 @@ def withdraw(layout, run_group_id: str, *, reason: str, decided_by: str, now: st
     target = path.with_name(WITHDRAWAL)
     if target.exists():
         raise ValueError(f"{run_group_id} is already withdrawn")
+    if (run.get("plan") or {}).get("split") == "heldout" and layout.heldout_incidents_path.exists():
+        raise ValueError(f"{run_group_id} is a held-out run group and heldout_incidents.json is written: the list never changes "
+                         "after it (decision 023 §5.5, §6); a person decides in a new decision")
     record = {"run_group_id": run_group_id, "incident_ids": run.get("incident_ids") or [], "reason": reason,
               "decided_by": decided_by, "withdrawn_at": now}
     target.write_text(json.dumps(record, indent=2) + "\n")
     return record
 
 
+def withdrawals(layout) -> dict[str, dict]:
+    """run group id (its directory) -> its withdrawal record, for every withdrawn run group of any set."""
+    return {path.parent.name: json.loads(path.read_text())
+            for path in sorted((layout.ground_truth_root / "run_groups").glob(f"RG-*/{WITHDRAWAL}"))}
+
+
 def withdrawn(layout) -> dict[str, str]:
     """incident id -> reason, for every withdrawn run group."""
     out = {}
-    for path in sorted((layout.ground_truth_root / "run_groups").glob(f"RG-*/{WITHDRAWAL}")):
-        w = json.loads(path.read_text())
+    for w in withdrawals(layout).values():
         out.update({inc: w["reason"] for inc in w["incident_ids"]})
     return out
 

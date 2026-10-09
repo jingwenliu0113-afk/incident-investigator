@@ -63,6 +63,8 @@
   **plan、freeze 與收集都被 A1 擋住**（要求 LLM 方法已批准並在 Pilot 上跑過）。freeze 之前必須 commit：API adapter、Gate 條件 2 / 3 的程式、
   各 fault 等權平均與缺格表、013 正式版、需要乾淨 checkout 的 review 說明；freeze 之後只能改 NEXT.md 與新增 decision 檔。
   待人處理的 slot 只記 slot id 與非 valid 的 run group id。
+  已合併 main 的 decision 025 修訂 2、3（2026-10-09）：電力條件與撤回對 held-out 一樣成立（026 解讀 29、30）——撤回的 held-out run group
+  不填 slot、不算無效嘗試、列在清單的 excluded、不執行不評分；清單寫出後不能再撤回。測試 814 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成

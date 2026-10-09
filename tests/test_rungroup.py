@@ -7,6 +7,7 @@ import pytest
 
 from collect.accounting import counter_key
 from collect.policy import load_policy
+from collect.provenance import power_problems
 from collect.rungroup import Plan, normal_minutes, recovery_minutes, run_group
 
 T0 = datetime(2026, 10, 8, 12, 0, 0, tzinfo=UTC)
@@ -552,3 +553,21 @@ def test_a_pilot_run_record_keeps_todays_plan_keys_and_a_heldout_one_adds_slot_a
              freeze_sha256="sha256:" + "f" * 64)
     assert set(rec["plan"]) == PILOT_PLAN_KEYS | {"slot", "freeze_sha256"}
     assert rec["plan"]["slot"] == "H07" and rec["plan"]["split"] == "heldout"
+
+
+def test_a_heldout_run_group_takes_the_same_preflight_and_window_power_check(tmp_path, flag_path):
+    # decision 025 revisions 2, 3 hold for every formal set: a held-out plan goes through the same run_group
+    held = {"split": "heldout", "slot": "H01", "freeze_sha256": "sha256:" + "f" * 64}
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    stack.preflight = lambda: power_problems({"source": "AC Power", "settings": {"powermode": "0"}})
+    with pytest.raises(RuntimeError, match="high power mode"):
+        go(stack, clock, flag_path, tmp_path, **held)
+    assert stack.calls == []
+    clock = Clock()
+    stack = Stack(clock, flag_path, power_at={22: {"source": "Battery Power", "settings": {"powermode": "2"}}})
+    rec = go(stack, clock, flag_path, tmp_path / "b", **held)
+    assert rec["status"] == "invalid" and rec["reasons"] == ["power_not_formal"] and rec["plan"]["slot"] == "H01"
+    clock = Clock()
+    rec = go(Stack(clock, flag_path), clock, flag_path, tmp_path / "c", **held)
+    assert rec["status"] == "valid" and rec["power_samples"] >= 25

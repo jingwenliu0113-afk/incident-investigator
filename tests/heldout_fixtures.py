@@ -18,6 +18,7 @@ FROZEN_AT = "2026-10-20T00:00:00Z"
 AFTER = "2026-10-21T00:00:00Z"
 BEFORE = "2026-10-19T00:00:00Z"
 POLICY = {"version": 1, "sha256": load_policy().sha256}
+FORMAL_POWER = {"source": "AC Power", "settings": {"powermode": "2"}}  # decision 025 revision 3
 
 
 def entry(flag: str, variant: str) -> dict:
@@ -33,8 +34,10 @@ def a_priori(flag: str, variant: str) -> dict:
 def write_run(layout: DataLayout, rg: str, flag: str, variant: str, status: str = "valid", *, inc: str | None = None,
               split: str | None = "pilot", seed: int | None = None, slot: str | None = None, freeze_sha: str | None = None,
               up_at: str = AFTER, commit: str | None = COMMIT, dirty: bool = False, lock: str = LOCK,
-              injection_split: str | None = None, power: dict | None = None, **plan_extra) -> dict:
-    """run.json (and injection.json for a valid run) of one run group; the incident's truth directory is created."""
+              injection_split: str | None = None, power: dict | None = FORMAL_POWER, power_samples: int | None = 30,
+              **plan_extra) -> dict:
+    """run.json (and injection.json for a valid run) of one run group; the incident's truth directory is created. A valid
+    run carries what _judge records: its window power samples (decision 025 revision 2)."""
     truth = layout.run_group_truth_dir(rg)
     truth.mkdir(parents=True)
     plan = {"run_group_id": rg, "seed": int(rg[3:]) if seed is None else seed, "flag": flag, "variant": variant,
@@ -51,6 +54,8 @@ def write_run(layout: DataLayout, rg: str, flag: str, variant: str, status: str 
     run = {"run_group_id": rg, "plan": plan, "status": status, "incident_ids": incs, "up_at": up_at,
            "env_lock_sha256": lock,
            "provenance": {"project": {"commit": commit, "dirty": dirty}, "machine": {"role": "mac", "power": power}}}
+    if status == "valid" and power_samples is not None:
+        run["power_samples"] = power_samples
     (truth / "run.json").write_text(json.dumps(run))
     if incs:
         layout.injection_path(rg).write_text(json.dumps(injection(

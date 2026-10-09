@@ -2,6 +2,7 @@
 
 - 狀態：Accepted（2026-10-09）；在任何 held-out 資料、任何 Pilot 方法結果之前寫定。只把 decision 023 落成程式，**不改任何規則、門檻、指標、切分或預算**；
   023 有歧義的地方一律取最保守的讀法（拒絕而不放行），每一項解讀都列在下面。
+  **補充（2026-10-09，合併 main 的 decision 025 修訂 2、3 之後）**：解讀 29（電力條件）、30（撤回）把 025 的規則落實到 held-out；只拒絕更多，不放寬任何條件。
 - 影響範圍：`collect/heldout.py`、`collect/freeze.py`（新增）；`collect/__main__.py`（`run|next|status --set heldout`、`heldout-plan`、
   `heldout-freeze`、`heldout-list`、incident 指令的 freeze 檢查）；`collect/rungroup.py`（`Plan.slot`、`Plan.freeze_sha256`）；
   `collect/pilot.py`、`collect/labeling.py`、`collect/layout.py`；`eval/runner.py`、`eval/__main__.py`；`agent/harness.py`（`CallError`）；
@@ -126,6 +127,24 @@
     013 正式版。NEXT 把它們列為 freeze 前的項目。
 28. **這一批不做 held-out loop**：023 的「程式」沒有列它；它在 A1 與 Pilot review 之前無法執行；而且要改 `pilot_loop.py`（正在跑 Pilot 的檔案）。
     手動的 `next` → `run` → `process` → `eval leakage` 就能完成 held-out 收集。
+29. **電力條件（decision 025 修訂 2、3：高效能模式 + AC，時間窗內每分鐘取樣）對 held-out 一樣成立**。held-out 沒有自己的收集路徑：
+    `collect run --set heldout` 用同一個 `LiveStack.preflight`（開始時讀 `pmset`，不符就拒絕）與同一個 `run_group` / `_judge`
+    （時間窗內任何一筆樣本不符或沒有樣本 → `power_not_formal`，run 無效）。有測試守住這兩點。
+    - `power_not_formal` 的 run group 和其他無效 run group 一樣，算該 slot 的一次無效嘗試（解讀 11），不會進清單。
+    - `heldout-list` 另加一項防竄改檢查（不是新規則）：每個計入 slot 的 valid held-out run group，run.json 必須記錄符合正式條件的開始電力
+      （`provenance.machine.power`）、`power_samples` ≥ 1，而且沒有 `power_not_formal`；不符就拒絕寫清單。撤回的 run group 不檢查這一項（撤回的原因可能正是電力）。
+30. **撤回（decision 025 修訂 3）對 held-out 一樣成立**。`collect.pilot.withdraw` 對任何 set 都可用：在 ground-truth 側寫 `run_groups/<RG>/withdrawn.json`，所有檔案保留。
+    - 撤回的 held-out run group **不填 slot、不算該 slot 的無效嘗試**；slot 照常重收（新的 run group、新的 seed）。
+    - 它的 incident 不需要 process、audit、review；`eval leakage --set heldout` 跳過它。
+    - `heldout_incidents.json` 把它列在 `excluded`（`reason` = `withdrawn: <原因>`，含 slot 與 run group id），另記 `withdrawn_run_groups`。
+      因此它不進任何方法的執行與評分；評分報告的「Not listed」列出它。
+    - **撤回不豁免任何檢查**：撤回的 run group 仍是磁碟上的 held-out run group，解讀 24 的 run group 檢查（freeze sha、env lock、乾淨且凍結的 commit、
+      freeze 之後開始、編號、023 §3 的長度、seed 不重複）照樣適用。撤回紀錄與 run.json 不符（run group id、incident id、非 valid）時 fail closed。
+    - `collect status --set heldout` 只顯示撤回的**數量**，不顯示它的 id（解讀 23）。
+    - **清單寫出之後不能再撤回 held-out run group**（023 §5.5、§6：清單永不因之後的事件或結果修改）：`withdraw` 拒絕；若仍有 `withdrawn.json` 被加入或移除，
+      `load_heldout_incidents` 拒絕，所有 held-out 方法執行與評分停止，由人以新的 decision 決定。Pilot 的撤回不受影響。
+    - **Pilot 側**：撤回的 Pilot incident 不是 held-out plan 的證據。`pilot_evidence` 不計入它（不算 valid、review 或無效 run group）；
+      `pilot_problems` 與 plan / freeze 的前置檢查不要求它的 review 與 leakage audit（例如真實 Pilot 撤回的 RG-002）。
 
 ## 為什麼
 
@@ -135,6 +154,8 @@
 - **以 Pilot 資料檢查修正與移除**：023 §1 的「只吸收 review 發現的差異」、使用者決定 5 的「只依驗證失敗移除」都是可以機械檢查的條件；交給人的自由文字就無法事後稽核。
 - **run group 的 commit、時間、編號三重檢查**：一個把 held-out 欄位全部偽造的 Pilot run group，仍然會因為 commit 不含 freeze 紀錄、開始時間早於 freeze、編號小於 Pilot 而被拒絕（SPEC §5、§10）。
 - **放棄作答留在分母**：如果把沒有答案的 incident 從分母拿掉，清單就會因結果而改變，這是 023 §6 禁止的；013 §2 已規定放棄作答算錯。
+- **清單寫出後不再撤回**：撤回若能在清單之後（也就是可能在看過方法結果之後）發生，就等於依結果修改測試集；寫出之前的撤回只依收集條件，沒有任何方法結果。
+- **電力證據在清單時再查一次**：preflight 與時間窗判定已經保證這件事；清單時再查，是讓不是由這套程式產生的紀錄無法混進 held-out。
 
 ## 放棄的替代方案
 
