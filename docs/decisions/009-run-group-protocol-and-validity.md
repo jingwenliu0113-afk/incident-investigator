@@ -138,7 +138,7 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 - **發現**：RG-009（cartFailure）與 RG-013（intlShippingSlowdown）的 fault **關閉**在 10 s 內沒確認（開啟都在 0.1–0.7 s 內確認）。
   RG-013 的 raw trace 顯示關閉寫入 105 秒後 shipping 仍有 10 秒延遲：flagd 根本沒讀到關閉的設定，fault 延續到 recovery。
   兩個 run 依 §4 判無效（`flag_unconfirmed`）是對的。
-- **推測的原因**：§5 的寫法是 temp file + `os.replace`，每次寫入都換掉 flag 檔的 inode；flagd v0.16 以 fsnotify 監看 bind mount 裡的這個檔案，
+- **推測的原因（probe 未證實，見下）**：§5 的寫法是 temp file + `os.replace`，每次寫入都換掉 flag 檔的 inode；flagd v0.16 以 fsnotify 監看 bind mount 裡的這個檔案，
   在 Docker Desktop 的檔案分享上偶爾沒能重新監看新的檔案，之後的變更就完全收不到。以單獨的 flagd container 比較兩種寫法的 probe 結果記在下方。
 - **修訂**（只改 harness 套用 fault 的方式；確認規則不變）：
   1. fault 開、關都以 `collect.faults.write_in_place` 寫入：同一個 inode，seek 0、寫入、truncate、fsync；不再 rename。
@@ -149,6 +149,10 @@ up → verify-running → 暖機（≥5 分鐘）→ 穩定閘門 → normal per
 - **取捨**：同一個 inode 寫入時，flagd 可能讀到寫到一半的檔案（JSON 解析失敗，保留上一份設定）；寫完與 truncate 都會再產生事件，
   加上 3 s 後的重寫與「讀到預期 variant 才算確認」，最終狀態一定被讀到並經過確認。
 - **對已收集的資料**：有效的 RG-003、RG-007、RG-008、RG-010 都在 0.7 s 內確認開關，與修訂後的條件相同，不需重收。
+- **probe 結果（2026-10-09 12:15Z，heavy lock 空出時；單獨的 flagd v0.16 container，同一個鎖定 image，bind mount 一個暫存目錄）**：
+  rename 與同一個 inode 寫入各 20 個開關循環（40 次切換），**兩者全部在 1.06 s 內生效，沒有重現失敗**。
+  所以「rename 換 inode」的推測**沒有被證實**；失敗只在完整 stack 中出現（可能與 flagd-ui 掛載同一個目錄、或負載下的事件延遲有關，未驗證）。
+  修訂後的重寫與每次查詢的 `served` 紀錄不依賴原因；若之後仍有 `flag_unconfirmed`，以這些紀錄與 flagd / flagd-ui 的 log 再查。
 
 ## 收集結果
 
