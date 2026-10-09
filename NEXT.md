@@ -5,7 +5,7 @@
 **Core 的工具鏈都已完成並測試；Pilot 正式收集「依使用者指示暫停」（2026-10-09 17:45Z，台北 10-10 01:45：使用者要用 Mac 跑重要的東西，等使用者指令再繼續）。**
 - 暫停時沒有任何 run 在進行；自動重啟的監看已停止。繼續時：確認高效能模式 + AC、heavy lock 空出，再啟動 `uv run python -m collect pilot-loop --labeler agent:claude-code`
   （intlShippingSlowdown 已由使用者 ack，修訂 5 的 flag 寫入已在 main）。
-- 本地分支 `heldout-protocol`（`11dcf31`，含 gate-analysis 與 synthetic-sample，917 passed）尚未合併：Pilot 收完、main 閒置後再合併並 push。
+- 本地分支 `heldout-protocol`（含 gate-analysis、synthetic-sample 與整合審查修正，918 passed）尚未合併：Pilot 收完、main 閒置後再合併並 push。
 - **Pilot 有效 incident（高效能模式 + AC）**：INC-002 paymentFailure（RG-003）、INC-003 productCatalogFailure（RG-007）、INC-004 paymentUnreachable（RG-008）、
   INC-005 cartFailure（RG-010；RG-009 無效）。RG-002（INC-001）撤回。剩 intlShippingSlowdown 與之後 5 個 fault。
 - **leakage audit（4 個有效 incident，2026-10-09 17:50Z，只寫 ground-truth 側、沒有方法輸出）**：詞彙命中全部 0；難度全部 easy（origin 自己發出只在 fault 期間出現的 error 等級訊息）。label review 工作表已產生（`label_review_todo.json` 與好讀版 `.md`）。
