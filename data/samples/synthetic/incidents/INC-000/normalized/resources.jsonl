@@ -1,0 +1,8 @@
+{"attributes":{"container.name":"checkout","deployment.environment.name":"synthetic-sample"},"dropped_attributes_count":0,"resource_id":"r-9e66c9566b8efd40","schema_url":null}
+{"attributes":{"deployment.environment.name":"synthetic-sample","service.name":"frontend"},"dropped_attributes_count":0,"resource_id":"r-a3aade8f459c06af","schema_url":null}
+{"attributes":{"deployment.environment.name":"synthetic-sample","service.name":"frontend-proxy"},"dropped_attributes_count":0,"resource_id":"r-ae72f6b0ae24e99a","schema_url":null}
+{"attributes":{"deployment.environment.name":"synthetic-sample","service.name":"checkout"},"dropped_attributes_count":0,"resource_id":"r-b4896555d2eb40a6","schema_url":null}
+{"attributes":{"deployment.environment.name":"synthetic-sample","service.name":"product-catalog"},"dropped_attributes_count":0,"resource_id":"r-bbea9ad8531d5d6d","schema_url":null}
+{"attributes":{"deployment.environment.name":"synthetic-sample","service.name":"cart"},"dropped_attributes_count":0,"resource_id":"r-de49d5ee5690f795","schema_url":null}
+{"attributes":{"deployment.environment.name":"synthetic-sample","service.name":"payment"},"dropped_attributes_count":0,"resource_id":"r-e45a01a86992302d","schema_url":null}
+{"attributes":{"container.name":"payment","deployment.environment.name":"synthetic-sample"},"dropped_attributes_count":0,"resource_id":"r-e8cf8d0d8f58c68f","schema_url":null}

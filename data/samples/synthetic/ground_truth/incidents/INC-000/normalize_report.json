@@ -1,0 +1,253 @@
+{
+  "attribute_keys": {
+    "resources/cart": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/checkout": [
+      "container.name",
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/frontend": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/frontend-proxy": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/payment": [
+      "container.name",
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/product-catalog": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "traces/cart": [
+      "rpc.service",
+      "rpc.system"
+    ],
+    "traces/checkout": [
+      "rpc.service",
+      "rpc.system"
+    ],
+    "traces/frontend": [
+      "http.request.method",
+      "http.response.status_code"
+    ],
+    "traces/frontend-proxy": [
+      "http.request.method",
+      "http.response.status_code",
+      "url.path"
+    ],
+    "traces/payment": [
+      "rpc.service",
+      "rpc.system"
+    ],
+    "traces/product-catalog": [
+      "rpc.method",
+      "rpc.service"
+    ]
+  },
+  "code": null,
+  "content_sha256": "sha256:cfbcdf05bc6afd4b2b1695944228cd22b681dc8a31a08d0ea3501ddb088b55a4",
+  "new_attribute_keys": {
+    "resources/cart": [
+      "deployment.environment.name"
+    ],
+    "resources/checkout": [
+      "deployment.environment.name"
+    ],
+    "resources/frontend": [
+      "deployment.environment.name"
+    ],
+    "resources/frontend-proxy": [
+      "deployment.environment.name"
+    ],
+    "resources/payment": [
+      "deployment.environment.name"
+    ],
+    "resources/product-catalog": [
+      "deployment.environment.name"
+    ],
+    "traces/cart": [
+      "rpc.service",
+      "rpc.system"
+    ],
+    "traces/checkout": [
+      "rpc.service",
+      "rpc.system"
+    ],
+    "traces/frontend-proxy": [
+      "http.request.method",
+      "http.response.status_code",
+      "url.path"
+    ],
+    "traces/product-catalog": [
+      "rpc.service"
+    ]
+  },
+  "outputs": [
+    {
+      "bytes": 1403,
+      "path": "resources.jsonl",
+      "records": 8,
+      "sha256": "sha256:27d1c4d9df81bca3e3eafa993cf525ae9a122a6993223a3748efd23fd76cb6f0"
+    },
+    {
+      "bytes": 185826,
+      "path": "spans.jsonl",
+      "records": 280,
+      "sha256": "sha256:dc86430daec8c5951bbf7cf57b611aab3cf4cdca552c433d149687a333ec5a87"
+    },
+    {
+      "bytes": 18894,
+      "path": "logs.jsonl",
+      "records": 38,
+      "sha256": "sha256:d4685c1ae2656a4d463172f4ea262fbd0bc130e9752806c5bd932933e1171a24"
+    },
+    {
+      "bytes": 1240,
+      "path": "metric_series.jsonl",
+      "records": 4,
+      "sha256": "sha256:b085735a5e1e6e25cb2f06d6e40924fe3d674b6ac7fe716eb7e4de783f81ac43"
+    },
+    {
+      "bytes": 28863,
+      "path": "metric_points.jsonl",
+      "records": 112,
+      "sha256": "sha256:4ad4bdb3e3f185a963b68ce0104cb6ad572771e251496e81258cf9e77d39efed"
+    }
+  ],
+  "policy": {
+    "sha256": "sha256:95bc4b07388fb04c9e3a8b0ee7faf8cdeefa5d309c069f540d446d24f4609b4e",
+    "version": 1
+  },
+  "raw_sha256": {
+    "logs": "sha256:7d454ba3b8f484335b10251bea87f9ba31978092ccf2594acb931760ba87db8b",
+    "metrics": "sha256:e7ad93f3149f25aa11d2b0ad17b2e1f2f89c8785d7cb52176abb1a31dde0ff7f",
+    "traces": "sha256:490b878c07561c1819e671c84bff6ec82544e7a0b0a1a97c04cc58b0330c9a1e"
+  },
+  "removed": {
+    "X1": {
+      "traces": 56
+    },
+    "X5_event": {
+      "traces": 28
+    }
+  },
+  "removed_detail": {
+    "X1": {
+      "traces": {
+        "by_minute": {
+          "2000-01-01T00:00": 2,
+          "2000-01-01T00:01": 2,
+          "2000-01-01T00:02": 2,
+          "2000-01-01T00:03": 2,
+          "2000-01-01T00:04": 2,
+          "2000-01-01T00:05": 2,
+          "2000-01-01T00:06": 2,
+          "2000-01-01T00:07": 2,
+          "2000-01-01T00:08": 2,
+          "2000-01-01T00:09": 2,
+          "2000-01-01T00:10": 2,
+          "2000-01-01T00:11": 2,
+          "2000-01-01T00:12": 2,
+          "2000-01-01T00:13": 2,
+          "2000-01-01T00:14": 2,
+          "2000-01-01T00:15": 2,
+          "2000-01-01T00:16": 2,
+          "2000-01-01T00:17": 2,
+          "2000-01-01T00:18": 2,
+          "2000-01-01T00:19": 2,
+          "2000-01-01T00:20": 2,
+          "2000-01-01T00:21": 2,
+          "2000-01-01T00:22": 2,
+          "2000-01-01T00:23": 2,
+          "2000-01-01T00:24": 2,
+          "2000-01-01T00:25": 2,
+          "2000-01-01T00:26": 2,
+          "2000-01-01T00:27": 2
+        },
+        "by_service": {
+          "load-generator": 56
+        }
+      }
+    },
+    "X5_event": {
+      "traces": {
+        "by_minute": {
+          "2000-01-01T00:00": 1,
+          "2000-01-01T00:01": 1,
+          "2000-01-01T00:02": 1,
+          "2000-01-01T00:03": 1,
+          "2000-01-01T00:04": 1,
+          "2000-01-01T00:05": 1,
+          "2000-01-01T00:06": 1,
+          "2000-01-01T00:07": 1,
+          "2000-01-01T00:08": 1,
+          "2000-01-01T00:09": 1,
+          "2000-01-01T00:10": 1,
+          "2000-01-01T00:11": 1,
+          "2000-01-01T00:12": 1,
+          "2000-01-01T00:13": 1,
+          "2000-01-01T00:14": 1,
+          "2000-01-01T00:15": 1,
+          "2000-01-01T00:16": 1,
+          "2000-01-01T00:17": 1,
+          "2000-01-01T00:18": 1,
+          "2000-01-01T00:19": 1,
+          "2000-01-01T00:20": 1,
+          "2000-01-01T00:21": 1,
+          "2000-01-01T00:22": 1,
+          "2000-01-01T00:23": 1,
+          "2000-01-01T00:24": 1,
+          "2000-01-01T00:25": 1,
+          "2000-01-01T00:26": 1,
+          "2000-01-01T00:27": 1
+        },
+        "by_service": {
+          "payment": 28
+        }
+      }
+    }
+  },
+  "report_version": 1,
+  "signals": {
+    "logs": {
+      "duplicates": 0,
+      "kept": 38,
+      "raw_items": 38
+    },
+    "metrics": {
+      "duplicates": 0,
+      "kept": 112,
+      "raw_items": 112
+    },
+    "traces": {
+      "duplicates": 0,
+      "kept": 280,
+      "raw_items": 336
+    }
+  },
+  "tokens_deleted": {},
+  "unknown_services": {},
+  "value_fixes": {},
+  "window": {
+    "clock_offsets": [
+      0.0,
+      0.0
+    ],
+    "data_ns": [
+      946684800000000000,
+      946686480000000000
+    ],
+    "host": [
+      "2000-01-01T00:00:00Z",
+      "2000-01-01T00:28:00Z"
+    ]
+  }
+}

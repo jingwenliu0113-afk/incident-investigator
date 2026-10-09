@@ -1,0 +1,65 @@
+{
+  "canonical_schema": "ctel/1",
+  "content_sha256": "sha256:cfbcdf05bc6afd4b2b1695944228cd22b681dc8a31a08d0ea3501ddb088b55a4",
+  "files": [
+    {
+      "bytes": 1403,
+      "path": "resources.jsonl",
+      "records": 8,
+      "sha256": "sha256:27d1c4d9df81bca3e3eafa993cf525ae9a122a6993223a3748efd23fd76cb6f0"
+    },
+    {
+      "bytes": 185826,
+      "path": "spans.jsonl",
+      "records": 280,
+      "sha256": "sha256:dc86430daec8c5951bbf7cf57b611aab3cf4cdca552c433d149687a333ec5a87"
+    },
+    {
+      "bytes": 18894,
+      "path": "logs.jsonl",
+      "records": 38,
+      "sha256": "sha256:d4685c1ae2656a4d463172f4ea262fbd0bc130e9752806c5bd932933e1171a24"
+    },
+    {
+      "bytes": 1240,
+      "path": "metric_series.jsonl",
+      "records": 4,
+      "sha256": "sha256:b085735a5e1e6e25cb2f06d6e40924fe3d674b6ac7fe716eb7e4de783f81ac43"
+    },
+    {
+      "bytes": 28863,
+      "path": "metric_points.jsonl",
+      "records": 112,
+      "sha256": "sha256:4ad4bdb3e3f185a963b68ce0104cb6ad572771e251496e81258cf9e77d39efed"
+    }
+  ],
+  "policy": {
+    "sha256": "sha256:95bc4b07388fb04c9e3a8b0ee7faf8cdeefa5d309c069f540d446d24f4609b4e",
+    "version": 1
+  },
+  "services": [
+    "accounting",
+    "ad",
+    "astronomy-db",
+    "cart",
+    "checkout",
+    "currency",
+    "email",
+    "fraud-detection",
+    "frontend",
+    "frontend-proxy",
+    "image-provider",
+    "kafka",
+    "payment",
+    "product-catalog",
+    "quote",
+    "recommendation",
+    "shipping",
+    "valkey-cart"
+  ],
+  "snapshot_version": 1,
+  "window": {
+    "end_ns": 946686480000000000,
+    "start_ns": 946684800000000000
+  }
+}

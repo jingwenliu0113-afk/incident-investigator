@@ -74,6 +74,11 @@
   方法的 `run.lock` 存在時拒絕評分；transcript 先寫、prediction 最後寫；`up_at` 在 run 任何可能失敗的步驟之前記錄。
   **freeze 之前要使用者決定**（026「待使用者決定」，程式行為不變）：(1) 待人處理的 slot 如何解除（現在一個卡住的 slot 就讓清單永遠寫不出來，
   估計約 55% 會發生）；(2) freeze 之後的修正路徑（現在 023 §6 的 bug 修正與使用者決定 6 的排除在 freeze 後都做不到）；(3) 是否要 held-out 撤回。測試 847 passed。
+- **合成範例與 2 分鐘 demo（decision 027；分支 `synthetic-sample`，從 `heldout-protocol` 分出，與它一樣等 Pilot loop 結束、main checkout 閒置後才合併）**：
+  `uv run python -m collect sample --out data/samples/synthetic` 以程式產生 raw、經真正的 normalize 寫出 `INC-000` / `RG-000`（28 分鐘、280 spans、
+  38 logs、112 metric points、全部約 248 KB；snapshot 與 ground truth 分開），`uv run python -m eval demo` 只讀範例、印出分層分數並聲明不是結果。
+  真實 snapshot 永不進 git：hygiene 測試要求 `data/samples/` 下每個檔案都以相同 sha256 列在 `synthetic: true` 的 `sample.json`。
+  id 用 `INC-000` 而不是 `INC-SAMPLE`（schema 只接受數字 id；000 永遠不會分配給收集到的 run）。測試 871 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成

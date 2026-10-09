@@ -44,6 +44,16 @@ locked OTel Demo stack ──flagd fault──> run group（warm-up → 穩定�
 Label 欄位（`schemas/incident_label.schema.json`）：fault_type / fault_family（封閉用詞）、origin_service、affected_services、
 user_symptom、fault_start / fault_end、traffic_profile、seed、telemetry_coverage。
 
+**範例（合成資料，decision 027）**：[`data/samples/synthetic/`](data/samples/synthetic/) 是程式產生的 incident `INC-000`，**不是收集到的資料**：
+產生的 raw OTLP JSON 經過真正的 normalize，得到與上表相同的兩棵樹（`incidents/INC-000/normalized/` 與 `ground_truth/`），
+另有統計 baseline 的範例預測與 `sample.json`（`synthetic: true`、每個檔案的 sha256）。真實 incident 的 snapshot 永遠不進 git。
+
+**2 分鐘 demo**（只讀合成範例、不寫檔；印出的分數來自合成資料，**不是結果**）：
+
+```bash
+uv run python -m eval demo
+```
+
 ## 評分
 
 - 分層、不合成一個數字：**fault_type、origin_top1、affected_f1、symptom_exact**（主要），加上 family、top-3、RR、precision / recall（decision 013）。
@@ -124,4 +134,4 @@ uv run python -m collect status --set heldout
 ## Repo
 
 `env/`（版本鎖定、soak）、`collect/`（收集、normalize、label、review）、`eval/`（評分、leakage、relevance、失敗分類、比較）、
-`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`docs/decisions/`（001–026）、`docs/heldout/`（held-out 的 plan、slot 清單、freeze 紀錄；Pilot 後才產生）、`tests/`。
+`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`data/samples/`（只有合成範例）、`docs/decisions/`（001–027）、`docs/heldout/`（held-out 的 plan、slot 清單、freeze 紀錄；Pilot 後才產生）、`tests/`。
