@@ -14,6 +14,7 @@ import json
 import os
 import shutil
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from collect.layout import DataLayout
@@ -21,7 +22,10 @@ from collect.layout import DataLayout
 GENERATOR = {"name": "collect.sample", "version": 1}
 SAMPLE_DIR = Path("data/samples/synthetic")
 SAMPLE_FILE = "sample.json"
-INCIDENT, RUN_GROUP = "INC-000", "RG-000"  # collect.rungroup.next_id starts at 001: 000 never names a collected run
+OS_FILES = frozenset({".DS_Store"})  # what Finder writes into any folder it opens; gitignored, never part of a sample
+# next_id starts at 001, so 000 never names a collected run group or incident; collect calibrate also writes its soak
+# snapshots (no fault, in no set, under data/external/calibration/) as INC-000, so the id alone does not mean synthetic
+INCIDENT, RUN_GROUP = "INC-000", "RG-000"
 SEED = 0
 WINDOW = ("2000-01-01T00:00:00Z", "2000-01-01T00:28:00Z")  # a date no collection has; data clock = host clock
 FAULT_ON, FAULT_OFF = "2000-01-01T00:12:00Z", "2000-01-01T00:22:00Z"  # 12 normal, 10 fault, 6 recovery minutes
@@ -68,27 +72,37 @@ def _start_ns() -> int:
     return host_to_data_ns(WINDOW[0], 0.0)
 
 
+# Span attribute keys are the ones each service sends in real soaks (the frozen policy's attribute_key_inventory, decision
+# 027 §4): Envoy's http.* tags at frontend-proxy, rpc.system.name at checkout / product-catalog, grpc.* at cart (.NET),
+# rpc.system / rpc.service at payment. The only key real snapshots lack is the deployment.environment.name marker.
+_ENVOY = "http://frontend-proxy:8080"
+
+
 def _browse(minute: int) -> tuple:
     """(service, name, OTLP kind, attributes, self time ms, children): one product page."""
     product = ("OLJCESPC7Z", "66VCHSJNUP", "1YMWWN1N4O", "L9ECAV7KIM")[minute % 4]
     return ("load-generator", "GET", 3, {}, 1, [
-        ("frontend-proxy", "ingress", 2, {"http.request.method": "GET", "url.path": f"/api/products/{product}"}, 1, [
-            ("frontend", "GET /api/products/[productId]", 2, {"http.request.method": "GET"}, 6, [
+        ("frontend-proxy", "ingress", 2, {"http.method": "GET", "http.url": f"{_ENVOY}/api/products/{product}"}, 1, [
+            ("frontend", "GET /api/products/[productId]", 2,
+             {"http.request.method": "GET", "url.path": f"/api/products/{product}"}, 6, [
                 ("product-catalog", "oteldemo.ProductCatalogService/GetProduct", 2,
-                 {"rpc.service": "oteldemo.ProductCatalogService", "rpc.method": "GetProduct"}, 2, [])])])])
+                 {"rpc.system.name": "grpc", "rpc.method": "oteldemo.ProductCatalogService/GetProduct"}, 2, [])])])])
 
 
 def _checkout(fault: bool) -> tuple:
     """One order: while the fault is on, payment refuses the charge and the error climbs to the edge."""
-    grpc = {"rpc.system": "grpc"}
+    def go(method: str) -> dict:
+        return {"rpc.system.name": "grpc", "rpc.method": method}
+
     return ("load-generator", "POST", 3, {}, 1, [
-        ("frontend-proxy", "ingress", 2, {"http.request.method": "POST", "url.path": "/api/checkout"}, 1, [
-            ("frontend", "POST /api/checkout", 2, {"http.request.method": "POST"}, 6, [
-                ("checkout", "oteldemo.CheckoutService/PlaceOrder", 2, {**grpc, "rpc.service": "oteldemo.CheckoutService"}, 3, [
-                    ("checkout", "oteldemo.CartService/GetCart", 3, {**grpc, "rpc.service": "oteldemo.CartService"}, 1, [
-                        ("cart", "oteldemo.CartService/GetCart", 2, {**grpc, "rpc.service": "oteldemo.CartService"}, 2, [])]),
-                    ("checkout", "oteldemo.PaymentService/Charge", 3, {**grpc, "rpc.service": "oteldemo.PaymentService"}, 1, [
-                        ("payment", "oteldemo.PaymentService/Charge", 2, {**grpc, "rpc.service": "oteldemo.PaymentService"},
+        ("frontend-proxy", "ingress", 2, {"http.method": "POST", "http.url": f"{_ENVOY}/api/checkout"}, 1, [
+            ("frontend", "POST /api/checkout", 2, {"http.request.method": "POST", "url.path": "/api/checkout"}, 6, [
+                ("checkout", "oteldemo.CheckoutService/PlaceOrder", 2, go("oteldemo.CheckoutService/PlaceOrder"), 3, [
+                    ("checkout", "oteldemo.CartService/GetCart", 3, go("oteldemo.CartService/GetCart"), 1, [
+                        ("cart", "oteldemo.CartService/GetCart", 2, {"grpc.method": "/oteldemo.CartService/GetCart"}, 2, [])]),
+                    ("checkout", "oteldemo.PaymentService/Charge", 3, go("oteldemo.PaymentService/Charge"), 1, [
+                        ("payment", "oteldemo.PaymentService/Charge", 2,
+                         {"rpc.system": "grpc", "rpc.service": "oteldemo.PaymentService", "rpc.method": "Charge"},
                          1 if fault else 4, [])])])])])])
 
 
@@ -114,6 +128,8 @@ def _build(node: tuple, trace: str, path: str, start: int, parent: str | None, f
     end = cursor + self_ms * MS + _pick(0, self_ms * MS // 3, trace, path, "self")
     if kind == 2 and "http.request.method" in attrs:
         attrs = {**attrs, "http.response.status_code": 500 if failed else 200}
+    elif kind == 2 and "http.method" in attrs:  # Envoy's tags are strings
+        attrs = {**attrs, "http.status_code": "500" if failed else "200"}
     span = {"traceId": trace, "spanId": span_id, "name": name, "kind": kind, "startTimeUnixNano": str(start),
             "endTimeUnixNano": str(end), "attributes": _kv(attrs), "status": _status(service, kind, failed)}
     if parent:
@@ -229,7 +245,13 @@ README = """# SYNTHETIC sample — 合成範例，不是收集到的 incident
   處理產生的 raw OTLP JSON 得到；28 分鐘時間窗，00:12–00:22 payment 的 Charge 全部失敗（模仿 paymentFailure 100%）。
 - `ground_truth/`：label（catalog，decision 016 的登錄項目）、injection、normalize report；與 snapshot 物理隔離。
 - `predictions/stat-anomaly/INC-000.json`：統計 baseline 在本範例上的預測（latency_s 設為 null，因為它不可重現）。
-- `sample.json`：`synthetic: true`，列出每個檔案的 sha256；`INC-000` / `RG-000` 是保留給範例的 id，收集永遠不會用到。
+- `sample.json`：`synthetic: true`，列出每個檔案的 sha256。`next_id` 從 001 開始，不會把 `INC-000` / `RG-000` 分配給收集到的
+  run group 或 incident；但 `collect calibrate` 也把 soak 的 snapshot（沒有 fault、不屬於任何 set）寫成 `INC-000`，所以 id 本身不代表合成，
+  合成由本目錄、`sample.json`、2000-01-01 的時間窗與 resource 上的 `synthetic-sample` 標記表明。
+
+只有 agent 可讀的 `normalized/` 與 ground truth 的一部分（injection、catalog label、normalize report）；正式 incident 另有的
+`manifest.json`、`run.json` 與 harness 取樣、`label.reviewed.json` / `label_review.json`、`leakage_audit.json`、evidence gold 這裡都沒有
+（demo 在記憶體裡跑 leakage audit，不寫檔）。
 
 重新產生（測試會比對每個 byte）：`uv run python -m collect sample --out data/samples/synthetic --replace`
 2 分鐘 demo：`uv run python -m eval demo`
@@ -293,24 +315,65 @@ def is_sample(root: Path) -> bool:
     return manifest.get("synthetic") is True and (manifest.get("generator") or {}).get("name") == GENERATOR["name"]
 
 
-def generate(out: Path, *, replace: bool = False) -> dict:
-    """Write the sample to `out`. An existing `out` is refused, unless `replace` and it is a sample this generator wrote;
-    the new sample is complete before the old one is removed."""
-    out = Path(out)
+def unlisted_files(root: Path) -> list[str]:
+    """Files under `root` that its sample.json does not list (besides sample.json and what Finder writes)."""
+    root = Path(root)
+    listed = {e.get("path") for e in json.loads((root / SAMPLE_FILE).read_text()).get("files", [])} | {SAMPLE_FILE}
+    return sorted(rel for p in root.rglob("*") if p.is_file() and p.name not in OS_FILES
+                  and (rel := p.relative_to(root).as_posix()) not in listed)
+
+
+def _fold(parts) -> list[str]:
+    return [unicodedata.normalize("NFC", part).casefold() for part in parts]
+
+
+def inside(path: Path, root: Path) -> bool:
+    """Is `path` the directory `root` or under it, however it is spelled? resolve() follows links but keeps case, and APFS
+    ignores case (data/EXTERNAL is data/external), so names are compared case- and normalization-insensitively (refused on
+    a case-sensitive file system too: conservative) and, from the nearest existing directories, by inode (firmlinks)."""
+    path, root = Path(path).resolve(), Path(root).resolve()
+    if _fold(path.parts)[:len(root.parts)] == _fold(root.parts):
+        return True
+    anchor = next(p for p in (root, *root.parents) if p.exists())
+    below = _fold(root.parts[len(anchor.parts):])
+    return any(p.exists() and os.path.samefile(p, anchor) and _fold(path.parts[len(p.parts):])[:len(below)] == below
+               for p in (path, *path.parents))
+
+
+def generate(out: Path, *, replace: bool = False, project_dir: Path | None = None) -> dict:
+    """Write the sample to `out`, never in `project_dir`/data/external (decision 027). An existing `out` is refused,
+    unless `replace`, it is a sample this generator wrote and it holds only the files its manifest lists. Fail closed:
+    the old sample is moved aside, the complete new one moved in, and the old one is put back if that fails."""
+    if project_dir is None:
+        from env.lock import PROJECT_DIR
+
+        project_dir = PROJECT_DIR
+    out, formal = Path(out), Path(project_dir) / "data" / "external"
+    if inside(out, formal):
+        raise PermissionError(f"the synthetic sample must be outside {formal.resolve()} (it is never part of any set)")
     if out.exists() and not (replace and is_sample(out)):
         raise FileExistsError(f"{out} exists" + (" and is not a sample written by collect.sample" if replace else
                                                  " (pass replace to regenerate a sample)"))
+    if out.exists() and (unlisted := unlisted_files(out)):
+        raise FileExistsError(f"{out} holds files not listed in its {SAMPLE_FILE}, which a replace would delete: {unlisted}")
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.parent / f".{out.name}.tmp-{os.getpid()}"
-    if tmp.exists():  # an unfinished attempt of this process
-        shutil.rmtree(tmp)
+    tmp, old = (out.parent / f".{out.name}.{what}-{os.getpid()}" for what in ("tmp", "old"))
+    for leftover in (tmp, old):  # an unfinished attempt of this process
+        if leftover.exists():
+            shutil.rmtree(leftover)
+    moved = False
     try:
         tmp.mkdir()
         _write(tmp)
         if out.exists():
-            shutil.rmtree(out)
+            os.replace(out, old)
+            moved = True
         os.replace(tmp, out)
     except BaseException:
+        if moved and not out.exists():
+            os.replace(old, out)
         shutil.rmtree(tmp, ignore_errors=True)
         raise
+    if moved:
+        shutil.rmtree(old)
     return json.loads((out / SAMPLE_FILE).read_text())

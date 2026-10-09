@@ -76,9 +76,16 @@
   估計約 55% 會發生）；(2) freeze 之後的修正路徑（現在 023 §6 的 bug 修正與使用者決定 6 的排除在 freeze 後都做不到）；(3) 是否要 held-out 撤回。測試 847 passed。
 - **合成範例與 2 分鐘 demo（decision 027；分支 `synthetic-sample`，從 `heldout-protocol` 分出，與它一樣等 Pilot loop 結束、main checkout 閒置後才合併）**：
   `uv run python -m collect sample --out data/samples/synthetic` 以程式產生 raw、經真正的 normalize 寫出 `INC-000` / `RG-000`（28 分鐘、280 spans、
-  38 logs、112 metric points、全部約 248 KB；snapshot 與 ground truth 分開），`uv run python -m eval demo` 只讀範例、印出分層分數並聲明不是結果。
-  真實 snapshot 永不進 git：hygiene 測試要求 `data/samples/` 下每個檔案都以相同 sha256 列在 `synthetic: true` 的 `sample.json`。
-  id 用 `INC-000` 而不是 `INC-SAMPLE`（schema 只接受數字 id；000 永遠不會分配給收集到的 run）。測試 871 passed。
+  38 logs、112 metric points、全部約 250 KB；snapshot 與 ground truth 的一部分分開），`uv run python -m eval demo` 只讀範例、在記憶體裡跑
+  leakage audit、印出分層分數並聲明不是結果（表頭也標明）。
+  真實 snapshot 永不進 git：hygiene 測試只接受 `data/samples/synthetic/` 一個目錄（測試逐 byte 重產比對的那個），每個檔案以相同 sha256 列在
+  `synthetic: true`、產生器 `collect.sample` 的 `sample.json`，內容只能出現 `INC-000` / `RG-000`。
+  id 用 `INC-000` 而不是 `INC-SAMPLE`（schema 只接受數字 id；`next_id` 從不給 000）；但 `collect calibrate` 的 soak snapshot 也叫 `INC-000`，
+  id 本身不代表合成。
+  **027 修訂 1（程式審查後，2026-10-10）**：span 屬性改用真實 soak 的 key（範例唯一的新 key 是 `deployment.environment.name` 標記）；
+  `generate()` 自己拒絕任何拼法的 `data/external`（macOS 不分大小寫、symlink、firmlink）；`--replace` 先把舊範例移開、失敗換回，
+  目錄有未列出的檔案就拒絕；`incidents_in` 遇到 `RG-000` / `INC-000` 直接拒絕（範例 injection 寫 `split: pilot`）；`.DS_Store` 不會讓 demo 失敗。
+  測試 895 passed。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成

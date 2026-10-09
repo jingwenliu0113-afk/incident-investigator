@@ -1,9 +1,10 @@
 """The 2-minute demo (decision 027): the statistical baseline on the SYNTHETIC sample, scored layer by layer.
 
 It runs only on a sample whose sample.json says synthetic: true and lists every file with its exact sha256, then follows
-the real order: open the frozen snapshot, predict, and only then read the label to score (decision 013), evidence
-existence and weak relevance (decision 017) and the failure category (decision 022). Nothing is written. The numbers come
-from one generated incident with an obvious fault: they are not results.
+the scoring path's order: open the frozen snapshot, predict, and only then read the label for the leakage audit (decision
+015, in memory; lexicon hits refuse the sample as the runner excludes such an incident), the layered scores (decision 013),
+evidence existence and weak relevance (decision 017) and the failure category (decision 022). Nothing is written. The
+numbers come from one generated incident with an obvious fault: they are not results.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ import time
 from pathlib import Path
 
 from collect.layout import DataLayout
-from collect.sample import PREDICTION, SAMPLE_FILE
+from collect.sample import OS_FILES, PREDICTION, SAMPLE_FILE
 
 BANNER = "SYNTHETIC SAMPLE: generated data, not a collected incident. These numbers are not results."
 FOOTER = ("SYNTHETIC: one generated incident with an obvious fault, so the scores say nothing about any method; "
@@ -41,7 +42,7 @@ def check_sample(root: Path) -> dict:
     for path, digest in sorted(listed.items()):
         if not (root / path).is_file() or sha256_path(root / path) != digest:
             raise ValueError(f"{path}: missing or its sha256 differs from {SAMPLE_FILE} (regenerate the sample)")
-    present = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} - {SAMPLE_FILE}
+    present = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file() and p.name not in OS_FILES} - {SAMPLE_FILE}
     if unlisted := sorted(present - set(listed)):
         raise ValueError(f"files not listed in {SAMPLE_FILE}: {unlisted}")
     return manifest
@@ -52,6 +53,7 @@ def run_demo(root: Path) -> dict:
     from collect.snapshot import open_snapshot
     from eval.evidence import existence
     from eval.failures import classify
+    from eval.leakage import audit
     from eval.relevance import weak_score
     from eval.score import check_prediction, score_incident
 
@@ -64,13 +66,17 @@ def run_demo(root: Path) -> dict:
     if problems := check_prediction(pred):
         raise ValueError(f"the baseline wrote an invalid prediction: {problems[:5]}")
     label = json.loads(layout.label_path(inc).read_text())  # read only once the prediction exists (decision 013)
-    offset = json.loads(layout.normalize_report_path(inc).read_text())["window"]["clock_offsets"][0]
+    report = json.loads(layout.normalize_report_path(inc).read_text())
+    offset = report["window"]["clock_offsets"][0]
+    leakage = audit(snapshot, label, clock_offset_s=offset, new_attribute_keys=report.get("new_attribute_keys"))
+    if leakage["lexicon_hits"]:  # the runner keeps such an incident out of every score (decision 015)
+        raise ValueError(f"the sample's leakage audit has lexicon_hits={leakage['lexicon_hits']}: it is scored nowhere")
     scores = score_incident(pred, label)
     example = json.loads((root / PREDICTION).read_text())
     return {"synthetic": True, "sample": manifest, "incident_id": inc, "method": dict(METHOD),
             "window_minutes": (snapshot.window["end_ns"] - snapshot.window["start_ns"]) / 60e9,
             "records": {f["path"]: f["records"] for f in snapshot.meta["files"]},
-            "prediction": pred, "label": label, "scores": scores,
+            "prediction": pred, "label": label, "leakage": leakage, "scores": scores,
             "evidence": {"existence": existence(pred["evidence"], snapshot),
                          "weak": weak_score(pred["evidence"], snapshot, label, clock_offset_s=offset)},
             "failure": classify(pred, label, scores, None, snapshot, clock_offset_s=offset),
@@ -99,7 +105,10 @@ def demo_text(result: dict, shown_root: str) -> str:
              f"label:      fault {label['injected_fault']['fault_type']}; origin {label['origin_service']}; "
              f"affected {', '.join(label['affected_services'])}; symptom {', '.join(label['user_symptom']['kinds'])} "
              f"(synthetic, {label['labeling']['method']})",
-             "", "| layer | metric | value |", "|---|---|---:|"]
+             "", "| layer | metric | value (SYNTHETIC sample, not a result) |", "|---|---|---:|"]
+    leak = result["leakage"]
+    lines += [f"| leakage audit | difficulty (decision 015) | {leak['difficulty']} |",
+              f"| leakage audit | lexicon hits | {leak['lexicon_hits']} |"]
     for metric, value in result["scores"].items():
         if metric in LAYERS:
             lines.append(f"| {LAYERS[metric]} | {metric}{' (main)' if metric in MAIN_METRICS else ''} | {_num(value)} |")

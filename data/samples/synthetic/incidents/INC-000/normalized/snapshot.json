@@ -1,6 +1,6 @@
 {
   "canonical_schema": "ctel/1",
-  "content_sha256": "sha256:cfbcdf05bc6afd4b2b1695944228cd22b681dc8a31a08d0ea3501ddb088b55a4",
+  "content_sha256": "sha256:d415bb4bd704086b2578c3241e86bd27e025a915c42fc61d634abf80cb0099e9",
   "files": [
     {
       "bytes": 1403,
@@ -9,28 +9,28 @@
       "sha256": "sha256:27d1c4d9df81bca3e3eafa993cf525ae9a122a6993223a3748efd23fd76cb6f0"
     },
     {
-      "bytes": 185826,
+      "bytes": 189886,
       "path": "spans.jsonl",
       "records": 280,
-      "sha256": "sha256:dc86430daec8c5951bbf7cf57b611aab3cf4cdca552c433d149687a333ec5a87"
+      "sha256": "sha256:e21200192f33c68bb9a678137e4d44393e129ed6115bdc29c90bf88a1bc936f9"
     },
     {
       "bytes": 18894,
       "path": "logs.jsonl",
       "records": 38,
-      "sha256": "sha256:d4685c1ae2656a4d463172f4ea262fbd0bc130e9752806c5bd932933e1171a24"
+      "sha256": "sha256:1699e683b71ab6a6712517e86188383e51ad866334a45c506fb28176497fb056"
     },
     {
       "bytes": 1240,
       "path": "metric_series.jsonl",
       "records": 4,
-      "sha256": "sha256:b085735a5e1e6e25cb2f06d6e40924fe3d674b6ac7fe716eb7e4de783f81ac43"
+      "sha256": "sha256:3c0bcfe630dd4af7526fdf388c16c41a9c65a85a752779c338675bea1afc8f54"
     },
     {
       "bytes": 28863,
       "path": "metric_points.jsonl",
       "records": 112,
-      "sha256": "sha256:4ad4bdb3e3f185a963b68ce0104cb6ad572771e251496e81258cf9e77d39efed"
+      "sha256": "sha256:9683dcee937e6ce45d01a6d362d301cad4ba9ac9f8f465b123c1036dcf37561c"
     }
   ],
   "policy": {

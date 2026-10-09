@@ -2,12 +2,15 @@
 
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from env.lock import PROJECT_DIR
+
+IDS = re.compile(r"\b(?:INC|RG)-[0-9]{3,}\b")
 
 MAX_TRACKED_BYTES = 1 << 20  # 1 MiB; small samples only
 SAMPLES = Path("data/samples")
@@ -93,49 +96,95 @@ def test_committed_heldout_files_describe_only_the_design():
         assert not ID.search(path.read_text()), f"{path} names an incident or run group"
 
 
-def test_data_samples_hold_only_the_synthetic_files_their_manifest_lists():
-    """decision 027: a real snapshot never enters git. Under data/samples/<name>/ there are only files that the sample's
-    sample.json (synthetic: true) lists with their exact sha256, and all samples together stay under 1 MiB."""
+def sample_problems() -> list[str]:
+    """decision 027 §6: data/samples/ holds one directory, data/samples/synthetic/ (the one tests/test_sample.py regenerates
+    and compares byte for byte), and in it only files that its sample.json (synthetic: true, generator collect.sample)
+    lists with their exact sha256 and that name no incident or run group but the sample's; 1 MiB at most in all."""
+    from collect.sample import GENERATOR, INCIDENT, RUN_GROUP, SAMPLE_DIR, SAMPLE_FILE
+
     files = [f for f in git("ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", str(SAMPLES)).stdout.split("\0")
              if f and (PROJECT_DIR / f).is_file()]
+    try:
+        manifest = json.loads((PROJECT_DIR / SAMPLE_DIR / SAMPLE_FILE).read_text())
+    except (OSError, ValueError):
+        manifest = None
     problems, total = [], 0
+    if files and manifest is None:
+        problems.append(f"{SAMPLE_DIR}/{SAMPLE_FILE} is missing or not JSON")
+    elif manifest is not None and manifest.get("synthetic") is not True:
+        problems.append(f"{SAMPLE_DIR}/{SAMPLE_FILE} does not say synthetic: true")
+    elif manifest is not None and (manifest.get("generator") or {}).get("name") != GENERATOR["name"]:
+        problems.append(f"{SAMPLE_DIR}/{SAMPLE_FILE} does not name the generator {GENERATOR['name']}")
+    listed = {e.get("path"): e.get("sha256") for e in (manifest or {}).get("files", [])}
     for f in files:
-        total += (PROJECT_DIR / f).stat().st_size
-        parts = Path(f).parts
-        if len(parts) < 4:
-            problems.append(f"{f}: not inside a sample directory data/samples/<name>/")
+        data = (PROJECT_DIR / f).read_bytes()
+        total += len(data)
+        if SAMPLE_DIR not in Path(f).parents:
+            problems.append(f"{f}: outside {SAMPLE_DIR}/, the only sample directory (decision 027)")
             continue
-        root = Path(*parts[:3])
-        try:
-            manifest = json.loads((PROJECT_DIR / root / "sample.json").read_text())
-        except (OSError, ValueError):
-            problems.append(f"{f}: {root}/sample.json is missing or not JSON")
-            continue
-        if manifest.get("synthetic") is not True:
-            problems.append(f"{f}: {root}/sample.json does not say synthetic: true")
-            continue
-        rel = Path(f).relative_to(root).as_posix()
-        listed = {e.get("path"): e.get("sha256") for e in manifest.get("files", [])}
-        digest = "sha256:" + hashlib.sha256((PROJECT_DIR / f).read_bytes()).hexdigest()
-        if rel != "sample.json" and listed.get(rel) != digest:
-            problems.append(f"{f}: not listed with this sha256 in {root}/sample.json")
-    assert not problems, "\n".join(problems)
-    assert total <= MAX_SAMPLES_BYTES, f"data/samples holds {total} bytes"
+        rel = Path(f).relative_to(SAMPLE_DIR).as_posix()
+        if rel != SAMPLE_FILE and listed.get(rel) != "sha256:" + hashlib.sha256(data).hexdigest():
+            problems.append(f"{f}: not listed with this sha256 in {SAMPLE_DIR}/{SAMPLE_FILE}")
+        if other := sorted(set(IDS.findall(f + "\n" + data.decode(errors="replace"))) - {INCIDENT, RUN_GROUP}):
+            problems.append(f"{f}: names {other}, not the sample's {INCIDENT} / {RUN_GROUP}")
+    if total > MAX_SAMPLES_BYTES:
+        problems.append(f"data/samples holds {total} bytes (at most {MAX_SAMPLES_BYTES})")
+    return problems
 
 
-def test_the_sample_manifest_check_refuses_an_unlisted_file(tmp_path, monkeypatch):
-    """The check above would catch a copied real snapshot (it is not listed in any synthetic manifest)."""
+def test_data_samples_hold_only_the_generated_synthetic_sample():
+    assert sample_problems() == []
+
+
+def _project(tmp_path, monkeypatch, files: dict[str, bytes], **manifest) -> Path:
+    """A scratch git checkout whose data/samples/ holds `files`, each listed with its sha256 in a sample.json that says
+    synthetic and names collect.sample unless `manifest` says otherwise; the check above then looks at it."""
     import test_repo_hygiene as me
 
     project = tmp_path / "p"
-    sample = project / "data/samples/synthetic"
-    sample.mkdir(parents=True)
+    project.mkdir()
     subprocess.run(["git", "init", "-q", str(project)], check=True)
-    (sample / "sample.json").write_text(json.dumps({"synthetic": True, "files": []}))
-    (project / "data/samples/INC-002").mkdir()  # a copied real incident: no synthetic manifest
-    (project / "data/samples/INC-002/spans.jsonl").write_text("{}\n")
-    (sample / "spans.jsonl").write_text("{}\n")
+    for path, data in files.items():
+        (project / path).parent.mkdir(parents=True, exist_ok=True)
+        (project / path).write_bytes(data)
+    listed = {}
+    for path, data in files.items():  # every file listed in the manifest of its own directory data/samples/<name>/
+        root = Path(*Path(path).parts[:3])
+        listed.setdefault(root, []).append({"path": Path(path).relative_to(root).as_posix(),
+                                            "sha256": "sha256:" + hashlib.sha256(data).hexdigest()})
+    for root, entries in listed.items():
+        doc = {"synthetic": True, "generator": {"name": "collect.sample", "version": 1}, "files": entries, **manifest}
+        (project / root / "sample.json").write_text(json.dumps(doc))
     monkeypatch.setattr(me, "PROJECT_DIR", project)
-    with pytest.raises(AssertionError) as e:
-        me.test_data_samples_hold_only_the_synthetic_files_their_manifest_lists()
-    assert "INC-002/sample.json is missing" in str(e.value) and "synthetic/spans.jsonl: not listed" in str(e.value)
+    return project
+
+
+LABEL = json.dumps({"incident_id": "INC-000", "run_group_id": "RG-000"}).encode()
+
+
+@pytest.mark.parametrize("files, manifest, problem", [
+    ({"data/samples/synthetic/ground_truth/incidents/INC-000/label.json": LABEL}, {}, None),
+    # a real incident copied in next to the sample, with a hand-written manifest of its own that says synthetic
+    ({"data/samples/real/ground_truth/incidents/INC-003/label.json": b'{"incident_id": "INC-003"}'}, {},
+     "outside data/samples/synthetic/"),
+    ({"data/samples/INC-002/spans.jsonl": b"{}\n"}, {}, "outside data/samples/synthetic/"),
+    ({"data/samples/synthetic/label.json": LABEL}, {"synthetic": False}, "does not say synthetic: true"),
+    ({"data/samples/synthetic/label.json": LABEL}, {"generator": {"name": "by-hand", "version": 1}},
+     "does not name the generator collect.sample"),
+    ({"data/samples/synthetic/ground_truth/incidents/INC-003/label.json": b'{"incident_id": "INC-003"}'}, {},
+     "names ['INC-003']"),
+    ({"data/samples/synthetic/spans.jsonl": b"x" * (MAX_SAMPLES_BYTES + 1)}, {}, "bytes (at most"),
+])
+def test_the_sample_check_refuses_anything_but_the_generated_sample(tmp_path, monkeypatch, files, manifest, problem):
+    _project(tmp_path, monkeypatch, files, **manifest)
+    problems = sample_problems()
+    assert problems == [] if problem is None else any(problem in p for p in problems), problems
+
+
+def test_the_sample_check_refuses_an_unlisted_file_and_a_missing_manifest(tmp_path, monkeypatch):
+    project = _project(tmp_path, monkeypatch, {"data/samples/synthetic/label.json": LABEL})
+    (project / "data/samples/synthetic/spans.jsonl").write_text("{}\n")
+    assert sample_problems() == ["data/samples/synthetic/spans.jsonl: not listed with this sha256 in "
+                                 "data/samples/synthetic/sample.json"]
+    (project / "data/samples/synthetic/sample.json").unlink()
+    assert "data/samples/synthetic/sample.json is missing or not JSON" in sample_problems()

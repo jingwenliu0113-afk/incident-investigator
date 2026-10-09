@@ -45,7 +45,9 @@ Label 欄位（`schemas/incident_label.schema.json`）：fault_type / fault_fami
 user_symptom、fault_start / fault_end、traffic_profile、seed、telemetry_coverage。
 
 **範例（合成資料，decision 027）**：[`data/samples/synthetic/`](data/samples/synthetic/) 是程式產生的 incident `INC-000`，**不是收集到的資料**：
-產生的 raw OTLP JSON 經過真正的 normalize，得到與上表相同的兩棵樹（`incidents/INC-000/normalized/` 與 `ground_truth/`），
+產生的 raw OTLP JSON 經過真正的 normalize，得到上表第一列完整的 `incidents/INC-000/normalized/`，以及 ground truth 的一部分
+（`ground_truth/run_groups/RG-000/injection.json`、`ground_truth/incidents/INC-000/` 的 catalog `label.json` 與 `normalize_report.json`）；
+上表其餘的檔案（`manifest.json`、`run.json` 與 harness 取樣、`label.reviewed.json` / `label_review.json`、`leakage_audit.json`、evidence gold）範例都沒有。
 另有統計 baseline 的範例預測與 `sample.json`（`synthetic: true`、每個檔案的 sha256）。真實 incident 的 snapshot 永遠不進 git。
 
 **2 分鐘 demo**（只讀合成範例、不寫檔；印出的分數來自合成資料，**不是結果**）：

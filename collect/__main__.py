@@ -228,16 +228,12 @@ SMOKE_MINUTES = {"normal": 10, "fault": 2, "recovery": 2}
 
 
 def _sample(ns: argparse.Namespace) -> int:
-    """decision 027: the synthetic sample goes anywhere but the formal data root."""
+    """decision 027: the synthetic sample goes anywhere but the formal data root (generate refuses it in any spelling)."""
     from collect.sample import generate
 
     out = ns.out.resolve()
-    formal = (PROJECT_DIR / "data" / "external").resolve()
-    if out == formal or formal in out.parents:
-        print(f"error: the synthetic sample must be outside {formal} (it is never part of any set)", file=sys.stderr)
-        return 2
     try:
-        manifest = generate(out, replace=ns.replace)
+        manifest = generate(out, replace=ns.replace, project_dir=PROJECT_DIR)
     except (FileExistsError, ValueError, PermissionError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
