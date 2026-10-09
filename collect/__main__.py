@@ -310,6 +310,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                                            "then leakage audit and the statistical baseline (run it without with-mac-lock)")
     lp.add_argument("--labeler", required=True, help="who writes the a priori labels, e.g. agent:claude-code")
     lp.add_argument("--max-runs", type=int, help="stop after this many run groups")
+    ack = sub.add_parser("ack-failures", help="decision 016 §5: record that a person looked at the failed run groups of a "
+                                              "fault, so it is collected again and its invalid attempts count anew")
+    ack.add_argument("--set", dest="split", required=True, choices=["pilot"])
+    ack.add_argument("--flag", required=True)
+    ack.add_argument("--variant", required=True)
+    ack.add_argument("--reason", required=True)
+    ack.add_argument("--decided-by", required=True, help="the person who looked, e.g. user")
     sta = sub.add_parser("status", help="decision 016: run groups and incidents of every planned fault of a set")
     sta.add_argument("--set", dest="split", required=True, choices=["pilot", "heldout"])
     nxt = sub.add_parser("next", help="the next planned fault to collect, as `--flag F --variant V` (nothing when complete)")
@@ -378,6 +385,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _heldout_progress(ns.command)
     if ns.command in ("heldout-plan", "heldout-freeze", "heldout-list"):
         return _heldout_writer(ns)
+    if ns.command == "ack-failures":
+        from datetime import UTC, datetime
+
+        from collect.pilot import acknowledge_failures
+
+        try:
+            out = acknowledge_failures(DataLayout(PROJECT_DIR / "data/external"), ns.split, ns.flag, ns.variant,
+                                       reason=ns.reason, decided_by=ns.decided_by,
+                                       now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        print(json.dumps(out, indent=2))
+        return 0
     if ns.command in ("status", "next"):
         from collect.pilot import next_planned, plan_status
 

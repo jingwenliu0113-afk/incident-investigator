@@ -57,6 +57,17 @@ def write_atomic(path: Path, content: dict | bytes) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def write_in_place(path: Path, content: dict | bytes) -> None:
+    """Rewrite `path` on the same inode (truncate, write, fsync): a watcher bound to the file keeps seeing it."""
+    data = content if isinstance(content, bytes) else (json.dumps(content, indent=2) + "\n").encode()
+    with Path(path).open("r+b") as f:
+        f.seek(0)
+        f.write(data)
+        f.truncate()
+        f.flush()
+        os.fsync(f.fileno())
+
+
 def check_context(flag: str) -> dict:
     return dict(_TARGETED.get(flag, {}))
 

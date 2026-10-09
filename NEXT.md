@@ -1,10 +1,16 @@
 # NEXT
 
-## 目前位置（2026-10-09 02:35Z，台北 10:35）
+## 目前位置（2026-10-09 08:05Z，台北 16:05）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集進行中（`collect pilot-loop`，高效能模式 + AC）。**
-- **Pilot 進度**：使用者決定正式收集改用高效能模式 + AC（decision 025 修訂 3）。RG-002（INC-001，自動模式開始）撤回並重收；
-  RG-002 的檔案保留，但不算 Pilot、不評分。迴圈從 paymentFailure 100% 重新開始，每個 fault 約 40–50 分鐘，全部約 7–8 小時。
+**Core 的工具鏈都已完成並測試；Pilot 正式收集暫停：intlShippingSlowdown 連續 3 次無效，等人看（A0）；heavy lock 目前被 rust-hnsw 的正式 benchmark 占用。**
+- **Pilot 有效 incident（高效能模式 + AC）**：INC-002 paymentFailure（RG-003）、INC-003 productCatalogFailure（RG-007）、INC-004 paymentUnreachable（RG-008）、
+  INC-005 cartFailure（RG-010；RG-009 無效）。RG-002（INC-001）撤回。剩 intlShippingSlowdown 與之後 5 個 fault。
+- **兩種失敗原因**：
+  1. **grafana 下載 plugin 逾時**（RG-004–006、RG-011、RG-012）：暖機前 aborted_unstable，只浪費約 5 分鐘、不影響資料；網路慢時發生（grafana.com 3–9 s）。
+  2. **fault 關閉沒生效**（RG-009 cartFailure、RG-013 intlShippingSlowdown，`flag_unconfirmed`）：開啟都在 0.1–0.7 s 內確認，關閉在 10 s 內沒確認；
+     RG-013 的 raw trace 顯示關閉寫入 105 秒後 shipping 仍有 10 秒延遲 → flagd 根本沒讀到關閉的設定，fault 延續到 recovery。判無效是對的（否則 label 錯）。
+     推測：harness 以「暫存檔 + rename」整檔替換 flag 檔，inode 改變，flagd v0.16 在 Docker Desktop bind mount 上偶爾失去對新檔的監看。
+     待驗證（要 Docker，等 heavy lock 空出再做，不干擾別人的正式 benchmark）：用單獨的 flagd container 比較 rename 與 in-place 寫入各 20 次切換。
 - **正式收集**：固定高效能模式 + AC 供電（decision 025 修訂 3；preflight 與時間窗內每分鐘取樣都檢查，不符就拒絕 / 判無效）。
   收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
 - **LLM 方法**：付費 API 由使用者決定先延後（A1）；程式已就緒。
@@ -201,6 +207,10 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
+0. **intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）→ 依規則由人看過才再收**。建議處理：
+   - fault 關閉沒生效是 harness 的 bug（flag 寫入方式），我會先用 probe 驗證，若 in-place 寫入可靠就改 harness（寫 decision；有效性規則不變：仍須 10 s 內確認）。
+   - grafana：Pilot 已有 4 個有效 incident 在現在的 env lock 下收集，**Pilot 期間不改 env lock**；網路好時重試。held-out freeze 前再決定是否關掉 grafana 的 plugin 下載（改 lock、新 soak）。
+   - 需要你：確認看過、同意 intlShippingSlowdown 在修好 harness 後重試（`collect ack-failures`）。
 1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
    scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
 2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）

@@ -104,3 +104,11 @@
 - leakage audit（decision 015）在 productCatalogFailure 預期會看到 "Error: Product Catalog Fail Enabled" 的殘留（decision 011 已接受）；
   adManualGc 若出現說出 fault 的字串，記錄為 policy 的缺口，在 held-out 之前以 policy v2 處理（policy v1 已凍結）。
 - 統計 baseline 的 fault_type 只對應 error_response / added_latency / cpu_saturation / memory_leak，在其他 fault 上 injected fault 層一定答錯；這是 baseline 的設計，不因 Pilot 結果修改（decision 014）。
+
+## 實作說明（2026-10-09）：「人看過再收」的紀錄
+
+- §5 / 009 §4 的「同一個 fault 連續 3 個 run group 無效 → 人看過 run record 才再收」：人看過之後以
+  `python -m collect ack-failures --set pilot --flag F --variant V --reason … --decided-by …` 記錄（ground-truth 側 `failure_acks.jsonl`，只附加）。
+  被確認過的失敗 run group 不再計入該 fault 的無效次數；之後若再連續 3 次無效，`collect next` 會再次停下等人。不刪除、不修改任何 run record。
+- 第一次使用：RG-004–006（productCatalogFailure on）都在暖機前 aborted_unstable，原因是 grafana 啟動時從 grafana.com 下載 plugin 逾時（網路慢）而一直重啟，
+  與 fault 無關；使用者換了網路並決定重試（2026-10-09 03:40Z 前後）。若仍失敗，回報使用者（另一選項是在 compose override 關掉 grafana 的 plugin 下載，需改 env lock 與新的 soak）。

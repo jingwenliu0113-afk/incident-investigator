@@ -149,6 +149,33 @@ def withdrawn(layout) -> dict[str, str]:
     return out
 
 
+ACKS = "failure_acks.jsonl"  # ground-truth side: a person looked at a fault's failed run groups (decision 016 §5)
+
+
+def _acknowledged(layout) -> set[str]:
+    path = layout.ground_truth_root / ACKS
+    return {rg for line in path.read_text().splitlines() if line.strip() for rg in json.loads(line)["run_groups"]} \
+        if path.exists() else set()
+
+
+def acknowledge_failures(layout, split: str, flag: str, variant: str, *, reason: str, decided_by: str, now: str) -> dict:
+    """Record that a person looked at the failed run groups of one fault (decision 016 §5 / 009 §4): the fault is
+    collected again and its invalid attempts count anew. Nothing is changed or deleted."""
+    entry = next((s for s in plan_status(layout, split) if (s["flag"], s["variant"]) == (flag, variant)), None)
+    if entry is None:
+        raise ValueError(f"{flag} {variant} is not on the {split} plan")
+    failed = [rg for rg, status in entry["run_groups"] if status != "valid" and rg not in entry["acknowledged"]]
+    if not failed:
+        raise ValueError(f"{flag} {variant}: no failed run group left to acknowledge")
+    record = {"split": split, "flag": flag, "variant": variant, "run_groups": failed, "reason": reason,
+              "decided_by": decided_by, "acknowledged_at": now}
+    path = layout.ground_truth_root / ACKS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+    return record
+
+
 def plan_status(layout, split: str) -> list[dict]:
     """Per planned fault, in plan order: its run groups (id, status), its usable incident, its excluded incidents and the
     power settings each valid run group was collected under (decision 025).
@@ -162,7 +189,7 @@ def plan_status(layout, split: str) -> list[dict]:
             power = ((r.get("provenance") or {}).get("machine") or {}).get("power")  # decision 025; None: not recorded
             runs.append((r["run_group_id"], r.get("status"), plan.get("flag"), plan.get("variant"), r.get("incident_ids") or [],
                          power))
-    out, withdrawals = [], withdrawn(layout)
+    out, withdrawals, acked = [], withdrawn(layout), _acknowledged(layout)
     for e in PLANS[split]:
         mine = [r for r in runs if (r[2], r[3]) == (e["flag"], e["variant"])]
         usable, excluded, gone = None, [], []
@@ -177,6 +204,7 @@ def plan_status(layout, split: str) -> list[dict]:
                     usable = inc
         out.append({"flag": e["flag"], "variant": e["variant"], "run_groups": [(r[0], r[1]) for r in mine],
                     "incident": usable, "excluded": excluded, "withdrawn": gone,
+                    "acknowledged": [r[0] for r in mine if r[0] in acked],
                     "power": {r[0]: r[5] for r in mine if r[1] == "valid"}})
     return out
 
@@ -188,7 +216,7 @@ def next_planned(layout, split: str) -> dict | None:
     for s in plan_status(layout, split):
         if s["incident"] is not None:
             continue
-        failed = [rg for rg, status in s["run_groups"] if status != "valid"]
+        failed = [rg for rg, status in s["run_groups"] if status != "valid" and rg not in s["acknowledged"]]
         if len(s["excluded"]) >= 2:
             raise RuntimeError(f"{s['flag']} {s['variant']}: the fault was not exercised in {s['excluded']}; "
                                "decision 016 §5 allows one recollection, a person decides what next")

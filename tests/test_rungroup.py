@@ -397,6 +397,31 @@ def test_verify_running_must_be_clean_before_the_warm_up(tmp_path, flag_path):
     assert flag_path.read_bytes() == original and stack.calls[-1] == ["down", "--volumes"]
 
 
+def test_the_flag_file_is_rewritten_in_place_and_again_when_flagd_missed_the_change(tmp_path, flag_path, monkeypatch):
+    # decision 009 revision 5: RG-009 / RG-013 lost the switch-off (flagd missed the renamed file). The file keeps its
+    # inode, and a change not served after REWRITE_AFTER_S is written once more; the 10 s confirmation rule is unchanged
+    import collect.rungroup as rg
+
+    clock = Clock()
+    stack = Stack(clock, flag_path)
+    inode, writes, real_write, real_ofrep = flag_path.stat().st_ino, [], rg.write_in_place, stack.ofrep
+
+    def write(path, content):
+        writes.append(clock.t)
+        real_write(path, content)
+
+    def ofrep(flag, ctx):  # flagd misses the first switch-off write and serves the fault until the file is written again
+        return ("100%", None) if len(writes) == 2 else real_ofrep(flag, ctx)
+
+    monkeypatch.setattr(rg, "write_in_place", write)
+    stack.ofrep = ofrep
+    rec = go(stack, clock, flag_path, tmp_path)
+    assert rec["status"] == "valid" and rec["flag"]["off"]["confirmed"]
+    assert rec["flag"]["on"]["writes"] == 1 and rec["flag"]["off"]["writes"] == 2 and len(writes) == 3
+    assert rg.REWRITE_AFTER_S <= rec["flag"]["off"]["latency_seconds"] < rg.Plan.confirm_timeout
+    assert flag_path.stat().st_ino == inode  # never replaced by a rename
+
+
 def test_unconfirmed_fault_off_invalidates_the_run(tmp_path, flag_path):
     clock = Clock()
     original = flag_path.read_bytes()
@@ -406,6 +431,8 @@ def test_unconfirmed_fault_off_invalidates_the_run(tmp_path, flag_path):
     assert rec["status"] == "invalid" and rec["reasons"] == ["flag_unconfirmed"]
     assert rec["flag"]["on"]["confirmed"] and not rec["flag"]["off"]["confirmed"]
     assert flag_path.read_bytes() == original and stack.calls[-1] == ["down", "--volumes"]
+    # what flagd served at every poll is kept, so a switch that did not take effect can be diagnosed
+    assert {q["served"] for q in rec["harness_flag_queries"]} == {"100%"} and len(rec["harness_flag_queries"]) > 3
 
 
 def test_a_broken_event_stream_invalidates_the_run(tmp_path, flag_path):
@@ -440,16 +467,18 @@ def test_a_failing_teardown_step_still_copies_raw_tears_down_and_keeps_the_recor
 
     clock = Clock()
     stack = Stack(clock, flag_path)
-    real_write = rg.write_atomic
     writes = []
 
-    def failing_write(path, content):
-        writes.append(content)
-        if len(writes) >= 2:  # fault on works; fault off and the teardown's restore hit ENOSPC
-            raise OSError(28, "No space left on device")
-        return real_write(path, content)
+    def failing(real):
+        def write(path, content):
+            writes.append(content)
+            if len(writes) >= 2:  # fault on works; fault off and the teardown's restore hit ENOSPC
+                raise OSError(28, "No space left on device")
+            return real(path, content)
+        return write
 
-    monkeypatch.setattr(rg, "write_atomic", failing_write)
+    monkeypatch.setattr(rg, "write_in_place", failing(rg.write_in_place))  # fault on / off
+    monkeypatch.setattr(rg, "write_atomic", failing(rg.write_atomic))  # the teardown's restore
     with pytest.raises(OSError) as info:
         go(stack, clock, flag_path, tmp_path)
     rec = info.value.run_record

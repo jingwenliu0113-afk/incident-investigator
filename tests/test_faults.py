@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from collect.faults import check_context, inject, ofrep_code, parse_ofrep, write_atomic
+from collect.faults import check_context, inject, ofrep_code, parse_ofrep, write_atomic, write_in_place
 from collect.records import canonical_json_sha256
 
 DOC = {"$schema": "https://flagd.dev/schema/v0/flags.json", "flags": {
@@ -66,3 +66,15 @@ def test_ofrep_check_code_and_response():
     assert parse_ofrep('{"key":"paymentFailure","value":1,"variant":"100%","reason":"STATIC"}') == ("100%", 1)
     with pytest.raises(ValueError):
         parse_ofrep('{"errorCode":"FLAG_NOT_FOUND"}')
+
+
+def test_write_in_place_keeps_the_inode_and_writes_exact_bytes(tmp_path):
+    # a file watcher bound to the file keeps seeing it: no rename, the same inode is truncated and rewritten
+    path = tmp_path / "demo.flagd.json"
+    path.write_text(json.dumps(DOC, indent=2) + "\n")
+    inode, original = path.stat().st_ino, path.read_bytes()
+    write_in_place(path, inject(DOC, "paymentFailure", "100%"))
+    assert path.stat().st_ino == inode and json.loads(path.read_text()) == inject(DOC, "paymentFailure", "100%")
+    write_in_place(path, original)
+    assert path.read_bytes() == original and path.stat().st_ino == inode
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["demo.flagd.json"]
