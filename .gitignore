@@ -1,6 +1,8 @@
 # Full telemetry, snapshots, ground truth and smoke-test dumps never go into git (SPEC Core §2).
 # Small shareable samples belong in data/samples/. tests/test_repo_hygiene.py guards this file.
 data/external/
+# Samples are synthetic and generated from code (decision 027): raw telemetry never goes in, not even under data/samples/
+data/samples/**/raw/
 
 # Upstream OTel Demo checkout used to run the pinned environment (re-fetched from the lock)
 env/upstream/

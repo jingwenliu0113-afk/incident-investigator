@@ -227,6 +227,21 @@ def _heldout_writer(ns: argparse.Namespace) -> int:
 SMOKE_MINUTES = {"normal": 10, "fault": 2, "recovery": 2}
 
 
+def _sample(ns: argparse.Namespace) -> int:
+    """decision 027: the synthetic sample goes anywhere but the formal data root (generate refuses it in any spelling)."""
+    from collect.sample import generate
+
+    out = ns.out.resolve()
+    try:
+        manifest = generate(out, replace=ns.replace, project_dir=PROJECT_DIR)
+    except (FileExistsError, ValueError, PermissionError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps({"out": str(out), "synthetic": manifest["synthetic"], "files": len(manifest["files"]),
+                      "bytes": sum(f["bytes"] for f in manifest["files"])}, indent=2))
+    return 0
+
+
 def _smoke(ns: argparse.Namespace) -> int:
     """A short non-formal run through the real stack and every later step, all under a scratch root."""
     root = ns.root.resolve()
@@ -339,6 +354,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     rev.add_argument("--incident", required=True)
     rev.add_argument("--file", type=Path, required=True, help="the filled label_review_todo.json")
     rev.add_argument("--reviewer", required=True, help="human:<name>")
+    smp = sub.add_parser("sample", help="decision 027: write the tiny SYNTHETIC sample (generated raw -> the real normalize, "
+                                        "a catalog label, the statistical baseline's prediction); never collected data")
+    smp.add_argument("--out", type=Path, required=True, help="e.g. data/samples/synthetic (never under data/external)")
+    smp.add_argument("--replace", action="store_true", help="regenerate over a sample that collect.sample wrote")
     ns = parser.parse_args(argv)
 
     if ns.command in INCIDENT_COMMANDS:
@@ -372,6 +391,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if ns.command == "smoke":
         return _smoke(ns)
+    if ns.command == "sample":
+        return _sample(ns)
     if ns.command == "pilot-loop":
         from collect.pilot_loop import pilot_loop
         from collect.provenance import power_facts

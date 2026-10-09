@@ -1,0 +1,238 @@
+{
+  "attribute_keys": {
+    "resources/cart": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/checkout": [
+      "container.name",
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/frontend": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/frontend-proxy": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/payment": [
+      "container.name",
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "resources/product-catalog": [
+      "deployment.environment.name",
+      "service.name"
+    ],
+    "traces/cart": [
+      "grpc.method"
+    ],
+    "traces/checkout": [
+      "rpc.method",
+      "rpc.system.name"
+    ],
+    "traces/frontend": [
+      "http.request.method",
+      "http.response.status_code",
+      "url.path"
+    ],
+    "traces/frontend-proxy": [
+      "http.method",
+      "http.status_code",
+      "http.url"
+    ],
+    "traces/payment": [
+      "rpc.method",
+      "rpc.service",
+      "rpc.system"
+    ],
+    "traces/product-catalog": [
+      "rpc.method",
+      "rpc.system.name"
+    ]
+  },
+  "code": null,
+  "content_sha256": "sha256:d415bb4bd704086b2578c3241e86bd27e025a915c42fc61d634abf80cb0099e9",
+  "new_attribute_keys": {
+    "resources/cart": [
+      "deployment.environment.name"
+    ],
+    "resources/checkout": [
+      "deployment.environment.name"
+    ],
+    "resources/frontend": [
+      "deployment.environment.name"
+    ],
+    "resources/frontend-proxy": [
+      "deployment.environment.name"
+    ],
+    "resources/payment": [
+      "deployment.environment.name"
+    ],
+    "resources/product-catalog": [
+      "deployment.environment.name"
+    ]
+  },
+  "outputs": [
+    {
+      "bytes": 1403,
+      "path": "resources.jsonl",
+      "records": 8,
+      "sha256": "sha256:27d1c4d9df81bca3e3eafa993cf525ae9a122a6993223a3748efd23fd76cb6f0"
+    },
+    {
+      "bytes": 189886,
+      "path": "spans.jsonl",
+      "records": 280,
+      "sha256": "sha256:e21200192f33c68bb9a678137e4d44393e129ed6115bdc29c90bf88a1bc936f9"
+    },
+    {
+      "bytes": 18894,
+      "path": "logs.jsonl",
+      "records": 38,
+      "sha256": "sha256:1699e683b71ab6a6712517e86188383e51ad866334a45c506fb28176497fb056"
+    },
+    {
+      "bytes": 1240,
+      "path": "metric_series.jsonl",
+      "records": 4,
+      "sha256": "sha256:3c0bcfe630dd4af7526fdf388c16c41a9c65a85a752779c338675bea1afc8f54"
+    },
+    {
+      "bytes": 28863,
+      "path": "metric_points.jsonl",
+      "records": 112,
+      "sha256": "sha256:9683dcee937e6ce45d01a6d362d301cad4ba9ac9f8f465b123c1036dcf37561c"
+    }
+  ],
+  "policy": {
+    "sha256": "sha256:95bc4b07388fb04c9e3a8b0ee7faf8cdeefa5d309c069f540d446d24f4609b4e",
+    "version": 1
+  },
+  "raw_sha256": {
+    "logs": "sha256:7d454ba3b8f484335b10251bea87f9ba31978092ccf2594acb931760ba87db8b",
+    "metrics": "sha256:e7ad93f3149f25aa11d2b0ad17b2e1f2f89c8785d7cb52176abb1a31dde0ff7f",
+    "traces": "sha256:ced2ce2237e29565f1994dcdd9a45c168846c1e9df2e3765e9d8d38013e991d1"
+  },
+  "removed": {
+    "X1": {
+      "traces": 56
+    },
+    "X5_event": {
+      "traces": 28
+    }
+  },
+  "removed_detail": {
+    "X1": {
+      "traces": {
+        "by_minute": {
+          "2000-01-01T00:00": 2,
+          "2000-01-01T00:01": 2,
+          "2000-01-01T00:02": 2,
+          "2000-01-01T00:03": 2,
+          "2000-01-01T00:04": 2,
+          "2000-01-01T00:05": 2,
+          "2000-01-01T00:06": 2,
+          "2000-01-01T00:07": 2,
+          "2000-01-01T00:08": 2,
+          "2000-01-01T00:09": 2,
+          "2000-01-01T00:10": 2,
+          "2000-01-01T00:11": 2,
+          "2000-01-01T00:12": 2,
+          "2000-01-01T00:13": 2,
+          "2000-01-01T00:14": 2,
+          "2000-01-01T00:15": 2,
+          "2000-01-01T00:16": 2,
+          "2000-01-01T00:17": 2,
+          "2000-01-01T00:18": 2,
+          "2000-01-01T00:19": 2,
+          "2000-01-01T00:20": 2,
+          "2000-01-01T00:21": 2,
+          "2000-01-01T00:22": 2,
+          "2000-01-01T00:23": 2,
+          "2000-01-01T00:24": 2,
+          "2000-01-01T00:25": 2,
+          "2000-01-01T00:26": 2,
+          "2000-01-01T00:27": 2
+        },
+        "by_service": {
+          "load-generator": 56
+        }
+      }
+    },
+    "X5_event": {
+      "traces": {
+        "by_minute": {
+          "2000-01-01T00:00": 1,
+          "2000-01-01T00:01": 1,
+          "2000-01-01T00:02": 1,
+          "2000-01-01T00:03": 1,
+          "2000-01-01T00:04": 1,
+          "2000-01-01T00:05": 1,
+          "2000-01-01T00:06": 1,
+          "2000-01-01T00:07": 1,
+          "2000-01-01T00:08": 1,
+          "2000-01-01T00:09": 1,
+          "2000-01-01T00:10": 1,
+          "2000-01-01T00:11": 1,
+          "2000-01-01T00:12": 1,
+          "2000-01-01T00:13": 1,
+          "2000-01-01T00:14": 1,
+          "2000-01-01T00:15": 1,
+          "2000-01-01T00:16": 1,
+          "2000-01-01T00:17": 1,
+          "2000-01-01T00:18": 1,
+          "2000-01-01T00:19": 1,
+          "2000-01-01T00:20": 1,
+          "2000-01-01T00:21": 1,
+          "2000-01-01T00:22": 1,
+          "2000-01-01T00:23": 1,
+          "2000-01-01T00:24": 1,
+          "2000-01-01T00:25": 1,
+          "2000-01-01T00:26": 1,
+          "2000-01-01T00:27": 1
+        },
+        "by_service": {
+          "payment": 28
+        }
+      }
+    }
+  },
+  "report_version": 1,
+  "signals": {
+    "logs": {
+      "duplicates": 0,
+      "kept": 38,
+      "raw_items": 38
+    },
+    "metrics": {
+      "duplicates": 0,
+      "kept": 112,
+      "raw_items": 112
+    },
+    "traces": {
+      "duplicates": 0,
+      "kept": 280,
+      "raw_items": 336
+    }
+  },
+  "tokens_deleted": {},
+  "unknown_services": {},
+  "value_fixes": {},
+  "window": {
+    "clock_offsets": [
+      0.0,
+      0.0
+    ],
+    "data_ns": [
+      946684800000000000,
+      946686480000000000
+    ],
+    "host": [
+      "2000-01-01T00:00:00Z",
+      "2000-01-01T00:28:00Z"
+    ]
+  }
+}

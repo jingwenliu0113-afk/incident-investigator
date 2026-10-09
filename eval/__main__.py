@@ -6,12 +6,14 @@
     python -m eval gold-add --incident INC-001 --file <worksheet> --annotator human:<name>
     python -m eval compare --method agent --against stat-anomaly --set pilot   # paired differences (decision 023 §7)
     python -m eval gate --method agent --against stat-anomaly --set heldout    # SPEC Gate from written scores (023 §7)
+    python -m eval demo                           # 2 minutes: the statistical baseline on the SYNTHETIC sample (decision 027)
 
 `gate` reads only scores.json and the compare outputs (it never runs a method) and writes gate.json / gate.md next to
 the Agent's scores: the Gate decision on the held-out set, a diagnostic only (NOT a Gate decision) on the Pilot.
 
 Predictions and scores go to data/external/results/<set>/<method>/ (gitignored); table.md there is the summary.
-Worksheets and gold judgments stay on the ground-truth side next to the label.
+Worksheets and gold judgments stay on the ground-truth side next to the label. The demo only reads data/samples/synthetic/
+and writes nothing; its numbers are not results.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from eval.runner import METHODS, run_method, score_method
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m eval", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["run", "score", "leakage", "gold-todo", "gold-add", "compare", "gate"])
+    parser.add_argument("command", choices=["run", "score", "leakage", "gold-todo", "gold-add", "compare", "gate", "demo"])
     parser.add_argument("--method", choices=sorted(METHODS), help="required for run / score / compare / gate (gate: agent)")
     parser.add_argument("--set", dest="split", choices=["pilot", "heldout"], help="required except for gold-add")
     parser.add_argument("--against", choices=sorted(METHODS),
@@ -46,8 +48,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error(f"{ns.command} needs --against")
     if ns.command == "gold-add" and not (ns.incident and ns.file and ns.annotator):
         parser.error("gold-add needs --incident, --file and --annotator")
-    if ns.command != "gold-add" and ns.split is None:
+    if ns.command not in ("gold-add", "demo") and ns.split is None:
         parser.error("--set is required")
+    if ns.command == "demo":
+        from collect.sample import SAMPLE_DIR
+        from eval.demo import demo_text, run_demo
+
+        try:
+            print(demo_text(run_demo(PROJECT_DIR / SAMPLE_DIR), SAMPLE_DIR.as_posix()), end="")
+        except (ValueError, OSError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        return 0
     layout = DataLayout(PROJECT_DIR / "data/external")
     out = PROJECT_DIR / "data/external/results"
     try:

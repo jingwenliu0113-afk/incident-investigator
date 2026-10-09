@@ -77,12 +77,17 @@ DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 
 
 def incidents_in(layout: DataLayout, split: str) -> list[tuple[str, str]]:
-    """(incident id, run group id) of every incident of `split` that has a published snapshot and was not withdrawn."""
+    """(incident id, run group id) of every incident of `split` that has a published snapshot and was not withdrawn.
+    Fail closed on the synthetic sample's ids (its injection says pilot only because the schema needs a set; decision 027)."""
     from collect.pilot import withdrawn
+    from collect.sample import INCIDENT, RUN_GROUP
 
     gone, out = withdrawn(layout), []
     for path in sorted((layout.ground_truth_root / "run_groups").glob("RG-*/injection.json")):
         inj = json.loads(path.read_text())
+        if inj.get("run_group_id") == RUN_GROUP or INCIDENT in inj.get("incident_ids", []):
+            raise ValueError(f"{path} is the synthetic sample ({RUN_GROUP} / {INCIDENT}): it is never part of a set; "
+                             "remove it from this data root (decision 027)")
         if inj.get("split") == split:
             out += [(inc, inj["run_group_id"]) for inc in inj["incident_ids"]
                     if (layout.incident_dir(inc) / "normalized" / "snapshot.json").exists() and inc not in gone]

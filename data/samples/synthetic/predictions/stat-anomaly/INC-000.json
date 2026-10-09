@@ -1,0 +1,44 @@
+{
+  "prediction_version": 1,
+  "incident_id": "INC-000",
+  "method": {
+    "name": "stat-anomaly",
+    "version": "2"
+  },
+  "fault": {
+    "fault_type": "error_response",
+    "fault_family": null
+  },
+  "origin_candidates": [
+    "payment",
+    "checkout",
+    "frontend",
+    "frontend-proxy",
+    "cart"
+  ],
+  "affected_services": [
+    "payment",
+    "checkout",
+    "frontend",
+    "frontend-proxy"
+  ],
+  "user_symptom": {
+    "kinds": [
+      "errors"
+    ]
+  },
+  "evidence": [
+    {
+      "id": "s-9136b5c351416cf9"
+    }
+  ],
+  "usage": {
+    "tokens_in": null,
+    "tokens_out": null,
+    "proxy_tokens": null,
+    "tool_calls": 0,
+    "retrievals": 0,
+    "latency_s": null,
+    "cost_usd": 0
+  }
+}
