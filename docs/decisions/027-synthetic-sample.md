@@ -4,6 +4,7 @@
   **修訂 1（2026-10-10，程式審查後）**：只修實作與文字，不改協定。hygiene 只接受 `data/samples/synthetic/` 一個目錄（§6）；`INC-000` 不是保留 id
   的說法更正（§3）；span 屬性改用真實 soak 的詞彙（§4）；demo 在記憶體裡跑 leakage audit、表頭標明合成（§5）；`generate()` 自己拒絕任何拼法的
   `data/external`、`--replace` 失敗時保住舊範例、不刪未列出的檔案；`incidents_in` 遇到範例的 id 直接拒絕（§1、§7）；Finder 的 `.DS_Store` 不算範例檔案。
+  **補充（2026-10-10，合併審查；只改文字）**：「對實驗的影響」補上 Pilot 修訂 011 / 014 時重產範例的順序（修訂後 `tests/test_sample.py` 會失敗，直到範例重產）。
 - 影響範圍：新增 `data/samples/synthetic/`（進 git）、`collect/sample.py`、`python -m collect sample`、`eval/demo.py`、`python -m eval demo`、
   `.gitignore`、`tests/test_repo_hygiene.py`；修訂 1：`eval/runner.py` 的 `incidents_in`（只多一個拒絕）。
   **不改**任何協定、指標、split、門檻、預算、schema、normalize policy 或統計 baseline。
@@ -91,3 +92,8 @@
   不放進 README 的結果表。修訂 1 對真實資料沒有任何行為改變：`incidents_in` 只多一個對 `RG-000` / `INC-000` 的拒絕，而 `next_id` 從不給出 000。
 - 範例的分數全對是因為合成 fault 刻意明顯，不代表統計 baseline 的能力；統計 baseline 的門檻與規則不依範例調整（decision 014）。
 - 範例的 byte 會隨 normalize、policy、統計 baseline 或 decision 016 登錄項目改變；屆時重產並與該變更一起 commit（不是實驗資料的變更）。
+- **Pilot 修訂時的順序**（補充 2026-10-10）：023 §6 允許 011（normalize policy）與 014（統計 baseline）各在 Pilot 上修訂一次。
+  修訂改了 policy 或統計 baseline，`tests/test_sample.py` 的逐 byte 比對與範例 prediction 的測試就會失敗；而 `generate()` 拒絕未凍結或未釘選的 policy，
+  所以範例只能在 policy 重新凍結、`collect/policy.py` 的 `POLICY_SHA256` 重新釘選之後重產。順序：修訂程式 →（011）凍結 policy v2 並釘選 sha →
+  `uv run python -m collect sample --out data/samples/synthetic --replace` → 重產的範例與修訂放在**同一個 commit** → 跑測試 → push。
+  014 只改統計 baseline 時，最多只有 `predictions/stat-anomaly/INC-000.json` 與 `sample.json` 的 sha 清單會變（demo 也比對 commit 的範例 prediction，重產前同樣失敗）。重產不影響 Pilot 的收集與評分指令，範例的數字也不是結果。

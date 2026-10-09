@@ -791,6 +791,15 @@ def _json_with_sha(path: Path) -> tuple[dict, str] | None:
     return json.loads(raw), "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
+CLOSED_SLOT_KEYS = ("slot", "flag", "variant", "reason")  # a closed held-out slot in compare / gate output: no ids
+
+
+def _without_ids(entries: list[dict], keys: tuple) -> list[dict]:
+    """Held-out list entries reduced to `keys`: the compare and gate outputs show no incident or run group id
+    (decision 023 "Gate 計算 / 輸出", 026 #23); the ids stay in the list and in each method's scores.json."""
+    return [{k: e[k] for k in keys} for e in entries]
+
+
 def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tuple = MAIN_METRICS,
                     resamples: int = 10_000, layout: DataLayout | None = None, project_dir: Path | None = None) -> dict:
     """Paired differences a - b on the incidents both were scored on (decision 023 §7), with LOFO bounds; written to
@@ -818,9 +827,10 @@ def compare_methods(split: str, a: str, b: str, out_root: Path, *, metrics: tupl
     result = {"split": split, "a": a, "b": b, "scores_sha256": shas,
               "paired": {m: paired(scored[a], scored[b], m, resamples=resamples) for m in metrics},
               "lofo": {m: lofo(scored[a], scored[b], m, resamples=resamples) for m in metrics}}
-    if held is not None:
-        result["heldout"] = {k: held[k] for k in ("freeze_sha256", "heldout_incidents_sha256", "removed_faults",
-                                                  "closed_slots", "excluded")}
+    if held is not None:  # no incident or run group id, as in the gate output it feeds (026 #23)
+        result["heldout"] = {**{k: held[k] for k in ("freeze_sha256", "heldout_incidents_sha256", "removed_faults")},
+                             "closed_slots": _without_ids(held["closed_slots"], CLOSED_SLOT_KEYS),
+                             "excluded": _without_ids(held["excluded"], ("slot", "reason"))}
     base = Path(out_root) / split / f"compare-{a}-vs-{b}"
     base.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
     lines = [f"# {a} - {b} on the {split} set (decision 023 §7; paired run-group cluster bootstrap)", "",
@@ -920,8 +930,7 @@ def gate_methods(split: str, method: str, against: str, out_root: Path, *, layou
     if current is not None:  # no incident id in the held-out gate output: a closed slot keeps its slot, fault and reason
         result["heldout"] = {"freeze_sha256": current[0], "heldout_incidents_sha256": current[1],
                              "removed_faults": listing["doc"]["removed_faults"],
-                             "closed_slots": [{k: c[k] for k in ("slot", "flag", "variant", "reason")}
-                                              for c in listing["doc"]["closed_slots"]]}
+                             "closed_slots": _without_ids(listing["doc"]["closed_slots"], CLOSED_SLOT_KEYS)}
     out_dir = root / method
     text = _gate_md(result).encode()  # both rendered before either is written
     data = (json.dumps(result, indent=2) + "\n").encode()

@@ -440,6 +440,15 @@ def test_leakage_needs_the_freeze_compare_the_same_list_and_gold_add_a_listed_in
                              resamples=50)
     assert result["heldout"]["closed_slots"][0]["slot"] == "H03" and result["heldout"]["removed_faults"]
     assert "H03" in (out / "heldout/compare-a-vs-b.md").read_text()
+    # like the gate (023 "Gate 計算 / 輸出", 026 #23): no incident or run group id, a closed slot or an excluded incident
+    # keeps its slot and reason (the gate reads this file and sits next to it)
+    reason = "fault not exercised twice: closed by default (decision 023 §5.3)"
+    assert result["heldout"]["closed_slots"] == [{"slot": "H03", "flag": "paymentFailure", "variant": "100%",
+                                                  "reason": reason}]
+    assert [set(e) for e in result["heldout"]["excluded"]] == [{"slot", "reason"}] * 2
+    for name in ("compare-a-vs-b.json", "compare-a-vs-b.md"):
+        raw = (out / "heldout" / name).read_bytes()
+        assert b"INC-" not in raw and b"RG-" not in raw, name
     with pytest.raises(PermissionError):
         compare_methods("heldout", "a", "b", out, metrics=("origin_top1",), resamples=50)  # no layout / project
     scores = out / "heldout/b/scores.json"

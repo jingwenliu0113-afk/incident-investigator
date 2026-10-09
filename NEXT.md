@@ -1,16 +1,20 @@
 # NEXT
 
-## 目前位置（2026-10-09 08:05Z，台北 16:05）
+## 目前位置（2026-10-09 17:45Z，台北 10-10 01:45）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集暫停：intlShippingSlowdown 連續 3 次無效，等人看（A0）；heavy lock 目前被 rust-hnsw 的正式 benchmark 占用。**
+**Core 的工具鏈都已完成並測試；Pilot 正式收集「依使用者指示暫停」（2026-10-09 17:45Z，台北 10-10 01:45：使用者要用 Mac 跑重要的東西，等使用者指令再繼續）。**
+- 暫停時沒有任何 run 在進行；自動重啟的監看已停止。繼續時：確認高效能模式 + AC、heavy lock 空出，再啟動 `uv run python -m collect pilot-loop --labeler agent:claude-code`
+  （intlShippingSlowdown 已由使用者 ack，修訂 5 的 flag 寫入已在 main）。
+- 本地分支 `heldout-protocol`（`11dcf31`，含 gate-analysis 與 synthetic-sample，917 passed）尚未合併：Pilot 收完、main 閒置後再合併並 push。
 - **Pilot 有效 incident（高效能模式 + AC）**：INC-002 paymentFailure（RG-003）、INC-003 productCatalogFailure（RG-007）、INC-004 paymentUnreachable（RG-008）、
   INC-005 cartFailure（RG-010；RG-009 無效）。RG-002（INC-001）撤回。剩 intlShippingSlowdown 與之後 5 個 fault。
+- **leakage audit（4 個有效 incident，2026-10-09 17:50Z，只寫 ground-truth 側、沒有方法輸出）**：詞彙命中全部 0；難度全部 easy（origin 自己發出只在 fault 期間出現的 error 等級訊息）。label review 工作表已產生（`label_review_todo.json` 與好讀版 `.md`）。
 - **兩種失敗原因**：
   1. **grafana 下載 plugin 逾時**（RG-004–006、RG-011、RG-012）：暖機前 aborted_unstable，只浪費約 5 分鐘、不影響資料；網路慢時發生（grafana.com 3–9 s）。
   2. **fault 關閉沒生效**（RG-009 cartFailure、RG-013 intlShippingSlowdown，`flag_unconfirmed`）：開啟都在 0.1–0.7 s 內確認，關閉在 10 s 內沒確認；
      RG-013 的 raw trace 顯示關閉寫入 105 秒後 shipping 仍有 10 秒延遲 → flagd 根本沒讀到關閉的設定，fault 延續到 recovery。判無效是對的（否則 label 錯）。
-     推測：harness 以「暫存檔 + rename」整檔替換 flag 檔，inode 改變，flagd v0.16 在 Docker Desktop bind mount 上偶爾失去對新檔的監看。
-     待驗證（要 Docker，等 heavy lock 空出再做，不干擾別人的正式 benchmark）：用單獨的 flagd container 比較 rename 與 in-place 寫入各 20 次切換。
+     已處理（decision 009 修訂 5）：單獨 flagd container 的 probe 沒有重現（rename 與同一個 inode 寫入各 40 次切換都在 1.06 s 內生效），
+     「rename 換 inode」的推測沒有被證實；harness 改為同一個 inode 寫入、3 s 內沒生效就重寫，每次查詢記錄 flagd 提供的 variant（`served`）。
 - **正式收集**：固定高效能模式 + AC 供電（decision 025 修訂 3；preflight 與時間窗內每分鐘取樣都檢查，不符就拒絕 / 判無效）。
   收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
 - **LLM 方法**：付費 API 由使用者決定先延後（A1）；程式已就緒。
@@ -19,7 +23,7 @@
   | 項目 | decision |
   |---|---|
   | 環境鎖定與 soak | 001、004、007、008 |
-  | run group 收集協定 | 009，含修訂 1–4 |
+  | run group 收集協定 | 009，含修訂 1–5 |
   | label 與 review | 006、010、016、018 |
   | canonical snapshot 與凍結的 policy v1 | 011；renderer v2 |
   | docker_stats 覆蓋 | 012 |
@@ -30,10 +34,12 @@
   | Agent 工具與執行框架 | 019、020 |
   | dump-all 與 retrieval | 021 |
   | 失敗分類 | 022 |
-  | held-out 協定（Proposed） | 023 |
+  | held-out 協定（Accepted，K = 5）與程式實作（分支 `heldout-protocol`） | 023、026 |
   | 預算、用量與可見資料的報告 | 024 |
   | 收集時的電力模式紀錄 | 025 |
   | paired 比較 | 023 §7 |
+  | Gate 計算（分支 `heldout-protocol`） | 023「實作說明：Gate 計算」 |
+  | 合成範例與 2 分鐘 demo（分支 `heldout-protocol`） | 027 |
   | 端到端測試 | — |
   | README | — |
 
@@ -62,39 +68,42 @@
 - **`collect pilot-loop`**（SPEC Week 1「自動化 collect → normalize → label」）：next → 一個 run（只在 run 期間持有 lock）→ process，重複到收齊或需要人；
   之後自動 leakage → stat-anomaly。只是把既有步驟串起來，不改任何協定；重新啟動時先補處理「有效但還沒有 label」的 incident。測試 615 passed。**今晚不執行**（電力模式，A7）。
 - **decision 025**：run record 與 manifest 記錄收集開始時的電源與 `pmset` 電力設定（唯讀，不改任何設定）；`collect status` 列出每個有效 run 的模式。
-  要用哪一種模式收集是使用者的決定（A5）。測試 608 passed。
-- **held-out 工具（decision 023 實作說明、026；分支 `heldout-protocol`，Pilot loop 結束、main checkout 閒置後才合併）**：
-  `collect heldout-plan` → `heldout-freeze` → 每個 slot `next` → `run --set heldout`（不接受 `--seed`）→ `process` → `eval leakage --set heldout`
-  → review → `collect heldout-list` → `eval run|score --set heldout`。沒有 freeze 紀錄時所有 held-out 收集與方法執行一律拒絕；
-  **plan、freeze 與收集都被 A1 擋住**（要求 LLM 方法已批准並在 Pilot 上跑過）。freeze 之前必須 commit：API adapter、Gate 條件 2 / 3 的程式、
-  各 fault 等權平均與缺格表、013 正式版、需要乾淨 checkout 的 review 說明；freeze 之後只能改 NEXT.md 與新增 decision 檔。
-  待人處理的 slot 只記 slot id 與非 valid 的 run group id。
-  已合併 main 的 decision 025 修訂 2、3（2026-10-09）：電力條件對 held-out 一樣成立（026 解讀 29）。
-  **026 修訂 1（程式審查後）**：held-out run group 一律不能撤回（撤回只用於 Pilot；手寫的撤回紀錄讓所有 held-out 步驟停止）；
-  方法的 `run.lock` 存在時拒絕評分；transcript 先寫、prediction 最後寫；`up_at` 在 run 任何可能失敗的步驟之前記錄。
-  **freeze 之前要使用者決定**（026「待使用者決定」，程式行為不變）：(1) 待人處理的 slot 如何解除（現在一個卡住的 slot 就讓清單永遠寫不出來，
-  估計約 55% 會發生）；(2) freeze 之後的修正路徑（現在 023 §6 的 bug 修正與使用者決定 6 的排除在 freeze 後都做不到）；(3) 是否要 held-out 撤回。測試 847 passed。
-- **Gate 計算（023「實作說明：Gate 計算」；分支 `gate-analysis`，與 `heldout-protocol` 一起在 Pilot 收完、main checkout 閒置後才合併）**：
-  `python -m eval gate --method agent --against stat-anomaly --set <set>` 只讀已寫好的 scores.json 與 `eval compare` 輸出（不跑方法），寫 `gate.json` / `gate.md`：
-  條件 1 讀 compare 的 origin_top1 paired 下界（對每個統計 baseline，compare 現在記錄 scores 的 sha，過期就拒絕）；條件 2（held-out 的 K 用 slot 數，缺格不降低 ⌈K/2⌉）；
-  條件 3；coverage 比例與各 fault 等權平均 / 缺格清單只描述（每個 `eval score` 也列出）。held-out 才是 Gate 判定，Pilot 只是診斷、不是 Gate 判定；
-  Agent 沒有分數（A1）時 exit 2、不寫檔。026 解讀 27 的 freeze 前項目中，Gate 條件 2 / 3 與等權 / 缺格表已完成。測試 866 passed。
-  **review 修正（2026-10-10）**：held-out 的 gate.json 原本經由關閉的 slot 列出 incident id，與 023 的說明不符，現在只列 slot、fault 與原因；
-  補上 §7 穩健性報告的「各 fault 的 k/K 與差異方向」（只描述）；各 fault 表的欄位改名為「scored / K」，避免和 k/K 混淆；Pilot 上 K < 2 的 fault 不評估條件 2
-  （單一 incident 無法顯示可重現性；held-out 不變，023 解讀 4，**請使用者確認這個 Pilot 診斷的讀法**）；gate.md 與 gate.json 先產生完再 atomic 寫入，gate.json 最後；
-  補測試：只重新評分 baseline 時拒絕過期的 compare、條件 2 過半只看 origin 答錯、第二個統計 baseline、held-out `only_in_one`、scores.json 的 set 與反向 compare。測試 872 passed。
-- **合成範例與 2 分鐘 demo（decision 027；分支 `synthetic-sample`，從 `heldout-protocol` 分出，與它一樣等 Pilot loop 結束、main checkout 閒置後才合併）**：
-  `uv run python -m collect sample --out data/samples/synthetic` 以程式產生 raw、經真正的 normalize 寫出 `INC-000` / `RG-000`（28 分鐘、280 spans、
-  38 logs、112 metric points、全部約 250 KB；snapshot 與 ground truth 的一部分分開），`uv run python -m eval demo` 只讀範例、在記憶體裡跑
-  leakage audit、印出分層分數並聲明不是結果（表頭也標明）。
-  真實 snapshot 永不進 git：hygiene 測試只接受 `data/samples/synthetic/` 一個目錄（測試逐 byte 重產比對的那個），每個檔案以相同 sha256 列在
-  `synthetic: true`、產生器 `collect.sample` 的 `sample.json`，內容只能出現 `INC-000` / `RG-000`。
-  id 用 `INC-000` 而不是 `INC-SAMPLE`（schema 只接受數字 id；`next_id` 從不給 000）；但 `collect calibrate` 的 soak snapshot 也叫 `INC-000`，
-  id 本身不代表合成。
-  **027 修訂 1（程式審查後，2026-10-10）**：span 屬性改用真實 soak 的 key（範例唯一的新 key 是 `deployment.environment.name` 標記）；
-  `generate()` 自己拒絕任何拼法的 `data/external`（macOS 不分大小寫、symlink、firmlink）；`--replace` 先把舊範例移開、失敗換回，
-  目錄有未列出的檔案就拒絕；`incidents_in` 遇到 `RG-000` / `INC-000` 直接拒絕（範例 injection 寫 `split: pilot`）；`.DS_Store` 不會讓 demo 失敗。
-  測試 895 passed。
+  要用哪一種模式收集是使用者的決定（當時的 A5，已處理：decision 025 修訂 3）。測試 608 passed。
+- **held-out 工具、Gate 計算、合成範例與 demo（分支 `heldout-protocol`，合併審查後 918 passed（`-m "not network and not docker_daemon"`））**：原本的三個分支
+  `heldout-protocol`、`gate-analysis`、`synthetic-sample` 已在 2026-10-10 合成 `heldout-protocol` 一個分支（也含 main 到 `9585027`：
+  decision 009 修訂 5、025 修訂、撤回、`ack-failures`）。**還沒合併進 main**：Pilot loop 結束、main checkout 閒置後才合併並 push；
+  剩下的 Pilot run 與 Pilot 評分都用合併後的程式。合併時：把這一句與「目前位置」開頭「本地分支 `heldout-protocol` … 尚未合併」那一行
+  改成合併的 commit 與合併後的測試數；NEXT 有衝突時，「目前位置」開頭以 main 的 Pilot 進度為準。
+  - **held-out 工具（decision 023 實作說明、026）**：
+    `collect heldout-plan` → `heldout-freeze` → 每個 slot `next` → `run --set heldout`（不接受 `--seed`）→ `process` → `eval leakage --set heldout`
+    → review（`collect review-sheet` / `collect review`）→ 未觸發的 slot 重收 → `collect heldout-list` → `eval run|score --set heldout`
+    → `eval compare` → `eval gate`。沒有 freeze 紀錄時所有 held-out 收集與方法執行一律拒絕；
+    **plan、freeze 與收集都被 A1 擋住**（要求 LLM 方法已批准並在 Pilot 上跑過）。freeze 之前必須 commit：API adapter、013 正式版、
+    A4 裡使用者決定要有的機制；freeze 之後只能改 NEXT.md 與新增 decision 檔（README 也不能改）。
+    待人處理的 slot 只記 slot id 與非 valid 的 run group id。電力條件對 held-out 一樣成立（026 解讀 29）。
+    **026 修訂 1（程式審查後）**：held-out run group 一律不能撤回（撤回只用於 Pilot；手寫的撤回紀錄讓所有 held-out 步驟停止）；
+    方法的 `run.lock` 存在時拒絕評分；transcript 先寫、prediction 最後寫；`up_at` 在 run 任何可能失敗的步驟之前記錄。
+    **freeze 之前要使用者決定的三件事**見 A4。
+  - **Gate 計算（023「實作說明：Gate 計算」）**：
+    `python -m eval gate --method agent --against stat-anomaly --set <set>` 只讀已寫好的 scores.json 與 `eval compare` 輸出（不跑方法），寫 `gate.json` / `gate.md`：
+    條件 1 讀 compare 的 origin_top1 paired 下界（對每個統計 baseline，compare 記錄 scores 的 sha，過期就拒絕）；條件 2（held-out 的 K 用 slot 數，缺格不降低 ⌈K/2⌉）；
+    條件 3；coverage 比例、各 fault 等權平均 / 缺格清單、§7 的各 fault k/K 與差異方向只描述（每個 `eval score` 也列出等權 / 缺格）。
+    held-out 才是 Gate 判定，Pilot 只是診斷、不是 Gate 判定；Agent 沒有分數（A1）時 exit 2、不寫檔。
+    held-out 的 gate 輸出不列 incident id 或 run group id；Pilot 上 K < 2 的 fault 不評估條件 2（**請使用者確認，A5**）。
+  - **合成範例與 2 分鐘 demo（decision 027）**：
+    `uv run python -m collect sample --out data/samples/synthetic` 以程式產生 raw、經真正的 normalize 寫出 `INC-000` / `RG-000`（28 分鐘、280 spans、
+    38 logs、112 metric points、全部約 250 KB；snapshot 與 ground truth 的一部分分開），`uv run python -m eval demo` 只讀範例、在記憶體裡跑
+    leakage audit、印出分層分數並聲明不是結果（表頭也標明）。
+    真實 snapshot 永不進 git：hygiene 測試只接受 `data/samples/synthetic/` 一個目錄（測試逐 byte 重產比對的那個），每個檔案以相同 sha256 列在
+    `synthetic: true`、產生器 `collect.sample` 的 `sample.json`，內容只能出現 `INC-000` / `RG-000`（`collect calibrate` 的 soak snapshot 也叫
+    `INC-000`，id 本身不代表合成）。`incidents_in` 遇到 `RG-000` / `INC-000` 直接拒絕。
+    **Pilot 修訂 011（policy）或 014（統計 baseline）時**，`tests/test_sample.py` 會失敗到範例重產為止：重新凍結並釘選 policy 之後
+    `collect sample --out data/samples/synthetic --replace`，與修訂放在同一個 commit（027「對實驗的影響」）。
+  - **合併審查（2026-10-10，三個部分合在一起之後）**：`eval` CLI 把 `CallError`（API / transport 錯誤）印成 `error: …`、exit 2（原本是 traceback；
+    Pilot 沒有嘗試紀錄，見 A1）；held-out 的 `compare-*.json` 不再帶 incident id 與 valid run group id（原樣複製了 scores.json 的
+    `excluded` / `closed_slots`；與 gate 一致，023「Gate 計算 / 輸出」更正）；026 解讀 11 更正（held-out 的 slot 無效上限沒有 Pilot 的
+    `ack-failures` 重新計數）並在「待使用者決定」1 註明 Pilot 前例；027 補上 Pilot 修訂時重產範例的順序；README 的 held-out 段補上
+    `collect review`、未觸發 slot 的重收、`eval compare` 與 `eval gate`，「評分」段說明 gate.json / gate.md。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 
 ## 上次完成
@@ -228,15 +237,27 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
-0. **intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）→ 依規則由人看過才再收**。建議處理：
-   - fault 關閉沒生效是 harness 的 bug（flag 寫入方式），我會先用 probe 驗證，若 in-place 寫入可靠就改 harness（寫 decision；有效性規則不變：仍須 10 s 內確認）。
-   - grafana：Pilot 已有 4 個有效 incident 在現在的 env lock 下收集，**Pilot 期間不改 env lock**；網路好時重試。held-out freeze 前再決定是否關掉 grafana 的 plugin 下載（改 lock、新 soak）。
-   - 需要你：確認看過、同意 intlShippingSlowdown 在修好 harness 後重試（`collect ack-failures`）。
+0. （已處理）intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）：使用者已 ack（`collect ack-failures`）；
+   flag 寫入改為同一個 inode、沒生效就重寫（decision 009 修訂 5，已在 main）。
+   仍待決定：grafana 的 plugin 下載逾時。**Pilot 期間不改 env lock**；held-out freeze 前再決定是否關掉 grafana 的 plugin 下載（改 lock、新 soak）。
 1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
    scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
+   - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）
+     中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
+     估算 Pilot 成本時要把這種重跑算進去。
 2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）
    與 evidence gold 標註（decision 017，`python -m eval gold-todo --set pilot`）。
 3. **decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
+4. **held-out freeze 之前必須決定（026「待使用者決定」1–3）**：023 與使用者決定都沒有涵蓋，程式目前都是拒絕的一側；freeze 釘住所有程式，
+   **freeze 之後就無法加入任何機制**。不影響 Pilot 收集。
+   1. 待人處理的 slot 如何解除：a. 人把該 slot 關閉為缺格；b. 人診斷 stack 之後允許再收（次數與條件寫進 decision；Pilot 的前例是 `collect ack-failures`）；
+      c. 維持現況：一個 slot 累計 3 個非 valid 的 run group 就永遠待人處理，held-out 清單永遠寫不出來（估計約 55% 會發生）。**c 與 Pilot 的規則不同**
+      （Pilot 人看過後會重新計數，026 解讀 11 的更正）。
+   2. freeze 之後的修正路徑：a. 實作一條窄的修訂路徑（新 decision + 接續的 freeze 紀錄，只用於 023 §6 允許的修正）；b. 接受現況（freeze 後任何 bug 都讓 held-out 評測停止）。
+   3. 是否要 held-out 撤回（預設沒有；026 修訂 1 改為一律拒絕）。
+5. **請確認 Gate 的 Pilot 診斷讀法**（023「實作說明：Gate 計算」解讀 4，2026-10-10 review 修正）：Pilot 上 K < 2 的 fault 不評估條件 2
+   （單一 incident 無法顯示可重現性；標為 not evaluated、不算成立）。只讓 Pilot 診斷更難成立；held-out 照 §7 原文（K = 設計的 slot 數），程式行為不變。
+   程式在 freeze 時一起凍結，所以要在 freeze 之前確認。
 
 已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定高效能模式 + AC 供電（decision 025 修訂 3；原本的自動模式由使用者改掉，RG-002 撤回重收）；
 真實 snapshot sample 不進 git（需要時用 synthetic fixture）；`/usr/bin/git` 已由使用者修好；電力模式限制解除。

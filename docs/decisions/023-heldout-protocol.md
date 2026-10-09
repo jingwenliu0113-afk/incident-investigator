@@ -315,7 +315,7 @@
 8. env lock、policy、llm 的 sha 寫入紀錄並由 diff 釘住；資料端仍逐筆比對。
 9. freeze 要求 llm 已 approved 且 model、model_version、temperature 非 null。
 10. 「Pilot 上修訂一次」：011、013–015、017、019–022 各宣告 used / waived；013 必須 used；011 隨 policy 版本。
-11. slot 的無效上限累計所有非 valid 的 run group。
+11. slot 的無效上限累計所有非 valid 的 run group，永不重新計數（2026-10-10 更正：與 Pilot **不同**，Pilot 有 `collect ack-failures` 讓人確認後重新計數，held-out 沒有；見 026 解讀 11 與「待使用者決定」1）。
 12. 狀態優先：filled > needs_person > closed > open；損壞或不符的紀錄 exit 2，需要人 exit 3。
 13. 未觸發重收一次，再未觸發就關閉；詞彙命中排除、不重收。
 14. `run --set heldout` 自己算下一個 slot；slot 與 freeze sha 只寫進 run.json。
@@ -360,7 +360,11 @@
   `conditions`（`1`：每個統計 baseline 的 n、平均差異、區間、下界；`2`：每個 fault 的 K、⌈K/2⌉、計分數、origin 答錯數、各類別次數、過半的類別、是否評估；`3`：失敗數、not_seen / seen_misread 次數、比例）、
   `descriptive`（coverage 比例、其他主要指標的 paired 差異、origin_top1 的 LOFO、對每個統計 baseline 的各 fault origin_top1 答對數 k/K 與差異方向、Agent 與每個統計 baseline 的各 fault 表）、`inputs`（讀到的 scores.json 與 compare 的 sha256）；
   held-out 另有 freeze 與清單的 sha、移除的 fault、關閉的 slot（只列 slot、fault 與原因）。held-out 的 gate 輸出（`gate.json`、`gate.md`、印出的摘要）不列 incident id 或 run group id；
-  incident id 只在清單與各方法的 scores.json 裡。
+  gate 讀的 compare 輸出（`compare-*.json` / `.md`）也一樣（2026-10-10 合併審查補上：原本原樣複製 scores.json 的 `excluded` 與 `closed_slots`，
+  帶著 incident id 與 valid run group id）：關閉的 slot 只列 slot、fault 與原因，排除的 incident 只列 slot 與原因。
+  incident id 只在清單與各方法自己的結果（prediction、`attempts.jsonl`、scores.json、table.md）裡。唯一的例外：compare 的 paired `only_in_one`
+  列出只有一個方法計分的 incident；held-out 上兩份 scores.json 屬於同一份清單、每個列表內 incident 都計分（放棄作答也算），所以正常情況下
+  它是空的（例如 scores.json 被手改時才不是）；不是空的時 gate 拒絕（解讀 8）。
 - 每個方法的 `eval score` 也在 scores.json 的 `by_fault` 與 table.md 的「Per fault」段列出各 fault 平均、等權平均與缺格清單。
   表中「scored / K」是該 fault 計分的 incident 數 / K，不是答對數（答對數 k/K 見解讀 14）。
 

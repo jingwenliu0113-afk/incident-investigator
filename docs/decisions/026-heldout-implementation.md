@@ -6,6 +6,8 @@
   **修訂 1（2026-10-09，程式審查後、在任何 held-out 資料與方法結果之前）**：補充時的解讀 30 讓 held-out run group 也能撤回，
   實際上會讓 slot 不受限地重收（放寬 023 §2、§4、§5.3），改為 held-out run group 一律不能撤回（解讀 30）。
   另修正解讀 18、19、24 的實作缺口（見各項）。023 沒有涵蓋、需要使用者決定的事項列在文末「待使用者決定」，**這些事項的程式行為不變**。
+  **更正（2026-10-10，合併審查；只改文字，程式行為不變）**：解讀 11 原本說 slot 的無效上限「與 Pilot 的規則相同」，合併 main 之後已不成立
+  （Pilot 有 `collect ack-failures`，held-out 沒有）；解讀 11 與「待使用者決定」1 已更正並註明 Pilot 的前例。
 - 影響範圍：`collect/heldout.py`、`collect/freeze.py`（新增）；`collect/__main__.py`（`run|next|status --set heldout`、`heldout-plan`、
   `heldout-freeze`、`heldout-list`、incident 指令的 freeze 檢查）；`collect/rungroup.py`（`Plan.slot`、`Plan.freeze_sha256`；修訂 1：`up_at` 先寫）；
   `collect/pilot.py`、`collect/labeling.py`、`collect/layout.py`；`eval/runner.py`、`eval/__main__.py`；`agent/harness.py`（`CallError`）；
@@ -80,7 +82,12 @@
 9. freeze 要求 `llm_methods.json` 已 approved，且 model、model_version、temperature 非 null（這些欄位在批准時加入）。
 10. **「Pilot 上修訂一次」**涵蓋 011、013、014、015、017、019、020、021、022：每一項都要宣告 used（指名 frozen commit 中的 decision 檔，人的聲明）或 waived。
     013 必須是 used（023 §7 用掉）；policy v1 時 011 必須 waived，v2 時必須 used（023 §6）。
-11. **以 slot 計算的無效上限**：累計該 slot 所有非 valid 的 run group（invalid 與所有 aborted_*），與 Pilot 的規則相同；在 run group 產生之前就被拒絕的 run 不算。
+11. **以 slot 計算的無效上限**：累計該 slot 所有非 valid 的 run group（invalid 與所有 aborted_*）；在 run group 產生之前就被拒絕的 run 不算。
+    **更正（2026-10-10）**：原文寫「與 Pilot 的規則相同」。「非 valid」的範圍（invalid 與所有 aborted_*）與 Pilot 相同，但計數方式已不同：
+    Pilot 自 016「實作說明（2026-10-09）」起有 `collect ack-failures`（ground-truth 側 `failure_acks.jsonl`），人看過 run record 之後，
+    被確認的失敗 run group 不再計入，該 fault 重新計數（已用過兩次：productCatalogFailure 的 RG-004–006、intlShippingSlowdown）。
+    held-out 沒有這種確認：一個 slot 的非 valid run group 一律累計、永不重新計數（`collect/heldout.py` 的 `_slot_detail`；
+    `ack-failures` 只接受 `--set pilot`）。程式行為不變；held-out 是否要類似的機制是文末「待使用者決定」1。
 12. **slot 狀態的優先順序**：filled > needs_person > closed > open。以下是 ValueError（exit 2）：
     - 一個 slot 有超過 1 個可用的 incident；
     - 一個 slot 有超過 2 個未觸發的 incident；
@@ -207,7 +214,10 @@
    - 選項（審查建議 a，與 023 §2「不追加收集」一致）：
      a. 人在 ground-truth 側寫一份決定，把該 slot **關閉為缺格**（記錄方式同 `closed_slots`，`by_fault.missing_slots` 列出），清單接受這樣關閉的 slot；
      b. 人診斷 stack 之後，允許該 slot 再收（例如再給 3 次），次數與條件要寫進 decision；
-     c. 維持現況（一個卡住的 slot 就讓 held-out 評測無法進行）。
+        **Pilot 的前例**（2026-10-10 補註）：Pilot 已用同一種機制，`collect ack-failures --set pilot`（016「實作說明（2026-10-09）」，
+        `failure_acks.jsonl`，只附加、不刪任何 run record），被確認的失敗不再計入、該 fault 重新計數，已用過兩次。
+        Pilot 的確認沒有次數上限，b 則要把次數與條件寫進 decision（如上）；
+     c. 維持現況（一個卡住的 slot 就讓 held-out 評測無法進行）。**注意**：c 與 Pilot 的規則**不同**（Pilot 有 `ack-failures`，見解讀 11 的更正）。
    - 附帶：狀態優先順序 needs_person > closed（解讀 12），所以 2 個未觸發加 3 個非 valid 的 slot 也是待人處理（實際上幾乎不會發生）；選項 a / b 也要涵蓋它。
 2. **freeze 之後的修正路徑**（023 §6 的 bug 修正程序與使用者決定 6）。
    - 現況：freeze 預設拒絕（解讀 7），任何程式、env lock 或 policy 的變動都讓所有 held-out 收集、清單與 eval 停止；slots / freeze 只能寫一次，

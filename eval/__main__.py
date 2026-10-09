@@ -25,6 +25,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from agent.harness import CallError
 from collect.layout import DataLayout
 from env.lock import PROJECT_DIR
 from eval.runner import METHODS, run_method, score_method
@@ -93,7 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             result = score_method(layout, ns.method, ns.split, out, project_dir=PROJECT_DIR)
             print(json.dumps({"aggregate": result["aggregate"], "evidence": result["evidence"]}, indent=2))
-    except (ValueError, OSError, LookupError, RuntimeError) as e:
+    except (ValueError, OSError, LookupError, RuntimeError, CallError) as e:  # CallError: an API / transport error (023 §5)
         print(f"error: {e}", file=sys.stderr)
         return 2
     return 0

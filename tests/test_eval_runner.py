@@ -136,6 +136,24 @@ def test_eval_cli_checks_its_arguments_and_gold_add_refuses_an_agent(tmp_path, m
     assert "human" in capsys.readouterr().err
 
 
+def test_a_call_error_on_a_pilot_run_is_an_error_line_and_exit_2(tmp_path, monkeypatch, capsys):
+    # decision 023 §5: the adapter raises CallError for API and transport errors; on the Pilot (no attempt ledger) the CLI
+    # reports it like every other refusal instead of a traceback
+    import eval.__main__ as cli
+    from agent.harness import CallError
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)
+    stored(tmp_path / "data/external")
+
+    def overloaded(snapshot, incident_id):
+        raise CallError("api_error", "HTTP 529 overloaded", usage={"tokens_in": 10})
+
+    monkeypatch.setitem(METHODS, "overloaded", overloaded)
+    assert cli.main(["run", "--method", "overloaded", "--set", "pilot"]) == 2
+    err = capsys.readouterr().err
+    assert err == "error: api_error: HTTP 529 overloaded\n"
+
+
 def test_scoring_needs_the_leakage_audit_drops_lexicon_hits_and_reports_by_difficulty(tmp_path):
     # decision 015: an incident whose snapshot hits the lexicon enters no score; reports are layered by difficulty
     layout = stored(tmp_path / "data")

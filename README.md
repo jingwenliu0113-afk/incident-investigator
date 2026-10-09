@@ -62,6 +62,8 @@ uv run python -m eval demo
 - 區間：run-group cluster bootstrap（10,000 次、seed 0）；兩個方法比較用同一組重抽的 paired 差異（decision 023）。
 - Evidence：existence（引用的 id 是否存在）與 relevance（弱標籤 temporal / service，加上人工盲標的 gold subset）分開報（decision 017）。
 - 每個方法的表也列出可見資料範圍、預算、usage（tokens、工具呼叫、retrieval、latency、cost）與實際看過多少資料；只報告、不計分（decision 024）。
+- Gate（SPEC Gate，decision 023 §7）：`python -m eval gate` 只讀已寫好的 scores.json 與 `eval compare` 的輸出（不跑任何方法），寫 `results/<set>/agent/gate.json` 與 `gate.md`。
+  **held-out 上才是 Gate 判定**（pass / not passed，只用第一次執行的結果）；Pilot 上只是診斷，**不是 Gate 判定**。
 
 ## 失敗分類（decision 022）
 
@@ -126,12 +128,21 @@ uv run python -m collect next --set heldout                                # 下
 ./tools/with-mac-lock uv run python -m collect run --set heldout --flag F --variant V   # 不接受 --seed
 uv run python -m collect process --incident <INC> --labeler agent:claude-code
 uv run python -m eval leakage --set heldout                                # 全部 slot 收完、process 之後
-uv run python -m collect review-sheet --incident <INC>                    # 使用者 review，saw_method_outputs 必須是 false
+uv run python -m collect review-sheet --incident <INC>                    # 使用者 review 的工作表，saw_method_outputs 必須是 false
+uv run python -m collect review --incident <INC> --file <filled.json> --reviewer human:<name>   # 寫 label.reviewed.json 與 label_review.json
 uv run python -m collect heldout-list                                      # 寫一次 heldout_incidents.json（只印數量）
 uv run python -m eval run --method stat-anomaly --set heldout              # 每個方法、每個 incident 只跑一次
 uv run python -m eval score --method stat-anomaly --set heldout
+uv run python -m eval compare --method agent --against stat-anomaly --set heldout   # Gate 條件 1 的 paired 差異
+uv run python -m eval gate --method agent --against stat-anomaly --set heldout      # SPEC Gate 判定：gate.json / gate.md
 uv run python -m collect status --set heldout
 ```
+
+- held-out 的 `collect review` 也要乾淨的 checkout（freeze 檢查）；`heldout-list` 要求每個 incident 都有 `label.reviewed.json` 與 `label_review.json`。
+- review 判定 `fault_exercised = false` 的 slot 會回到 open：再 `collect next --set heldout` → `run` → `process` → `eval leakage --set heldout` → review 一次；
+  再次未觸發就關閉並列出（decision 023 §5.3）。全部 slot 都是 filled 或 closed 之後才寫 `heldout-list`。
+- `eval run` / `score` 對每個方法都要做（統計 baseline 與 Agent）；`compare` 對每個統計 baseline 各做一次；`gate` 做一次，讀全部統計 baseline 的 compare（缺任何一個就拒絕、不寫檔）。
+- freeze 之後 README 不能再改（只允許 NEXT.md 與新的 decision 檔），所以這段在 freeze 之前定稿。
 
 ## Repo
 
