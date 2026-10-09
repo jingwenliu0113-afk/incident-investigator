@@ -1,10 +1,11 @@
 # NEXT
 
-## 目前位置（2026-10-09 02:35Z，台北 10:35）
+## 目前位置（2026-10-09 03:30Z，台北 11:30）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集進行中（`collect pilot-loop`，高效能模式 + AC）。**
-- **Pilot 進度**：使用者決定正式收集改用高效能模式 + AC（decision 025 修訂 3）。RG-002（INC-001，自動模式開始）撤回並重收；
-  RG-002 的檔案保留，但不算 Pilot、不評分。迴圈從 paymentFailure 100% 重新開始，每個 fault 約 40–50 分鐘，全部約 7–8 小時。
+**Core 的工具鏈都已完成並測試；Pilot 正式收集暫停：productCatalogFailure 連續 3 次無效，依規則等人看（A0）。**
+- **Pilot 進度**：RG-002（INC-001，自動模式開始）撤回；RG-003（paymentFailure 100%，高效能）**valid → INC-002**（已 normalize / replay / label）。
+  RG-004–006（productCatalogFailure）都在暖機前 aborted_unstable：grafana 啟動時要從 grafana.com 下載 `grafana-opensearch-datasource` plugin
+  （upstream `GF_INSTALL_PLUGINS`），網路慢時逾時 → grafana 一直重啟（4–14 次）→ verify-running 不乾淨。與 fault 無關，是環境對外部網路的相依。
 - **正式收集**：固定高效能模式 + AC 供電（decision 025 修訂 3；preflight 與時間窗內每分鐘取樣都檢查，不符就拒絕 / 判無效）。
   收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
 - **LLM 方法**：付費 API 由使用者決定先延後（A1）；程式已就緒。
@@ -190,6 +191,10 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
+0. **productCatalogFailure 連續 3 個 run group 無效 → 依 decision 016 §5 / 009 §4 由人看過才再收**（原因見「目前位置」：grafana 下載 plugin 逾時，非 fault 造成）。兩個選項：
+   - **(a) 直接重試**：使用者確認看過後再收。網路慢時可能再失敗；之後 held-out 50 個 run 也一直受外部網路影響。
+   - **(b) 讓環境不依賴網路（建議）**：在 `env/compose.overrides.yaml` 關掉 grafana 啟動時下載 plugin（grafana 只是 UI，不是被測系統，也不在 telemetry 匯出路徑上）。
+     env lock 會改變 → 寫 decision、跑一次新的 soak（約 1 小時 lock）、INC-002 在舊 lock 下收集要撤回重收（約 45 分鐘）。之後所有 run 都不受外部網路影響。
 1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
    scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
 2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）
