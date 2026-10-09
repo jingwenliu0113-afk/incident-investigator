@@ -39,12 +39,12 @@ def test_a_formal_run_needs_a_committed_clean_project_tree():
     assert project_tree_problems({"commit": None, "dirty": False}) != []
 
 
-def test_a_formal_run_needs_automatic_power_mode_on_ac_power():
-    # decision 025 revision 1 (user decision 2026-10-09): every formal run under the same power conditions
-    assert power_problems({"source": "AC Power", "settings": {"powermode": "0"}}) == []
-    assert power_problems({"source": "Battery Power", "settings": {"powermode": "0"}}) != []
-    assert power_problems({"source": "AC Power", "settings": {"powermode": "2"}}) != []  # high power is not asked for
+def test_a_formal_run_needs_high_power_mode_on_ac_power():
+    # decision 025 revision 3 (user decision 2026-10-09): every formal run in the high power mode on AC power
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "2"}}) == []
+    assert power_problems({"source": "Battery Power", "settings": {"powermode": "2"}}) != []
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "0"}}) != []  # automatic: not any more
     assert power_problems({"source": "AC Power", "settings": {"powermode": "1"}}) != []
-    assert power_problems({"source": "AC Power", "settings": {"powermode": "0", "lowpowermode": "1"}}) != []
+    assert power_problems({"source": "AC Power", "settings": {"powermode": "2", "lowpowermode": "1"}}) != []
     assert power_problems({"source": "AC Power", "settings": {}}) != []  # not reported: never assumed
     assert power_problems(None) != []

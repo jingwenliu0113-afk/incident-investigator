@@ -5,7 +5,7 @@ import json
 import pytest
 
 from collect.layout import DataLayout
-from collect.pilot import MAX_INVALID_ATTEMPTS, PLANS, next_planned, plan_status
+from collect.pilot import MAX_INVALID_ATTEMPTS, PLANS, next_planned, plan_status, withdraw, withdrawn
 
 
 def run_group(layout, rg, flag, variant, status, inc=None, split="pilot", exercised=None, power=None):
@@ -124,3 +124,21 @@ def test_process_runs_normalize_replay_and_label_once_each(tmp_path, monkeypatch
 
     replay_ok["checks"] = ["a live container is still running"]
     assert cli.main(["process", "--incident", "INC-001", "--labeler", "agent:claude-code"]) == 1  # no label on a failed replay
+
+
+def test_a_withdrawn_run_group_is_kept_on_disk_but_its_incident_is_not_usable(tmp_path):
+    # decision 025 revision 3: RG-002 was collected before the formal power mode changed; the user withdrew it
+    layout = DataLayout(tmp_path)
+    run_group(layout, "RG-001", "paymentFailure", "100%", "aborted_unstable")
+    run_group(layout, "RG-002", "paymentFailure", "100%", "valid", inc="INC-001")
+    assert next_planned(layout, "pilot")["flag"] == "productCatalogFailure"
+    record = withdraw(layout, "RG-002", reason="collected in the automatic power mode", decided_by="user (chat)",
+                      now="2026-10-09T03:00:00Z")
+    assert record["incident_ids"] == ["INC-001"] and withdrawn(layout) == {"INC-001": "collected in the automatic power mode"}
+    status = plan_status(layout, "pilot")[0]
+    assert status["incident"] is None and status["withdrawn"] == ["INC-001"] and status["excluded"] == []
+    assert next_planned(layout, "pilot")["flag"] == "paymentFailure"  # collected again; not an invalid attempt
+    assert (layout.run_group_truth_dir("RG-002") / "run.json").exists()  # nothing is deleted
+    for bad in ("RG-001", "RG-002", "RG-009"):  # not valid, already withdrawn, unknown
+        with pytest.raises(ValueError):
+            withdraw(layout, bad, reason="x", decided_by="user", now="2026-10-09T03:00:00Z")

@@ -94,17 +94,17 @@ def project_git_state(project_dir: Path, run: Run = _run) -> dict:
     return {"commit": commit, "dirty": dirty}
 
 
-FORMAL_POWER = {"source": "AC Power", "powermode": "0"}  # decision 025 revision 1: automatic power mode on AC power
+FORMAL_POWER = {"source": "AC Power", "powermode": "2"}  # decision 025 revision 3: high power mode on AC power
 
 
 def power_problems(power: dict | None) -> list[str]:
-    """Every formal run is collected on AC power in the automatic power mode (decision 025 revisions 1, 2)."""
+    """Every formal run is collected on AC power in the high power mode (decision 025 revisions 1-3)."""
     if power is None:
-        return ["power state unreadable (pmset); a formal run needs automatic power mode on AC power (decision 025)"]
+        return ["power state unreadable (pmset); a formal run needs the high power mode on AC power (decision 025)"]
     problems, settings = [], power.get("settings") or {}
     if power.get("source") != FORMAL_POWER["source"]:
         problems.append(f"power source is {power.get('source')!r}; a formal run needs AC power (decision 025)")
     if settings.get("powermode") != FORMAL_POWER["powermode"] or settings.get("lowpowermode", "0") != "0":
-        problems.append(f"power settings are {settings}; a formal run needs the automatic power mode, powermode 0 "
+        problems.append(f"power settings are {settings}; a formal run needs the high power mode, powermode 2 "
                         "(decision 025)")
     return problems

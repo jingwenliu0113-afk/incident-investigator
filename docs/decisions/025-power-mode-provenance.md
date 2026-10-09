@@ -3,6 +3,7 @@
 - 狀態：Accepted（2026-10-08）；在任何正式 Pilot incident 收集之前寫定。只增加紀錄，不改收集協定、有效性判定或任何指標。
   **修訂 1（2026-10-09，使用者決定）**：正式收集固定為自動電力模式 + AC 供電，preflight 檢查（見文末）。
   **修訂 2（2026-10-09）**：run 期間每分鐘取樣電力狀態，incident 時間窗內任何一筆不符就判無效（見文末）。
+  **修訂 3（2026-10-09，使用者決定）**：正式條件改為**高效能模式（`powermode` 2）+ AC 供電**；RG-002 撤回並重收（見文末）。
 - 影響範圍：run record 與 incident manifest 的 `machine`（`schemas/run_manifest.schema.json` 新增可選的 `machine.power`）；`collect status` 的輸出。
 
 ## 背景
@@ -60,3 +61,14 @@
   3. 時間窗之前（暖機、穩定閘門）不判定：開始時的狀態由 preflight 檢查。
 - **RG-002**：在本修訂之前收集，沒有 run 期間的電力樣本。依修訂 1 的書面規則它仍是有效 run（只看開始時的狀態），**是否重收由使用者決定**
   （使用者知道何時切換；若在 01:29:39Z–02:08Z 之間，INC-001 有一部分在高效能模式下收集）。
+
+## 修訂 3（2026-10-09，使用者決定；Pilot 只有一個有效 run 之後、在任何方法結果之前）
+
+- **決定**（使用者：「改高效能先跑」；「要不要重收，如果你認為需要就直接重收」）：所有正式收集（Pilot 與 held-out）改為
+  **高效能模式（`pmset` 的 `powermode` = 2）+ AC 供電**。取代修訂 1 的「自動模式」；修訂 1 的其他規則（讀不到不假設、`lowpowermode` 必須是 0）與修訂 2 的時間窗取樣判定不變。
+- **為什麼要求一致而不是要求某種模式**：電力模式改變 CPU 時脈，會改變 latency、CPU 等的絕對值；各方法都以同一個 snapshot 的前 10 分鐘為參考，看的是 fault 造成的變化，
+  所以哪一種模式都可以，但同一個 set 必須全部相同，時間窗內也不能切換。
+- **RG-002 / INC-001**：開始時是自動模式（`powermode` 0），與新的正式條件不一致 → **撤回**（`collect.pilot.withdraw`，在 ground-truth 側寫
+  `run_groups/RG-002/withdrawn.json`：原因、決定者、時間）。所有檔案保留；撤回的 incident 不算 Pilot 的可用 incident、不算無效次數、
+  不進任何方法執行與評分（評分表列在 excluded，原因 `withdrawn: …`）。paymentFailure 100% 以新的 run group、新的 seed 重收。
+- 校準統計 baseline 門檻的 soak（#3、#5）沒有記錄電力模式；門檻是相對的 z 分數，視為已知限制，不因此修改門檻（decision 014）。

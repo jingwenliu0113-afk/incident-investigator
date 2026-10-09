@@ -99,7 +99,7 @@ class Stack:
                 self.n5xx += 1
             return {"kind": "locust", "ts": ts, "requests": 100, "failures": self.n5xx, "errors": {E504: self.n5xx}}
         if kind == "power":
-            power = {"source": "AC Power", "settings": {"powermode": "0"}}
+            power = {"source": "AC Power", "settings": {"powermode": "2"}}
             for minute in sorted(self.power_at):
                 if self.minute() >= minute:
                     power = self.power_at[minute]
@@ -247,18 +247,18 @@ def test_restart_during_the_fault_is_recorded_but_keeps_the_run_valid(tmp_path, 
 
 
 def test_a_power_mode_change_during_the_window_invalidates_the_run(tmp_path, flag_path):
-    # decision 025 revision 2: the whole incident window is collected on AC power in the automatic power mode
+    # decision 025 revisions 2, 3: the whole incident window is collected on AC power in the high power mode
     clock = Clock()
-    stack = Stack(clock, flag_path, power_at={22: {"source": "AC Power", "settings": {"powermode": "2"}}})
+    stack = Stack(clock, flag_path, power_at={22: {"source": "AC Power", "settings": {"powermode": "0"}}})
     rec = go(stack, clock, flag_path, tmp_path)
     assert rec["status"] == "invalid" and rec["reasons"] == ["power_not_formal"]
-    assert rec["power_not_formal"][0]["power"]["settings"] == {"powermode": "2"}
+    assert rec["power_not_formal"][0]["power"]["settings"] == {"powermode": "0"}
     clock = Clock()
     stack = Stack(clock, flag_path, power_at={22: None})  # pmset unreadable: never assumed formal
     assert "power_not_formal" in go(stack, clock, flag_path, tmp_path / "b")["reasons"]
     clock = Clock()  # before the window (warm-up): not judged; the preflight checks the start
-    stack = Stack(clock, flag_path, power_at={1: {"source": "Battery Power", "settings": {"powermode": "0"}},
-                                              4: {"source": "AC Power", "settings": {"powermode": "0"}}})
+    stack = Stack(clock, flag_path, power_at={1: {"source": "Battery Power", "settings": {"powermode": "2"}},
+                                              4: {"source": "AC Power", "settings": {"powermode": "2"}}})
     rec = go(stack, clock, flag_path, tmp_path / "c")
     assert rec["status"] == "valid" and rec["power_samples"] >= 25  # about one a minute over 25-35 minutes
 

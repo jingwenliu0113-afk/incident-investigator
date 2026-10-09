@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from collect.layout import DataLayout
-from collect.pilot import next_planned
+from collect.pilot import next_planned, withdrawn
 
 LOCK_BUSY = 75  # tools/with-mac-lock: another workload holds the lock
 SPLIT = "pilot"
@@ -37,11 +37,11 @@ def _run_groups(layout: DataLayout) -> set[str]:
 
 def _unprocessed(layout: DataLayout) -> list[str]:
     """Incidents of valid Pilot run groups without a label: a process that failed or was interrupted earlier."""
-    out = []
+    out, gone = [], withdrawn(layout)
     for path in sorted((layout.ground_truth_root / "run_groups").glob("RG-*/run.json")):
         r = json.loads(path.read_text())
         if r.get("status") == "valid" and (r.get("plan") or {}).get("split", SPLIT) == SPLIT:
-            out += [inc for inc in r.get("incident_ids") or [] if not layout.label_path(inc).exists()]
+            out += [inc for inc in r.get("incident_ids") or [] if not layout.label_path(inc).exists() and inc not in gone]
     return out
 
 
