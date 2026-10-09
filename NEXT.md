@@ -2,7 +2,10 @@
 
 ## 目前位置（2026-10-09 01:40Z，台北 09:40）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集已開始（`collect pilot-loop`，背景執行，約 8 小時）。**
+**Core 的工具鏈都已完成並測試；Pilot 正式收集已開始，但目前因電力模式暫停（見 A0）。**
+- **Pilot 進度**：RG-002（paymentFailure 100%，01:29Z）**valid** → INC-001 已 normalize、replay（每個 id 都能解析）、a priori label。
+  下一個 run（productCatalogFailure）02:10:47Z 被 preflight 拒絕：AC 的 `powermode` 變成 2（高效能）。我不改系統設定；
+  背景監看會在電力模式回到自動（AC、`powermode` 0）且 lock 空出時自動重啟 `collect pilot-loop`。
 - **正式收集**：使用者解除電力限制並決定固定自動電力模式 + AC 供電（decision 025 修訂 1，preflight 檢查）。
   收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
 - **LLM 方法**：付費 API 由使用者決定先延後（A1）；程式已就緒。
@@ -188,6 +191,10 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
+0. **電力模式被改成高效能**（02:10:47Z 讀到 AC 的 `powermode` = 2；01:29:39Z 時還是 0）：正式收集依你的決定固定在自動模式 + AC，preflight 會一直拒絕。
+   請把 AC 的電力模式改回「自動」（我不會改系統設定）；改回後背景監看會自動繼續 Pilot。
+   **RG-002 / INC-001 要不要重收**：切換若發生在 01:29:39Z–02:08Z 之間，INC-001 有一部分在高效能模式下收集。依 decision 025 修訂 1 的書面規則它有效；
+   要嚴格一致的話請告訴我，我會把它記為無效並重收 paymentFailure（約 45 分鐘）。之後的 run 已改為每分鐘取樣電力狀態（decision 025 修訂 2），時間窗內有任何不符就判無效。
 1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
    scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
 2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）
