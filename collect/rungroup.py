@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Protocol
 
 from collect.accounting import account
-from collect.faults import check_context, inject, write_atomic
+from collect.faults import check_context, inject, write_atomic, write_in_place
 from collect.layout import DataLayout
 from collect.normalize import host_to_data_ns
 from collect.rawexport import SIGNALS, build_raw_export, check_raw_export, raw_flags
@@ -48,6 +48,9 @@ class Plan:
 
 
 MAX_CLOCK_DRIFT = 1.0  # seconds the host <-> VM offset may move during a run (decision 009, amended)
+
+
+REWRITE_AFTER_S = 3  # decision 009 revision 5: a flag change flagd has not served after this is written again
 
 
 def _draws(plan: Plan) -> tuple[float, float]:
@@ -165,10 +168,12 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
         return vm - (before + after) / 2
 
     def switch(content: bytes, expect: str, label: str) -> tuple[str, float, bool]:
-        """Write the flag file, then poll flagd until it serves `expect` (decision 009 §5)."""
+        """Write the flag file, then poll flagd until it serves `expect` (decision 009 §5). The file keeps its inode
+        (flagd watches it through a bind mount), and is written again when a change was not served after
+        REWRITE_AFTER_S; the confirmation deadline still counts from the first write (decision 009 revision 5)."""
         written_at, host_t, mono_t = clock.now(), clock.time(), clock.monotonic()
-        write_atomic(flag_path, content)
-        confirmed = False
+        write_in_place(flag_path, content)
+        confirmed, writes, last_write = False, 1, mono_t
         while True:
             ts = clock.now()
             variant, _ = stack.ofrep(plan.flag, check_context(plan.flag))
@@ -178,9 +183,12 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
                 break
             if clock.monotonic() - mono_t >= plan.confirm_timeout:
                 break
+            if clock.monotonic() - last_write >= REWRITE_AFTER_S:
+                write_in_place(flag_path, content)
+                writes, last_write = writes + 1, clock.monotonic()
             clock.sleep(0.5)
         record["flag"][label] = {"written_at": written_at, "confirmed": confirmed,
-                                 "latency_seconds": round(clock.time() - host_t, 3)}
+                                 "latency_seconds": round(clock.time() - host_t, 3), "writes": writes}
         return written_at, mono_t, confirmed
 
     watch, raw, up_started, events, crashed = None, None, False, None, False
@@ -222,7 +230,7 @@ def run_group(plan: Plan, stack: Stack, clock: Clock, *, flag_path: Path, work_d
         times["fault_on"], on_mono, on_ok = switch(injected_bytes, plan.variant, "on")
         if not on_ok:
             record["reasons"].append("flag_unconfirmed")
-            write_atomic(flag_path, original)  # no fault period without a confirmed fault
+            write_in_place(flag_path, original)  # no fault period without a confirmed fault
         else:
             run_until(on_mono + plan.fault_minutes * 60)
             take(("state", "locust"))
