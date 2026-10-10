@@ -1,8 +1,20 @@
 {
   "status": "proposed",
-  "note": "decisions 020 / 021: the model, prices and budgets are the user's decision; nothing runs until status is approved and the cost was reported under MACHINE_POLICY",
+  "note": "decisions 020 / 021 / 029: the model, prices and budgets are the user's decision; nothing runs until status is approved. Decision 029 (user 2026-10-10, provisional): the LLM methods try a local Ollama model on this Mac instead of a paid API; after the synthetic probe (python -m eval local-probe) the user picks the model. Approval then sets provider \"ollama\", model (tag), model_version (its digest sha256:..., /api/tags), price_per_mtok {input: 0, output: 0}, ollama.version, ollama.num_ctx and ollama.think; the budgets are unchanged unless the user decides otherwise. Any other provider has no adapter.",
+  "provider": null,
   "model": null,
+  "model_version": null,
+  "temperature": 0,
   "price_per_mtok": null,
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "version": null,
+    "num_ctx": null,
+    "num_predict": 8192,
+    "seed": 42,
+    "think": null,
+    "timeout_s": 3600
+  },
   "budgets": {
     "dump_all_proxy_tokens": 120000,
     "retrieval_queries": 8,

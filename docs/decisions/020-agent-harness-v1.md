@@ -25,6 +25,8 @@
    不含任何 label 或 ground truth。
 6. **模型介面**：harness 只依賴一個 `complete(system, messages, tools) → {content, usage}` 的介面（訊息與 content block 採 Anthropic Messages API 的形狀）；
    真正的 API client 是另外一個 adapter，在使用者批准成本之後才加入。測試用腳本化的假模型。
+   - **補註（2026-10-10，decision 029）**：使用者暫時同意先試本機模型；第一個 adapter 是本機 Ollama（`agent/ollama.py`，只連 loopback），介面不變。
+     截斷或無法確認未截斷的呼叫是不可重試的 `CallError`（029 §2）。付費 API 的 adapter 仍不存在。
 
 ## 為什麼
 
