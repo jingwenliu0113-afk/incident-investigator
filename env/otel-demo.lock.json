@@ -1,6 +1,6 @@
 {
   "lock_version": 1,
-  "generated_at": "2026-10-08T11:16:37Z",
+  "generated_at": "2026-10-10T04:04:02Z",
   "upstream": {
     "repo": "https://github.com/open-telemetry/opentelemetry-demo",
     "tag": "3.1.0",
@@ -28,7 +28,7 @@
       {
         "root": "project",
         "path": "env/compose.overrides.yaml",
-        "sha256": "sha256:fe1da17deb1ba24f1efd513bfffba77877af0460f7fb03cc7fad68725f0083e4"
+        "sha256": "sha256:e1d29b2615d793d4ab7e8ad785c80425c17d649a6b9357f08e92002c8373f2b6"
       },
       {
         "root": "project",

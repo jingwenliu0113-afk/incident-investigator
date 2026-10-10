@@ -2,8 +2,9 @@
 # Upstream source stays untouched. Every setting here deviates from upstream 3.1.0 and needs a decision log;
 # tests/test_locked_env.py asserts that this file changes nothing else in the rendered stack, and every
 # memory limit set here is judged by the soak test's R6 (env.soak.WATCHED_SERVICES).
-# Not a fault and not for task performance: these remove OOM-kills / stalls seen with no fault injected
-# (upstream baseline instability). Frozen once the baseline soak test passes.
+# Not a fault and not for task performance: these remove OOM-kills / stalls / restarts seen with no fault injected
+# (upstream baseline instability; grafana: a plugin download at every start, decision 028).
+# Frozen once the baseline soak test passes.
 
 services:
   product-catalog:
@@ -23,3 +24,10 @@ services:
       # decision 008: raw telemetry export. Replaces the upstream extras stub (compose merges volumes by target);
       # relative to the upstream checkout, i.e. env/otelcol-config-raw.yml. Adds pipelines, rewrites none.
       - ../../otelcol-config-raw.yml:/etc/otelcol-config-extras.yml
+  grafana:
+    environment:
+      # decision 028 (temporary, user decision 2026-10-10): upstream installs grafana-opensearch-datasource from
+      # grafana.com at every start; a slow download made grafana restart and aborted 5 Pilot run groups before warm-up.
+      # Set and empty, so the image installs nothing (compose merges environment by key; list vs map form does not matter).
+      # grafana is not a SUT service (decision 011 X1). Switching back is a new decision before the held-out freeze.
+      GF_INSTALL_PLUGINS: ""

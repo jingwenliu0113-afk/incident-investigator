@@ -8,7 +8,7 @@ Core §1。為什麼是這個版本、這組 compose 與這些 override，見 `d
 | `otel-demo.overrides.env` | 人 | 疊在 upstream `.env` 之上的變數（`DEMO_VERSION`、`IMAGE_VERSION`…）；每改一行都要寫 decision log |
 | `otel-demo.lock.json` | `python -m env resolve` | upstream commit、每個檔案 / bind mount 的 sha256、28 個 image 的 index digest 與 arm64 / amd64 manifest digest、`up` 參數 |
 | `compose.pinned.yaml` | `python -m env resolve` / `pin` | compose override：每個 service 都改成 `image: <ref>@sha256:<index digest>` |
-| `compose.overrides.yaml` | 人 | 本 Project 的 compose overlay：memory limit（decision 004 / 007）、collector 的 raw export layer（decision 008）；每一項都要有 decision log |
+| `compose.overrides.yaml` | 人 | 本 Project 的 compose overlay：memory limit（decision 004 / 007）、collector 的 raw export layer（decision 008）、grafana 啟動時不下載 plugin（`GF_INSTALL_PLUGINS` 設為空，decision 028，暫時）；每一項都要有 decision log |
 | `otelcol-config-raw.yml` | 人 | collector 的 extras layer：只新增 `traces/raw`、`metrics/raw`、`logs/raw` 與 `file/raw_*`，不改任何 upstream pipeline（decision 008） |
 | `upstream/opentelemetry-demo/` | `python -m env fetch-upstream` | upstream shallow clone（gitignored） |
 
@@ -64,7 +64,10 @@ R1–R6（有 raw pipeline 時加上 R7–R9）全部通過才算 baseline 穩�
 ## 改環境的流程
 
 1. 寫 decision log（`docs/decisions/`）。
-2. 改 `otel-demo.spec.json` 或 `otel-demo.overrides.env`（換版本時同時改 commit，再 `rm -rf env/upstream && … fetch-upstream`）。
+2. 改 `otel-demo.spec.json`、`otel-demo.overrides.env` 或 `compose.overrides.yaml`（換版本時同時改 commit，再 `rm -rf env/upstream && … fetch-upstream`）。
 3. `uv run python -m env resolve`：沒有通過檢查（缺 arm64、floating tag、demo image 不是 `<tag>-*`…）就不會寫出 lock。
+   它會向 registry 重查每個 tag 的 digest（tag 可以被改）；只改 project 檔、image 不變時，可以改用離線重算，沿用 lock 裡的 digest
+   （decision 028「決策 2」的指令），之後用 `git diff env/otel-demo.lock.json` 確認只有預期的 sha 與 `generated_at` 改變。
 4. `uv run pytest`。
 5. 不同 lock sha256 收集到的資料不得混用。
+6. 新 lock 要先通過 soak（上面的指令）才能收集：collect 的 preflight 只接受 `env_lock_sha256` 等於目前 lock、通過且 teardown 乾淨的 soak 報告。

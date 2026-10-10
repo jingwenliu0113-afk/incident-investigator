@@ -69,6 +69,7 @@ registry（ghcr / Docker Hub / quay）查證，重點發現如下：
   lock 有記錄它的 hash，`verify` 與 `compose up` 會擋下「上一個 run 留下 flag」的狀況。
 - 已知但不修的 upstream 行為（記錄起來，leakage audit 與 failure taxonomy 要考慮）：
   - Grafana 啟動時會抓沒有固定版本的 `grafana-opensearch-datasource` plugin（只影響 UI，不影響 telemetry 匯出）。
+    （2026-10-10 起暫時關掉：project overlay 把 `GF_INSTALL_PLUGINS` 設為空，新的 lock，見 decision 028。）
   - observability 模式下 collector config 會丟掉 `prometheus/ad` receiver（ad 的 Prometheus custom metrics 不會被收集；ad 的 OTLP metrics 不受影響）。
     （更正，decision 008：是 full layer 的 metrics receivers list 拿掉的；我們的組合一定載入 full，效果相同。）
   - observability 的 profiles pipeline 會輸出到 firepit，但 firepit 只存在於 profiling layer → collector 自己的 log 裡可能出現 exporter 錯誤。
@@ -86,5 +87,5 @@ registry（ghcr / Docker Hub / quay）查證，重點發現如下：
     Run 2 的 15 分鐘內兩者都沒有觀察到。
   - Run 1 冷啟動時有大量 504（product-catalog 很慢）；run 2 沒有。只排除暖機期不足以保證穩定。
   - OpenSearch exporter 因 `attributes.http` mapping 衝突持續拒收相當比例的 log（run 1 逐筆拒收 1,624 次、run 2 3,073 次）→ OpenSearch 不能當 snapshot 的 source of truth。
-  - Grafana runtime 安裝的 plugin 版本是 `grafana-opensearch-datasource` v2.34.4（未鎖定，只影響 UI）。
+  - Grafana runtime 安裝的 plugin 版本是 `grafana-opensearch-datasource` v2.34.4（未鎖定，只影響 UI；decision 028 起暫時不安裝）。
   - upstream 把 compose network 名稱寫死成 `opentelemetry-demo`。

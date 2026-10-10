@@ -76,6 +76,34 @@ def test_memory_limits_from_the_project_overlay_and_unchanged_gomemlimit(lock, s
     assert svc["environment"]["GOMEMLIMIT"] == "16MiB"
 
 
+def test_project_files_recorded_in_the_lock_match_the_committed_files(lock):
+    # editing the overlay (or another project file) without recomputing the lock would leave `env verify` and every
+    # `compose up` refusing; catch it here, without the upstream checkout (whose flag file a running collection edits)
+    from env.lock import sha256_path
+
+    startup = lock["startup"]
+    entries = [(f["path"], f["sha256"]) for f in startup["compose_files"] + startup["env_files"]
+               if f["root"] == "project" and not f.get("generated")]
+    entries += [(m["source"]["path"], m["sha256"]) for m in lock["bind_mounts"] if m["source"]["root"] == "project"]
+    assert (OVERRIDES, next(f["sha256"] for f in startup["compose_files"] if f["path"] == OVERRIDES)) in entries
+    assert {path: sha256_path(PROJECT_DIR / path) for path, _ in entries} == dict(entries)
+
+
+GRAFANA_PLUGINS = ("services", "grafana", "environment", "GF_INSTALL_PLUGINS")  # decision 028
+
+
+@pytest.mark.docker_cli
+def test_grafana_installs_no_plugin_at_start(lock):
+    # decision 028 (temporary, user decision 2026-10-10): upstream downloads grafana-opensearch-datasource from
+    # grafana.com at every start; a slow network made grafana restart and aborted 5 Pilot run groups before warm-up
+    upstream_env = _render(lock, drop=(OVERRIDES,))["services"]["grafana"]["environment"]
+    assert upstream_env["GF_INSTALL_PLUGINS"] == "grafana-opensearch-datasource"
+    env = _render(lock)["services"]["grafana"]["environment"]
+    assert env["GF_INSTALL_PLUGINS"] == ""  # set and empty: the image installs nothing
+    assert {k: v for k, v in env.items() if k != "GF_INSTALL_PLUGINS"} == {
+        k: v for k, v in upstream_env.items() if k != "GF_INSTALL_PLUGINS"}
+
+
 @pytest.mark.docker_cli
 def test_project_override_changes_nothing_but_memory_limits_and_the_raw_extras_mount(lock):
     from env.soak import RAW_CONFIG, RAW_EXTRAS_TARGET, RAW_SERVICE, WATCHED_SERVICES
@@ -94,9 +122,9 @@ def test_project_override_changes_nothing_but_memory_limits_and_the_raw_extras_m
     without = dict(leaves(_render(lock, drop=(OVERRIDES,))))
     changed = {p for p in with_override.keys() | without.keys() if with_override.get(p) != without.get(p)}
     # every limit the overlay changes is judged by the soak test's R6 (decision 004 revision), plus the collector's
-    # extras layer (decision 008); nothing else changes
+    # extras layer (decision 008) and grafana's plugin download (decision 028); nothing else changes
     assert changed == {("services", svc, "deploy", "resources", "limits", "memory") for svc in WATCHED_SERVICES} | {
-        ("services", RAW_SERVICE, "volumes")}
+        ("services", RAW_SERVICE, "volumes"), GRAFANA_PLUGINS}
     assert set(WATCHED_SERVICES) == {"product-catalog", "checkout"}
     vols = {v["target"]: v for v in rendered["services"][RAW_SERVICE]["volumes"]}
     before = {v["target"]: v for v in json.loads(without[("services", RAW_SERVICE, "volumes")])}
