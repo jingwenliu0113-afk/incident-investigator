@@ -39,3 +39,14 @@
 
 - **讓模型輸出自由文字、再用另一個 LLM 抽取答案**：多一個會出錯、要花錢的步驟，評分也不可重現。
 - **把 fault 類型的說明或範例寫進 prompt**：等於提供 fault 設計的提示；只給用詞清單（答案空間），所有方法相同。
+
+## 修正（2026-10-10，在任何 LLM 方法於任何 set 上的結果之前）
+
+- **發現**：decision 029 的合成範例探測（只用 synthetic 樣本）中，qwen3.5 9B 在 dump-all 與 retrieval 都呼叫了 `submit_diagnosis`，但把 `evidence` 寫成
+  id 字串的清單（`["s-…", "l-…"]`），格式規定是物件的清單。harness 把 Python 的例外訊息原樣回給模型（`string indices must be integers, not 'str'`），
+  沒說哪一項錯、應該是什麼格式；模型在 temperature 0 下三次送出相同的答案，被記為 `invalid_submission`（放棄作答）。這是 harness 的缺陷，不是答案格式的問題。
+- **修正**（§3 的更正迴圈；`agent/harness.py` 的 `_evidence_shape`）：`evidence` 不是清單、某一項不是物件、缺少字串的 `id`、或 `t0` / `t1` 不是數字時，
+  回給模型的問題指出是哪一項（`evidence[i]`）並附上預期的形狀。**答案格式不變、沒有放寬**：id 字串的清單仍然不合格，仍然要更正，更正次數上限（2 次）不變。
+  其他欄位的檢查（`check_prediction`）原本就會指出欄位，不變。
+- 這不是本文件「在 Pilot 上修訂一次」的那一次：發現於合成範例，在任何 LLM 方法在 Pilot 或 held-out 上執行之前，沒有看過任何方法結果。
+- 測試：`tests/test_agent_harness.py`（先寫、看到 6 個失敗才改）。

@@ -5,6 +5,7 @@ usage accounting and a transcript. The model is any object with complete(system,
 
 from __future__ import annotations
 
+import json
 import math
 import time
 from pathlib import Path
@@ -78,10 +79,35 @@ def _arguments(block: dict):
     return block["unparsed_arguments"] if "unparsed_arguments" in block else (block.get("input") or {})
 
 
+EVIDENCE_SHAPE = '{"id": "<the id of a record you saw>", "t0": <seconds>, "t1": <seconds>} (t0 and t1 optional)'
+
+
+def _evidence_shape(evidence) -> str | None:
+    """What is wrong with the shape of `evidence`, naming the item and the expected shape (decision 020 §3: the problem
+    goes back to the model to be fixed, so it must say what to fix); None when the shape is right. The format itself is
+    unchanged: a bare id string is still malformed."""
+    if evidence is None:
+        return None
+    if not isinstance(evidence, list):
+        return f"evidence must be a list of objects like {EVIDENCE_SHAPE}, not {type(evidence).__name__}"
+    for i, e in enumerate(evidence):
+        if not isinstance(e, dict):
+            return (f"evidence[{i}] must be an object like {EVIDENCE_SHAPE}, not {type(e).__name__} "
+                    f"{json.dumps(e)[:60]}")
+        if not isinstance(e.get("id"), str):
+            return f'evidence[{i}] needs "id": the id of a record you saw, as a string ({EVIDENCE_SHAPE})'
+        for k in ("t0", "t1"):
+            if e.get(k) is not None and (isinstance(e[k], bool) or not isinstance(e[k], (int, float))):
+                return f"evidence[{i}] ({e['id']}): {k} must be a number of seconds since the start of the window"
+    return None
+
+
 def _prediction(answer: dict, incident_id: str, method: dict, start_ns: int, services) -> tuple[dict | None, list[str]]:
     """The submitted answer as a decision-013 prediction (evidence times converted to the data clock), and its problems."""
     if not isinstance(answer, dict):
         return None, ["the answer is malformed: its arguments are not a JSON object"]
+    if problem := _evidence_shape(answer.get("evidence")):
+        return None, [f"the answer is malformed: {problem}"]
     try:
         evidence = []
         for e in answer.get("evidence") or []:

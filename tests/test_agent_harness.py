@@ -171,3 +171,31 @@ def test_other_errors_are_not_wrapped(tmp_path):
 
     with pytest.raises(KeyError):
         run(tmp_path, Broken())
+
+
+@pytest.mark.parametrize("evidence, says", [
+    (["s-" + "a" * 16], ['evidence[0]', 'object', '"id"']),  # what qwen3.5 sent on the synthetic sample (decision 020 rev.)
+    ([{"id": "s-" + "a" * 16}, "l-" + "b" * 16], ['evidence[1]', 'object', '"id"']),
+    ("s-" + "a" * 16, ['evidence', 'list']),
+    ([{"t0": 1.0}], ['evidence[0]', '"id"']),
+    ([{"id": 7}], ['evidence[0]', '"id"', 'string']),
+    ([{"id": "s-" + "a" * 16, "t0": "soon"}], ['evidence[0]', 't0', 'seconds']),
+])
+def test_a_malformed_evidence_list_is_told_which_item_is_wrong_and_the_expected_shape(evidence, says):
+    # decision 020 §3: the problems go back to the model to be fixed; a Python error text tells it nothing to fix
+    from agent.harness import _prediction
+
+    pred, problems = _prediction({**ANSWER, "evidence": evidence}, "INC-001", {"name": "m", "version": "1"}, 10**18,
+                                 ["payment", "checkout"])
+    assert pred is None and len(problems) == 1
+    assert all(s in problems[0] for s in says), problems
+    assert "indices" not in problems[0] and "object has no attribute" not in problems[0]
+
+
+def test_a_malformed_answer_outside_the_evidence_names_the_expected_arguments():
+    from agent.harness import _prediction
+
+    pred, problems = _prediction({**ANSWER, "fault": "error_response"}, "INC-001", {"name": "m", "version": "1"}, 10**18,
+                                 ["payment", "checkout"])
+    assert pred is None and problems
+    assert any("fault" in p for p in problems), problems
