@@ -1,6 +1,6 @@
 {
   "status": "approved",
-  "note": "decisions 020 / 021 / 029. Approved by the user on 2026-10-10 (「照建議」: the eight recommendations after the synthetic probe; decision 029 「使用者決定（2026-10-10）：照建議」): the local Ollama model qwen3.5 9B (q4_K_M) on this Mac instead of a paid API (provisional, decision 029), its manifest digest and Ollama 0.35.0 pinned (a mismatch refuses the run; no Ollama upgrade until the held-out evaluation is done), num_ctx 262144 (the model's maximum, so the dump-all budget fits in real tokens), think off, num_predict 8192, temperature 0, seed 42, price 0 (local, no external cost). timeout_s 7200: a single call near the full context is estimated at about 50 minutes from the probe's prefill / decode speeds (decision 029). Runs need the Mac heavy lock and the high power mode on AC power. The budgets are unchanged. Any other provider has no adapter.",
+  "note": "decisions 020 / 021 / 029. Approved by the user on 2026-10-10 (「照建議」: the eight recommendations after the synthetic probe; decision 029 「使用者決定（2026-10-10）：照建議」): the local Ollama model qwen3.5 9B (q4_K_M) on this Mac instead of a paid API (provisional, decision 029), its manifest digest and Ollama 0.35.0 pinned (a mismatch refuses the run; no Ollama upgrade until the held-out evaluation is done), num_ctx 262144 (the model's maximum, so the dump-all budget fits in real tokens), think off, num_predict 8192, temperature 0, seed 42, price 0 (local, no external cost). timeout_s stays the proposed 3600 (not one of the eight items; the probe's speeds put a single call near the full context at about 43-50 minutes, decision 029; raising it is the user's decision, before the freeze). Runs need the Mac heavy lock and the high power mode on AC power. The budgets are unchanged. Any other provider has no adapter.",
   "provider": "ollama",
   "model": "qwen3.5:9b-q4_K_M",
   "model_version": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
@@ -16,7 +16,7 @@
     "num_predict": 8192,
     "seed": 42,
     "think": false,
-    "timeout_s": 7200
+    "timeout_s": 3600
   },
   "budgets": {
     "dump_all_proxy_tokens": 120000,

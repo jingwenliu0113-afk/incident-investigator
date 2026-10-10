@@ -313,6 +313,8 @@
 
 1. `collect heldout-plan --amendments <file>`：寫一次 `docs/heldout/plan.json`；人檢查後 commit。
 2. `collect heldout-freeze --pilot-revisions <file>`：在乾淨、plan 已 commit 的 checkout 上寫一次 `slots.json` 與 `freeze.json`；**只把這兩個檔案 commit 成一個 commit**。
+   另由程式檢查（2026-10-10 第三次追加，026 解讀 31、32）：目前的 env lock 有通過的 soak；三個 LLM 方法 Pilot 的 `run_config.json` 正好是要凍結的設定、
+   分數是從那次執行算的、評分的每個 prediction 都是那次執行寫的。
 3. 每個 slot：`collect next --set heldout` → `./tools/with-mac-lock uv run python -m collect run --set heldout --flag F --variant V`（不接受 `--seed`）
    → `collect process --incident <INC> --labeler …`。
    待人處理的 slot（2026-10-10 使用者決定）：人看過 run record → `collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`
@@ -339,14 +341,15 @@
 ### 解讀（理由見 026 §2 的同一編號）
 
 1. `PLANS["heldout"]` = 進 git 的 `docs/heldout/plan.json`，只從明確的專案目錄讀。
-2. plan 與 freeze 都要等 Pilot 收集、review、audit 與 LLM 方法試跑完成 → 目前被 NEXT A1 擋住。
+2. plan 與 freeze 都要等 Pilot 收集、review、audit 與 LLM 方法試跑完成。（A1 已於 2026-10-10 決定：現在等三個 LLM 方法在 Pilot 上執行並評分，NEXT 下一步 8.2；
+   freeze 另要求解讀 31、32。）
 3. 只吸收所有 exercised 且沒看過方法輸出的 review 一致發現、且與 a priori 不同的值；每項要理由；修正後仍符合 PILOT entry 規則。
 4. 進 git 的文字不得有 `INC-` / `RG-` id。
 5. 移除只依 Pilot 驗證失敗，每種依據對照 Pilot 資料；pipeline / label 需要 HEAD 上的 decision 檔；永不依分數。
 6. 進入條件：至少一個 reviewed 且 `fault_exercised = true` 的 Pilot incident；review 完成 = 每個 valid Pilot incident 都有兩個 review 檔。
 7. freeze 預設拒絕：只允許 `M NEXT.md`、新增 slots / freeze、新增 decision 檔；freeze 後既有 decision 不再修改。
 8. env lock、policy、llm 的 sha 寫入紀錄並由 diff 釘住；資料端仍逐筆比對。
-9. freeze 要求 llm 已 approved 且 model、model_version、temperature 非 null。
+9. freeze 要求 llm 已 approved 且 model、model_version、temperature 非 null。（2026-10-10 第三次追加：另比對每個 LLM 方法 Pilot 的 `run_config.json`，解讀 32。）
 10. 「Pilot 上修訂一次」：011、013–015、017、019–022 各宣告 used / waived；013 必須 used；011 隨 policy 版本；
     014 必須 waived（使用者 2026-10-10 決定；026 修訂 2 審查起由 freeze 檢查強制）。
 11. slot 的無效上限累計沒有被確認的非 valid run group（invalid 與所有 aborted_*）。2026-10-10 使用者決定（026「待使用者決定」1 選 b，與 Pilot 相同）：
@@ -375,6 +378,9 @@
 29. decision 025 修訂 2、3 的電力條件對 held-out 一樣成立（同一個 preflight 與時間窗判定）；`power_not_formal` 算 slot 的無效嘗試；清單時再查每個計入的 valid run group 的電力證據。
 30. held-out run group 一律不能撤回（026 修訂 1：撤回會讓 slot 不受限地重收，放寬本文 §2、§4、§5.3）；手寫的撤回紀錄讓所有 held-out 步驟停止，由人以新的 decision 決定；
     decision 025 修訂 3 的撤回只用於 Pilot，撤回的 Pilot incident 不是 plan 的證據。
+31. freeze 要求要凍結的 env lock 有通過的 soak（`collect.live.passing_soak`，與收集 preflight 同一條規則；2026-10-10 第三次追加，026 修訂 3）。
+32. freeze 要求每個 LLM 方法的 Pilot 結果用的正好是要凍結的 LLM 設定：`run_config.json` 的 model、預算與 `llm` 等於 `llm_methods.json`、`scores.json` 從那次執行算出、
+    評分的每個 incident 在 `power.jsonl` 的最後一行指向那份 `run_config.json`（中途停止留下的舊 prediction 會被拒絕；026 修訂 3 與其審查）。
 
 023 與使用者決定沒有涵蓋的三件事（待人處理的 slot 如何解除、freeze 之後的修正路徑、held-out 撤回）原本列在 026「待使用者決定」；
 使用者 2026-10-10 已處理（見上面「使用者決定」的「追加（2026-10-10）」）：1 選 b、已實作（解讀 11）；2 沒有偏好，不實作、維持現況，freeze 之前仍可決定；3 不允許（解讀 30）。

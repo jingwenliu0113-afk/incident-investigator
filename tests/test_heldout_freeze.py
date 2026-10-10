@@ -274,6 +274,21 @@ def pilot_run_config(config, method):
             "scope": SCOPES[method], "llm": pinned_record(config)}
 
 
+def pilot_llm_results(layout, method, config, incidents=("INC-002",)):
+    """What `eval run --method <m> --set pilot` run to the end and `eval score` leave: run_config.json, one power.jsonl
+    line per incident naming that run_config.json (review 2026-10-10, decision 026 #32) and scores.json from that run."""
+    from env.lock import sha256_path
+
+    run_config = pilot_run_config(config, method)
+    write(layout.root, f"results/pilot/{method}/run_config.json", json.dumps(run_config, indent=2) + "\n")
+    sha = sha256_path(layout.root / f"results/pilot/{method}/run_config.json")
+    write(layout.root, f"results/pilot/{method}/power.jsonl", "".join(
+        json.dumps({"incident_id": inc, "attempt": None, "run_config_sha256": sha, "formal": True}) + "\n" for inc in incidents))
+    write(layout.root, f"results/pilot/{method}/scores.json",
+          json.dumps({"run_config": run_config, "incidents": [{"incident_id": inc} for inc in incidents]}))
+    return run_config
+
+
 def soak_report(layout, *, lock=None, passed=True, verify=(), rel=SOAK):
     from env.lock import lock_sha256
 
@@ -306,9 +321,7 @@ def project(tmp_path, llm=None):
     complete_pilot(layout)
     for m in METHODS:
         write(layout.root, f"results/pilot/{m}/scores.json", "{}")
-    run_config = pilot_run_config(approved_config(), "agent")
-    write(layout.root, "results/pilot/agent/run_config.json", json.dumps(run_config, indent=2) + "\n")
-    write(layout.root, "results/pilot/agent/scores.json", json.dumps({"run_config": run_config}))
+    pilot_llm_results(layout, "agent", approved_config())
     soak_report(layout)
     return repo, layout
 
@@ -481,7 +494,7 @@ def run_config_edit(change):
         change(doc)
         path.write_text(json.dumps(doc, indent=2) + "\n")
         scores = layout.root / "results/pilot/agent/scores.json"
-        scores.write_text(json.dumps({"run_config": doc}))  # scored after that run: only the settings differ
+        scores.write_text(json.dumps({**json.loads(scores.read_text()), "run_config": doc}))  # only the settings differ
     return apply
 
 
@@ -515,7 +528,21 @@ def llm_config_changed(repo, layout):
 
 def stale_scores(repo, layout):
     path = layout.root / "results/pilot/agent/scores.json"
-    path.write_text(json.dumps({"run_config": {**json.loads(path.read_text())["run_config"], "model": "earlier"}}))
+    doc = json.loads(path.read_text())
+    path.write_text(json.dumps({**doc, "run_config": {**doc["run_config"], "model": "earlier"}}))
+
+
+def earlier_run_line(repo, layout):
+    """A scored prediction whose latest power.jsonl line names another run_config.json: a run with these settings stopped
+    before this incident and left the prediction of an earlier run (review 2026-10-10)."""
+    path = layout.root / "results/pilot/agent/power.jsonl"
+    line = json.loads(path.read_text())
+    path.write_text(json.dumps({**line, "run_config_sha256": "sha256:" + "0" * 64}) + "\n")
+
+
+def scores_without_incidents(repo, layout):
+    path = layout.root / "results/pilot/agent/scores.json"
+    path.write_text(json.dumps({"run_config": json.loads(path.read_text())["run_config"]}))
 
 
 @pytest.mark.parametrize("breaks, needle", [
@@ -533,8 +560,12 @@ def stale_scores(repo, layout):
     (lambda repo, layout: run_config_edit(lambda d: d.update(split="heldout"))(layout), "split"),
     (llm_config_changed, "agent.*llm"),
     (stale_scores, "scores.json"),
+    (earlier_run_line, "agent: its Pilot scores include predictions .*INC-002.*to the end"),
+    (lambda repo, layout: (layout.root / "results/pilot/agent/power.jsonl").unlink(), "agent: .*INC-002.*to the end"),
+    (scores_without_incidents, "agent: .*cannot be compared"),
 ], ids=["no-run-config", "num-ctx", "digest", "ollama-version", "think", "num-predict", "seed", "temperature", "no-llm",
-        "budgets", "model", "split", "config-changed-after-the-pilot", "stale-scores"])
+        "budgets", "model", "split", "config-changed-after-the-pilot", "stale-scores", "earlier-run-prediction",
+        "no-power-line", "scores-without-incidents"])
 def test_the_freeze_needs_pilot_llm_runs_with_exactly_the_settings_it_freezes(tmp_path, breaks, needle):
     # decision 026 #32 (user decision 2026-10-10, item 7b): every LLM method's Pilot run_config.json records the model,
     # runtime (provider, model, digest, Ollama version, num_ctx, num_predict, temperature, seed, think) and budgets of the

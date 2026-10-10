@@ -14,8 +14,12 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
   6. `num_predict` 8192；7. freeze 另外拒絕：目前 env lock 沒有通過的 soak（026 解讀 31）、任一 LLM 方法的 Pilot `run_config.json` 不是要凍結的設定
      或 Pilot 分數不是從那次執行算的（026 解讀 32）；freeze 紀錄的格式與 held-out 的驗證不變，`heldout-freeze` 印出找到的 soak 報告與各 run_config 的 sha；
   8. grafana 的背景安裝器維持現狀。
-  - 另外：`ollama.timeout_s` 3600 → **7200**（探測速度外插：一次接近滿 context 的呼叫最壞約 43–50 分鐘，已到 3600 的 83%；held-out 上超時會變成放棄作答，見 029）。
-  - 測試：1058 passed（`-m "not network and not docker_daemon"`）；電力一律 monkeypatch，沒有執行任何模型、server、Docker 或 `pmset`。
+  - `ollama.timeout_s` **維持提案的 3600**（不在八項之內；探測速度外插：約 23 萬 tokens 的 dump-all 呼叫約 33–43 分鐘，最壞約 50 分鐘、3600 的 83%）。
+    要不要加長是使用者的決定（freeze 之前；Pilot 不需重跑），見 029「`timeout_s`」一節與 A1。
+  - **審查（2026-10-10，只拒絕更多或只增加紀錄）**：`timeout_s` 改回 3600（實作時曾改成 7200，不在使用者同意的範圍）；`power.jsonl` 每一行另記
+    `run_config_sha256`，freeze 拒絕「中途停止的 Pilot 執行留下前一次執行的 prediction」（026 解讀 32，原本只靠流程）；held-out 失敗嘗試的 latency
+    不是正式電力條件時評分也列出（`failed_not_formal`）；補上不可重試錯誤 / 不合格 prediction 之後電力紀錄的測試；023 的解讀清單補 31、32。
+  - 測試：1065 passed（`-m "not network and not docker_daemon"`）；電力一律 monkeypatch，沒有執行任何模型、server、Docker 或 `pmset`。
 - **使用者決定（2026-10-10）與實作**（023「使用者決定」的「追加（2026-10-10）」）：
   1. 統計 baseline 在 Pilot 上的那一次修訂**放棄**：stat-anomaly 維持 v2（decision 014「補註（2026-10-10）」；freeze 的 Pilot 修訂宣告 014 = waived，
      freeze 檢查強制這一項）。
@@ -308,10 +312,15 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
       uv run python -m eval gate --method agent --against stat-anomaly --set pilot      # Pilot 診斷，不是 Gate 判定
       ```
       - 時間是依探測速度的估計（029「探測結果」），不是量測；第一個方法跑完後依實際的 latency 更新。
-      - agent 開始時 stderr 會印 `WARNING (decision 029): agent's worst case (409,730 proxy tokens …) is above num_ctx 262,144`：只是報告（029 §2.5），
-        真的超過時那次呼叫以 `context_overflow` 停止、不會靜默截斷。Agent 的實際 / proxy 比例最高約 1.68，工具輸出用滿 120,000 proxy 的長對話有可能碰到。
+      - **每個 LLM 方法**（包括第一個跑的 retrieval）開始時 stderr 都會印
+        `WARNING (decision 029): agent's worst case (409,730 proxy tokens …) is above num_ctx 262,144`：`start_llm` 對三個方法的 fit 都報告，
+        不管這次跑的是哪個；只是報告（029 §2.5），不是錯誤。Agent 真的超過時那次呼叫以 `context_overflow` 停止、不會靜默截斷。
+        Agent 的實際 / proxy 比例最高約 1.68，工具輸出用滿 120,000 proxy 的長對話有可能碰到。
+      - `timeout_s` 是 3600：dump-all 接近滿 context 的一次呼叫估計 33–50 分鐘。若 Pilot 上有呼叫逾時（`transport_error`、exit 2），
+        或評分表的 dump-all `latency_s` max 接近 3600，回報使用者決定要不要加長（029「`timeout_s`」；freeze 之前改不需重跑 Pilot 的其他方法）。
       - exit 2（`error: …`）：`CallError`（例如 `context_overflow`）、釘選不符、電力不是正式條件。Pilot 沒有嘗試紀錄，重跑時整個 Pilot 從頭執行、
-        所有 prediction 與 `run_config.json` 重寫（A1）；**中途停止的執行不要評分**（026 解讀 32 的已知限制）。原因回報使用者，不自行改預算或設定。
+        所有 prediction 與 `run_config.json` 重寫（A1）；**中途停止的執行不要評分**，要重跑到 exit 0 再評分（就算評分了，freeze 也會以 `power.jsonl` 的
+        `run_config_sha256` 拒絕留下的舊 prediction，026 解讀 32）。原因回報使用者，不自行改預算或設定。
       - 評分表的「Budgets, usage and visible data」段會列出 latency 不是在正式電力條件下量測的 incident（`power.jsonl`）。
       - 之後：`uv run python -m eval gold-todo --set pilot` 產生 LLM 方法新引用的 evidence gold 工作表（只列新的；由使用者標註，decision 017）。
    3. held-out：plan → freeze（`collect heldout-freeze` 現在由程式要求：目前 lock 有通過的 soak（soak #6 已滿足）、三個 LLM 方法的 Pilot `run_config.json`
@@ -333,6 +342,7 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
     原本待確認的三項（版本釘選或只記錄、電力條件、freeze 是否強制）都已決定：釘選、套用並記錄、強制。
   - **下一步不需要使用者**：三個方法在 Pilot 上執行（下一步 8.2）。執行中被拒絕或停止（`CallError`、釘選、電力）時回報使用者，不自行改設定或預算。
   - **之後需要使用者**：LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
+    若 Pilot 的 dump-all 有呼叫逾時或最長的呼叫接近 3600 秒：決定要不要加長 `ollama.timeout_s`（不在「照建議」八項之內，維持提案的 3600；freeze 之前決定，029）。
   - 已完成並合併進 main（decision 029）：Ollama adapter（只連 loopback、拒絕 cloud 模型；`truncate` / `shift` 關閉、每個回覆檢查——包括不依賴
     `truncate: false` 的送出量與計數下限——截斷或無法確認未截斷一律是不可重試的 `CallError`；解析不了的 tool call 參數照 020 §3 拒收）、
     模型 digest 與 Ollama 版本釘選（每個 incident 的檢查在嘗試開始之前：server 不在或模型被換時執行停止、不用掉 held-out 嘗試）、整個執行只用開始時的設定、

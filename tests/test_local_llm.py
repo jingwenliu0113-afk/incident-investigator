@@ -65,12 +65,14 @@ APPROVED = {"provider": "ollama", "model": "qwen3.5:9b-q4_K_M",
 
 def test_the_committed_config_is_the_model_the_user_approved_with_unchanged_budgets():
     # user decision 2026-10-10 「照建議」 (decision 029): qwen3.5 9B, num_ctx 262,144 (its maximum), think off, Ollama 0.35.0
-    # pinned, num_predict 8192; the budgets are unchanged
+    # pinned, num_predict 8192; the budgets are unchanged; timeout_s stays the proposed 3600 (not one of the eight items:
+    # the probe's estimate for a call near the full context is below it, review 2026-10-10)
     config = json.loads(LLM_CONFIG.read_text())
     assert config["status"] == "approved" and {k: config[k] for k in APPROVED} == APPROVED
     assert config["ollama"] == {"url": "http://127.0.0.1:11434", "version": "0.35.0", "num_ctx": 262_144,
-                                "num_predict": 8192, "seed": 42, "think": False, "timeout_s": 7200}
+                                "num_predict": 8192, "seed": 42, "think": False, "timeout_s": 3600}
     assert config["budgets"] == COMMITTED_BUDGETS and "029" in config["note"] and "照建議" in config["note"]
+    assert "7200" not in config["note"]  # the note records only what the user approved
     assert load_llm_config() == config  # every pinned field and the context fit pass; no server is asked
     fit = llm_fit(config["budgets"], 262_144, 8192)
     assert fit["dump-all"]["fits"] and fit["agent"]["fits"]
@@ -462,3 +464,103 @@ def test_power_after_a_retryable_held_out_attempt_stops_the_run_and_the_retry_wa
         ("INC-050", 1, False), ("INC-050", 2, True), ("INC-051", 1, True)]
     result = score_method(layout, "dump-all", "heldout", out, project_dir=project)
     assert result["usage"]["latency_power"]["not_formal"] == []  # the prediction's own attempt was formal
+    # review 2026-10-10: the failed attempt's latency is in "Failed attempts" and was measured on battery: listed too
+    (failed,) = result["usage"]["latency_power"]["failed_not_formal"]
+    assert (failed["incident_id"], failed["attempt"]) == ("INC-050", 1) and "Battery Power" in failed["reason"]
+    assert result["usage"]["failed_attempts"]["latency_s"] is not None  # reported, never removed
+    table = (out / "heldout/dump-all/table.md").read_text()
+    assert "Failed attempts: 1" in table
+    assert "Latency of failed attempts NOT measured under the formal power condition" in table
+    assert "INC-050 attempt 1 (power source is" in table
+
+
+def test_failed_held_out_attempts_under_the_formal_power_state_are_not_listed(tmp_path, monkeypatch):
+    from test_eval_heldout import heldout_set
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    fake = FakeOllama(chat=answering, down_after=6)
+    local(monkeypatch, tmp_path, fake)
+    with pytest.raises(ValueError, match="cannot reach"):
+        run_method(layout, "dump-all", "heldout", out, project_dir=project)
+    fake.down_after = None
+    assert run_method(layout, "dump-all", "heldout", out, project_dir=project) == []
+    result = score_method(layout, "dump-all", "heldout", out, project_dir=project)
+    assert result["usage"]["failed_attempts"]["count"] == 1
+    assert result["usage"]["latency_power"]["failed_not_formal"] == []
+    assert "Latency of failed attempts NOT" not in (out / "heldout/dump-all/table.md").read_text()
+
+
+def overflowing(monkeypatch):
+    return FakeOllama(chat=lambda body, prompt: (400, {"error": "the input length exceeds the context length"}))
+
+
+def invalid(monkeypatch):
+    real = runner.METHODS["dump-all"]
+
+    def broken(snapshot, inc, **kw):
+        pred, transcript = real(snapshot, inc, **kw)
+        return {"prediction_version": 1, "incident_id": inc}, transcript  # not a decision-013 prediction
+
+    monkeypatch.setitem(runner.METHODS, "dump-all", broken)
+    return FakeOllama(chat=answering)
+
+
+@pytest.mark.parametrize("setup, error, says, outcome", [
+    (overflowing, ollama.CallError, "context_overflow", "error"),
+    (invalid, ValueError, "invalid prediction", "invalid_prediction"),
+], ids=["non-retryable-call-error", "invalid-prediction"])
+def test_power_after_a_held_out_attempt_that_ends_in_an_error_is_recorded_and_the_error_stands(
+        tmp_path, monkeypatch, setup, error, says, outcome):
+    # decision 029 「電力條件的實作」: an attempt that ends in a non-retryable error or an invalid prediction still gets its
+    # power.jsonl line; the original error stops the run (not the power message) and closes the incident (023 §5)
+    from test_eval_heldout import heldout_set, ledger
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    fake = setup(monkeypatch)
+    local(monkeypatch, tmp_path, fake)
+    power(monkeypatch, FORMAL, FORMAL, BATTERY)  # start, before INC-050's attempt, after it
+    with pytest.raises(error, match=says) as e:
+        run_method(layout, "dump-all", "heldout", out, project_dir=project)
+    assert "power state" not in str(e.value)
+    assert [(e["incident_id"], e["attempt"], e["event"], e.get("outcome")) for e in ledger(out, "dump-all")] == [
+        ("INC-050", 1, "start", None), ("INC-050", 1, "end", outcome)]
+    (line,) = power_lines(out, "heldout", "dump-all")
+    assert (line["incident_id"], line["attempt"], line["formal"]) == ("INC-050", 1, False)
+    assert line["after"]["power"] == BATTERY and "Battery Power" in line["problems"][0]
+    monkeypatch.setitem(runner.METHODS, "dump-all", runner._llm("dump-all"))
+    local(monkeypatch, tmp_path, FakeOllama(chat=answering))  # the power state is back, the model answers
+    assert run_method(layout, "dump-all", "heldout", out, project_dir=project) == ["INC-050"]  # closed: never again
+    assert [(e["incident_id"], e["attempt"]) for e in power_lines(out, "heldout", "dump-all")] == [
+        ("INC-050", 1), ("INC-051", 1)]
+
+
+def test_a_pilot_run_stopped_midway_leaves_earlier_predictions_that_the_freeze_check_refuses(tmp_path, monkeypatch):
+    # review 2026-10-10 (decision 026 #32): a run with the settings being frozen that stops midway leaves the earlier
+    # run's predictions of the incidents it did not reach under its own run_config.json; each power.jsonl line names the
+    # run_config.json its prediction was written under, so the freeze check finds them even if they were scored
+    from env.lock import sha256_path
+
+    layout = stored(tmp_path / "data")
+    stored(tmp_path / "data", inc="INC-002", rg="RG-002")
+    out = tmp_path / "results"
+    old, new = approved_config(), approved_config(num_ctx=262_144)
+    local(monkeypatch, tmp_path, FakeOllama(chat=answering), config=old)
+    run_method(layout, "agent", "pilot", out)  # a complete run with other settings
+    earlier = (out / "pilot/agent/INC-002.json").read_text()
+    local(monkeypatch, tmp_path, FakeOllama(chat=answering), config=new)
+    power(monkeypatch, FORMAL, FORMAL, FORMAL, BATTERY)  # start, before INC-001, after INC-001, before INC-002
+    with pytest.raises(ValueError, match="before INC-002"):
+        run_method(layout, "agent", "pilot", out)
+    assert (out / "pilot/agent/INC-002.json").read_text() == earlier  # produced with the other settings
+    audit_set(layout, "pilot", out)
+    score_method(layout, "agent", "pilot", out)  # scored against NEXT 8.2 (a stopped run is not scored)
+    problems, shas = pilot_llm_problems(out, new, ["agent"])
+    assert len(problems) == 1 and "INC-002" in problems[0] and "INC-001" not in problems[0] and shas == {}
+    assert "026 #32" in problems[0] and "to the end" in problems[0]
+    power(monkeypatch, FORMAL)
+    run_method(layout, "agent", "pilot", out)  # run again to the end (exit 0), then score
+    score_method(layout, "agent", "pilot", out)
+    assert pilot_llm_problems(out, new, ["agent"])[0] == []
+    sha = sha256_path(out / "pilot/agent/run_config.json")
+    assert [(e["incident_id"], e["run_config_sha256"] == sha) for e in power_lines(out, "pilot", "agent")] == [
+        ("INC-001", False), ("INC-002", False), ("INC-001", True), ("INC-001", True), ("INC-002", True)]

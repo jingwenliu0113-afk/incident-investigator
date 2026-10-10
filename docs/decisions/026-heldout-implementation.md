@@ -21,6 +21,10 @@
   （decision 029「使用者決定（2026-10-10）：照建議」第 7 項；023「使用者決定」的「追加（2026-10-10，第三次）」）：freeze 的兩項條件寫進程式。
   `collect heldout-freeze` 另外拒絕：要凍結的 env lock 沒有通過的 soak（解讀 31）；任一個 LLM 方法的 Pilot 結果不是用要凍結的 LLM 設定產生的（解讀 32）。
   freeze 紀錄的格式（`RECORD_KEYS`）、freeze 的驗證（`check_freeze`，held-out 的每一步都用它）、plan 的寫入與其他規則都不變。
+  **修訂 3 審查（2026-10-10，程式審查後；在任何 held-out 資料、freeze 與 Pilot 上的 LLM 執行之前；只會拒絕更多）**：解讀 32 原本只比對
+  `run_config.json` 與 `scores.json`，一次用凍結的設定、但在中途停止的 Pilot 執行會留下前一次執行（別的設定）的部分 prediction，freeze 仍會接受
+  （原本列為「已知限制」、只靠流程擋）。改為：`power.jsonl` 的每一行另記該次嘗試所用 `run_config.json` 的 sha256，freeze 要求該方法 Pilot `scores.json`
+  評分的每個 incident 在 `power.jsonl` 的最後一行都指向目前的 `run_config.json`（解讀 32「混合的 Pilot 目錄」）。freeze 紀錄、held-out 的驗證與其他規則不變。
 - 影響範圍：`collect/heldout.py`、`collect/freeze.py`（新增）；`collect/__main__.py`（`run|next|status --set heldout`、`heldout-plan`、
   `heldout-freeze`、`heldout-list`、incident 指令的 freeze 檢查；修訂 2：`ack-failures --set heldout --slot`）；`collect/rungroup.py`（`Plan.slot`、`Plan.freeze_sha256`；修訂 1：`up_at` 先寫）；
   `collect/pilot.py`、`collect/labeling.py`、`collect/layout.py`；`eval/runner.py`、`eval/__main__.py`；`agent/harness.py`（`CallError`）；
@@ -234,9 +238,17 @@
     - **不比對** `scope`（固定的描述文字）與 `llm_methods.json` 中不進 `run_config.json` 的欄位（`url`、`timeout_s`、`note`）：使用者同意的是 llm 紀錄與預算；
       整個 `llm_methods.json` 已由 freeze 紀錄的 `llm.config_sha256` 釘住（解讀 8）。
     - 只有 provider `ollama` 有 runtime 紀錄；其他 provider 的期望 `llm` 是 null。它們現在沒有 adapter、不能執行；換回付費 API 時另寫 decision 並更新這一項。
-    - **已知限制**：Pilot 的執行沒有嘗試紀錄（NEXT A1）；一次在中途停止的 Pilot 執行會留下新的 `run_config.json` 與前一次執行的部分 prediction。
-      prediction 不帶設定（decision 013 的格式不變），所以這種混合無法從檔案判斷，程式不檢查。流程上：Pilot 的 LLM 執行要跑完（exit 0）才評分（NEXT 下一步 8.2）；
-      設定已批准、freeze 之前不改，同一份設定的重跑混在一起沒有影響。
+    - **混合的 Pilot 目錄（修訂 3 審查，2026-10-10；原本列為「已知限制」、程式不檢查）**：Pilot 的執行沒有嘗試紀錄（NEXT A1）；一次在中途停止的
+      Pilot 執行會留下新的 `run_config.json` 與前一次執行的部分 prediction（`run_method` 先寫 `run_config.json`，再逐一寫 prediction），
+      電力或釘選的停止、`CallError` 都會造成這種狀態。prediction 不帶設定（decision 013 的格式不變），所以改由 sidecar 判斷：
+      本機模型的每次嘗試結束後寫的 `power.jsonl` 那一行（decision 029「電力條件的實作」）另記 `run_config_sha256`（該次執行的 `run_config.json`
+      寫出之後的 sha256；held-out 續跑時 `run_config.json` 不變，sha 也不變）。freeze 要求：該方法 Pilot `scores.json` 的 `incidents` 中每個 incident，
+      `power.jsonl` 的**最後一行**的 `run_config_sha256` 等於目前 `run_config.json` 的 sha256；沒有任何一行也拒絕，訊息列出這些 incident，
+      要求整個 Pilot 重跑到 exit 0 再評分。`scores.json` 沒有 `incidents` 或 `power.jsonl` 無法解析 → 無法比較、拒絕。
+      - 為什麼用 `run_config.json` 的 sha 而不是 prediction 的 mtime：內容決定、不受複製或還原檔案影響，也正好表示「用哪一份設定」；
+        同一份設定的兩次執行 sha 相同，混在一起沒有影響（temperature 0、同一個 seed）。不在 `run_config.json` 加每次執行的 token：held-out 續跑要求它完全相同。
+      - 只看「被評分的 incident」：撤回或被排除的 incident 不進分數，它們留下的舊 prediction 不影響結果。
+      - 只有寫了 `power.jsonl` 的程式（2026-10-10 之後）產生的 Pilot 結果能通過；目前沒有任何 Pilot 上的 LLM 結果，所以沒有既有結果被這項拒絕。
     - **不寫進 freeze 紀錄**（理由同解讀 31）：紀錄已釘住 `llm_methods.json`，各方法 Pilot `run_config.json` 的 sha256 由 `heldout-freeze` 印在
       `checked.pilot_run_config_sha256`。
 
@@ -288,6 +300,9 @@
   held-out 的驗證、plan、收集、評分與 Gate 都不變。測試：`tests/test_heldout_freeze.py`（四種沒有通過的 soak、Pilot run_config 每一個不同的欄位、
   設定在 Pilot 之後被改、過期的 scores.json、統計 baseline 不需要 run_config、印出的 `checked`）、`tests/test_collect_cli.py`（CLI 印出 `checked`）、
   `tests/test_local_llm.py`（真正的 Pilot 執行寫出的 run_config 通過這項檢查）。
+  修訂 3 審查（混合的 Pilot 目錄）也只拒絕更多；`power.jsonl` 每一行多一個 `run_config_sha256` 欄位（sidecar，不是 prediction 或 `run_config.json`）。
+  測試：`tests/test_heldout_freeze.py`（評分的 incident 的最後一行指向別的 run_config、沒有 `power.jsonl`、`scores.json` 沒有 `incidents`）、
+  `tests/test_local_llm.py`（真正的執行：先用別的設定跑完、再用凍結的設定在 INC-002 之前停止並評分 → 拒絕且只列 INC-002；重跑到結束後通過）。
 - 修訂 1 只拒絕更多（held-out 不撤回、run.lock 存在時不評分），或讓紀錄更完整（每個紀錄都有 `up_at`、prediction 最後寫）；
   不改任何協定、門檻、指標、切分或預算。Pilot 的撤回與評分不變；Pilot 的 run.json 形狀不變（`up_at` 一直都有，只是更早寫入）。
 

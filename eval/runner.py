@@ -171,15 +171,18 @@ def formal_power(when: str) -> dict:
     return {"at": sample["at"], "power": sample["power"]}
 
 
-def _power_after(out_dir: Path, incident_id: str, attempt: int | None, before: dict, *, stop: bool = True) -> None:
+def _power_after(out_dir: Path, incident_id: str, attempt: int | None, before: dict, run_config_sha256: str, *,
+                 stop: bool = True) -> None:
     """The power sample after an incident's attempt (attempt None on the Pilot), appended to POWER_LOG with the one taken
-    before it; never in run_config.json (a resumed held-out run needs it unchanged) nor in a prediction (decision 013).
+    before it and the sha256 of the run_config.json the attempt ran under (review 2026-10-10: on the Pilot it tells which
+    run wrote the incident's prediction, decision 026 #32); never in run_config.json (a resumed held-out run needs it
+    unchanged) nor in a prediction (decision 013).
     A sample that is not formal stops the run (unless an error already does): what the attempt produced stands and its
     latency is reported as measured under non-formal power (a held-out incident is never run again, decision 023 §5)."""
     sample = _power_sample()
-    _append(out_dir, {"incident_id": incident_id, "attempt": attempt, "before": before,
-                      "after": {"at": sample["at"], "power": sample["power"]}, "formal": not sample["problems"],
-                      "problems": sample["problems"]}, name=POWER_LOG)
+    _append(out_dir, {"incident_id": incident_id, "attempt": attempt, "run_config_sha256": run_config_sha256,
+                      "before": before, "after": {"at": sample["at"], "power": sample["power"]},
+                      "formal": not sample["problems"], "problems": sample["problems"]}, name=POWER_LOG)
     if stop and sample["problems"]:
         label = incident_id if attempt is None else f"{incident_id}'s attempt {attempt}"
         held = "" if attempt is None else "; a held-out incident with a prediction is never run again (decision 023 §5)"
@@ -187,6 +190,11 @@ def _power_after(out_dir: Path, incident_id: str, attempt: int | None, before: d
                          "stops here (decision 029, user decision 2026-10-10): what the attempt produced stands, "
                          f"{POWER_LOG} marks its latency as measured under non-formal power and the score lists it{held}; "
                          "restore the high power mode on AC power before running again")
+
+
+def _power_log(out_dir: Path) -> list[dict]:
+    path = Path(out_dir) / POWER_LOG
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
 
 
 def finish_llm(config: dict | None) -> None:
@@ -246,7 +254,9 @@ def pilot_llm_problems(results_root: Path, config: dict | None, methods) -> tupl
     Pilot results were produced with exactly the LLM settings being frozen. Its Pilot run_config.json records a Pilot run
     of that method with this config's model, budgets and local runtime (agent.ollama.pinned_record: provider, model,
     digest, Ollama version, num_ctx, num_predict, temperature, seed, think); its Pilot scores.json, once written, embeds
-    that run_config (scored after that run; a missing scores.json is the freeze's other check). Returns
+    that run_config (scored after that run; a missing scores.json is the freeze's other check), and every incident it
+    scores has its latest POWER_LOG line naming that run_config.json (review 2026-10-10: a run with these settings that
+    stopped midway leaves the predictions of an earlier run for the incidents it did not reach). Returns
     (problems, {method: sha256 of its run_config.json})."""
     from agent.ollama import pinned_record
     from env.lock import sha256_path
@@ -259,12 +269,18 @@ def pilot_llm_problems(results_root: Path, config: dict | None, methods) -> tupl
                             "eval/llm_methods.json first (decision 026 #32)")
             continue
         scores = path.with_name("scores.json")
+        earlier = []
         try:
             doc = json.loads(path.read_text())
             want = {"method": m, "split": "pilot", "model": config["model"], "budgets": method_budgets(m, config),
                     "llm": pinned_record(config)}
             differ = [k for k in want if doc.get(k) != want[k]]
-            stale = not differ and scores.exists() and json.loads(scores.read_text()).get("run_config") != doc
+            scored = json.loads(scores.read_text()) if not differ and scores.exists() else None
+            stale = scored is not None and scored.get("run_config") != doc
+            if scored is not None and not stale:
+                latest = {e["incident_id"]: e.get("run_config_sha256") for e in _power_log(path.parent)}
+                sha = sha256_path(path)
+                earlier = [r["incident_id"] for r in scored["incidents"] if latest.get(r["incident_id"]) != sha]
         except (ValueError, KeyError, TypeError, AttributeError) as e:
             problems.append(f"{m}: its Pilot run_config.json cannot be compared with eval/llm_methods.json "
                             f"({type(e).__name__}: {e}) (decision 026 #32)")
@@ -276,6 +292,12 @@ def pilot_llm_problems(results_root: Path, config: dict | None, methods) -> tupl
         elif stale:
             problems.append(f"{m}: its Pilot scores.json was not computed from the run in run_config.json (decision 026 "
                             f"#32): `python -m eval score --method {m} --set pilot`")
+        elif earlier:
+            problems.append(f"{m}: its Pilot scores include predictions that the run in run_config.json did not write "
+                            f"({', '.join(earlier)}: the latest {POWER_LOG} line of each names another run_config.json or "
+                            "there is none), e.g. a run that stopped midway left an earlier run's predictions (decision 026 "
+                            f"#32): run it on the Pilot again to the end (exit 0) and `python -m eval score --method {m} "
+                            "--set pilot`")
         else:
             shas[m] = sha256_path(path)
     return problems, shas
@@ -377,6 +399,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
     from agent.harness import CallError
     from collect.faults import write_atomic
     from collect.heldout import write_once
+    from env.lock import sha256_path
 
     freeze, listing = heldout_guard(layout, project_dir)
     config = load_llm_config() if method in LLM_METHODS else None  # refuses: not approved, no adapter, not pinned
@@ -404,6 +427,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
                                  "(decision 023 §5, 024)")
         else:
             write_once(path, run_config)
+        run_sha = sha256_path(path) if llm else None  # named by each POWER_LOG line (review 2026-10-10)
         ledger = _ledger(out_dir)
         for item in listing["doc"]["incidents"]:  # never an excluded incident or a closed slot
             inc = item["incident_id"]
@@ -425,7 +449,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
 
                 def power_after(stop: bool = True) -> None:  # after the attempt's end event (decision 029, 2026-10-10)
                     if llm:
-                        _power_after(out_dir, inc, attempt, before, stop=stop)
+                        _power_after(out_dir, inc, attempt, before, run_sha, stop=stop)
 
                 try:
                     out = METHODS[method](snapshot, inc, **kw)
@@ -493,6 +517,9 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
     run_config = {"method": method, "split": split, "model": config["model"] if config else None,
                   "budgets": method_budgets(method, config), "scope": SCOPES.get(method), **({"llm": llm} if llm else {})}
     (out_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
+    from env.lock import sha256_path
+
+    run_sha = sha256_path(out_dir / "run_config.json") if llm else None  # named by each POWER_LOG line (review 2026-10-10)
     written = []
     try:
         for inc, _ in incidents_in(layout, split):
@@ -509,7 +536,7 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
                 (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
             written.append(path)
             if llm:
-                _power_after(out_dir, inc, None, before)
+                _power_after(out_dir, inc, None, before, run_sha)
     finally:
         finish_llm(config if llm else None)
     return written
@@ -603,27 +630,33 @@ def _usage_aggregate(rows: list[dict]) -> dict:
             if seen else None}
 
 
-def _latency_power(out_dir: Path, rows: list[dict], run_config: dict | None) -> dict | None:
+def _latency_power(out_dir: Path, rows: list[dict], run_config: dict | None, failed: list[dict] | None = None) -> dict | None:
     """decision 029, user decision 2026-10-10 (item 5): the scored incidents whose latency was not measured under the
     formal power state, from the latest POWER_LOG line of each (the attempt that produced its prediction; on the Pilot,
-    the latest run). Reported next to the latency, never removed from it. None for a run without a local model."""
+    the latest run). Held-out (`failed`: the ledger's failed attempts, whose latency the report adds up): also the timed
+    failed attempts whose own line is not formal or missing (review 2026-10-10). Reported next to the latency, never
+    removed from it. None for a run without a local model."""
     if not (run_config or {}).get("llm"):
         return None
-    latest, path = {}, out_dir / POWER_LOG
-    for line in path.read_text().splitlines() if path.exists() else []:
-        if line.strip():
-            entry = json.loads(line)
-            latest[entry["incident_id"]] = entry
-    timed = [r["incident_id"] for r in rows if r["usage"].get("latency_s") is not None]  # abstentions have no latency
-    not_formal = []
-    for inc in timed:
-        entry = latest.get(inc)
+    lines = _power_log(out_dir)
+    latest = {e["incident_id"]: e for e in lines}
+    by_attempt = {(e["incident_id"], e.get("attempt")): e for e in lines}
+
+    def why(entry: dict | None) -> str | None:
         if entry is None:
-            not_formal.append({"incident_id": inc, "attempt": None, "reason": f"no power sample in {POWER_LOG}"})
-        elif entry.get("formal") is not True:
-            not_formal.append({"incident_id": inc, "attempt": entry.get("attempt"),
-                               "reason": "; ".join(entry.get("problems") or []) or "not formal"})
-    return {"condition": POWER_CONDITION, "incidents_timed": len(timed), "not_formal": not_formal}
+            return f"no power sample in {POWER_LOG}"
+        return None if entry.get("formal") is True else "; ".join(entry.get("problems") or []) or "not formal"
+
+    timed = [r["incident_id"] for r in rows if r["usage"].get("latency_s") is not None]  # abstentions have no latency
+    not_formal = [{"incident_id": inc, "attempt": (latest.get(inc) or {}).get("attempt"), "reason": reason}
+                  for inc in timed if (reason := why(latest.get(inc))) is not None]
+    out = {"condition": POWER_CONDITION, "incidents_timed": len(timed), "not_formal": not_formal}
+    if failed is not None:
+        out["failed_not_formal"] = [
+            {"incident_id": e["incident_id"], "attempt": e["attempt"], "reason": reason} for e in failed
+            if (e.get("usage") or {}).get("latency_s") is not None
+            and (reason := why(by_attempt.get((e["incident_id"], e["attempt"])))) is not None]
+    return out
 
 
 def _evidence_aggregate(rows: list[dict]) -> dict:
@@ -666,7 +699,7 @@ def _heldout_scoring(layout: DataLayout, method: str, out_root: Path, project_di
         return None if None in values else round(sum(values), 6)
 
     doc = listing["doc"]
-    return {"pairs": pairs, "ledger": ledger, "listing": doc,
+    return {"pairs": pairs, "ledger": ledger, "listing": doc, "failed": failed,
             "report": {"freeze_sha256": freeze["sha256"], "heldout_incidents_sha256": listing["sha256"],
                        "excluded": doc["excluded"], "closed_slots": doc["closed_slots"],
                        "removed_faults": doc["removed_faults"], "unanswered": []},
@@ -753,7 +786,7 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *,
               "review_differences": differences,
               "run_config": json.loads(config_path.read_text()) if config_path.exists() else None,
               "usage": _usage_aggregate(rows)}
-    result["usage"]["latency_power"] = _latency_power(out_dir, rows, result["run_config"])
+    result["usage"]["latency_power"] = _latency_power(out_dir, rows, result["run_config"], held["failed"] if held else None)
     if held:  # decision 023 §5, §6: what the list left out and what the run could not answer
         result["heldout"] = held["report"]
         result["usage"]["failed_attempts"] = held["failed_attempts"]
@@ -890,6 +923,10 @@ def _heldout_lines(result: dict) -> list[str]:
     f = result["usage"]["failed_attempts"]
     lines.append(f"Failed attempts: {f['count']} (tokens in {f['tokens_in']}, out {f['tokens_out']}, cost USD {f['cost_usd']}, "
                  f"latency s {f['latency_s']}).")
+    if failed := (result["usage"].get("latency_power") or {}).get("failed_not_formal"):  # decision 029, review 2026-10-10
+        lines.append("Latency of failed attempts NOT measured under the formal power condition (AC power, high power mode; "
+                     "kept in the failed attempts' latency above): " + "; ".join(
+                         f"{e['incident_id']} attempt {e['attempt']} ({e['reason']})" for e in failed) + ".")
     return lines
 
 
