@@ -8,7 +8,7 @@ Core §1。為什麼是這個版本、這組 compose 與這些 override，見 `d
 | `otel-demo.overrides.env` | 人 | 疊在 upstream `.env` 之上的變數（`DEMO_VERSION`、`IMAGE_VERSION`…）；每改一行都要寫 decision log |
 | `otel-demo.lock.json` | `python -m env resolve` | upstream commit、每個檔案 / bind mount 的 sha256、28 個 image 的 index digest 與 arm64 / amd64 manifest digest、`up` 參數 |
 | `compose.pinned.yaml` | `python -m env resolve` / `pin` | compose override：每個 service 都改成 `image: <ref>@sha256:<index digest>` |
-| `compose.overrides.yaml` | 人 | 本 Project 的 compose overlay：memory limit（decision 004 / 007）、collector 的 raw export layer（decision 008）、grafana 啟動時不下載 plugin（`GF_INSTALL_PLUGINS` 設為空，decision 028，暫時）；每一項都要有 decision log |
+| `compose.overrides.yaml` | 人 | 本 Project 的 compose overlay：memory limit（decision 004 / 007）、collector 的 raw export layer（decision 008）、grafana 啟動時不依 `GF_INSTALL_PLUGINS` 下載 plugin（設為空，decision 028，暫時；Grafana 自己預設的其他網路行為不變）；每一項都要有 decision log |
 | `otelcol-config-raw.yml` | 人 | collector 的 extras layer：只新增 `traces/raw`、`metrics/raw`、`logs/raw` 與 `file/raw_*`，不改任何 upstream pipeline（decision 008） |
 | `upstream/opentelemetry-demo/` | `python -m env fetch-upstream` | upstream shallow clone（gitignored） |
 
@@ -71,3 +71,4 @@ R1–R6（有 raw pipeline 時加上 R7–R9）全部通過才算 baseline 穩�
 4. `uv run pytest`。
 5. 不同 lock sha256 收集到的資料不得混用。
 6. 新 lock 要先通過 soak（上面的指令）才能收集：collect 的 preflight 只接受 `env_lock_sha256` 等於目前 lock、通過且 teardown 乾淨的 soak 報告。
+   held-out freeze 會釘住 lock 但**不檢查 soak**，所以新 lock 的 soak 要在 `collect heldout-freeze` 之前 PASS（decision 028）。

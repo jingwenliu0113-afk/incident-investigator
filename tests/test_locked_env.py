@@ -89,6 +89,19 @@ def test_project_files_recorded_in_the_lock_match_the_committed_files(lock):
     assert {path: sha256_path(PROJECT_DIR / path) for path, _ in entries} == dict(entries)
 
 
+def test_spec_note_lists_every_service_the_project_overlay_sets():
+    # env/otel-demo.spec.json is the human-edited input and its note enumerates the overlay; it is not hashed into the
+    # lock, so nothing else catches it falling behind the overlay (decision 028 added grafana)
+    import yaml
+
+    from env.cli import SPEC_PATH
+
+    services = yaml.safe_load((PROJECT_DIR / OVERRIDES).read_text())["services"]
+    notes = [n for n in json.loads((PROJECT_DIR / SPEC_PATH).read_text())["notes"] if n.startswith(f"{OVERRIDES}:")]
+    assert len(notes) == 1
+    assert [svc for svc in services if svc not in notes[0]] == []
+
+
 GRAFANA_PLUGINS = ("services", "grafana", "environment", "GF_INSTALL_PLUGINS")  # decision 028
 
 
@@ -99,7 +112,7 @@ def test_grafana_installs_no_plugin_at_start(lock):
     upstream_env = _render(lock, drop=(OVERRIDES,))["services"]["grafana"]["environment"]
     assert upstream_env["GF_INSTALL_PLUGINS"] == "grafana-opensearch-datasource"
     env = _render(lock)["services"]["grafana"]["environment"]
-    assert env["GF_INSTALL_PLUGINS"] == ""  # set and empty: the image installs nothing
+    assert env["GF_INSTALL_PLUGINS"] == ""  # set and empty: no install asked for by this variable (other defaults unchanged)
     assert {k: v for k, v in env.items() if k != "GF_INSTALL_PLUGINS"} == {
         k: v for k, v in upstream_env.items() if k != "GF_INSTALL_PLUGINS"}
 

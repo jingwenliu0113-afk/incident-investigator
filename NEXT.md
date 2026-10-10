@@ -2,7 +2,7 @@
 
 ## 目前位置（2026-10-10，label review 完成後）
 
-**Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 LLM 方法用哪個模型；A0 grafana 已於 2026-10-10 決定暫時關掉 plugin 下載（decision 028），剩新 lock 的 soak；A3、A5 已於 2026-10-10 確認）。**
+**Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 LLM 方法用哪個模型；A0 grafana 已於 2026-10-10 決定暫時關掉 plugin 下載（decision 028），剩新 lock 的 soak（合併後馬上跑，held-out freeze 前必須 PASS）；A3、A5 已於 2026-10-10 確認）。**
 - **使用者決定（2026-10-10）與實作**（023「使用者決定」的「追加（2026-10-10）」）：
   1. 統計 baseline 在 Pilot 上的那一次修訂**放棄**：stat-anomaly 維持 v2（decision 014「補註（2026-10-10）」；freeze 的 Pilot 修訂宣告 014 = waived，
      freeze 檢查強制這一項）。
@@ -282,12 +282,19 @@
 
 - **A0 grafana 的 plugin 下載逾時**：**使用者 2026-10-10 決定暫時關掉**（「先暫時兩個都同意，先關掉 grafana 下載再測本地模型，之後可以考慮再換回來原本的方案」）。
   已實作（decision 028）：overlay 把 grafana 的 `GF_INSTALL_PLUGINS` 設為空；lock 離線重算（沿用 lock 裡的 digest），只有 overlay 的 sha 與 `generated_at` 改變，
-  28 個 image digest 不變；新 lock `sha256:88c4989f…`（Pilot 是 `055cc7a0…`）。grafana 的資料本來就不進 snapshot（X1），方法看到的資料定義不變。
-  **剩下一步：新 lock 的 soak**（main checkout 合併本變更後、沒有本 Project 的 container、建議高效能 + AC）：
+  28 個 image digest 不變；新 lock `sha256:1e749f67…`（Pilot 是 `055cc7a0…`；中間版本 `88c4989f…` 作廢）。grafana 的資料本來就不進 snapshot（X1），
+  方法看到的資料定義不變。只關掉這個變數要求的安裝；Grafana 自己預設的其他網路行為不改、也沒驗證。
+  **剩下一步：新 lock 的 soak，合併後馬上跑（不必等 A1）**（main checkout、沒有本 Project 的 container、建議高效能 + AC）：
   `./tools/with-mac-lock uv run python -m env soak --minutes 30 --warmup-minutes 5`（約 40–45 分鐘）。**通過之前所有收集都拒絕**
-  （preflight 要求這個 lock 的 soak 通過：`collect run`、`pilot-loop`、`smoke`）。grafana 若因缺 plugin 起不來或 crash loop，R1 失敗；
-  沒有規則看 grafana 是否正常運作（它不進 snapshot）。不重做校準（policy v1 已凍結、014 的門檻固定）。
-  換回原方案：只能在 freeze 前另寫 decision；逐 byte 還原 overlay 與 lock 就能沿用 soak #5，重算 lock 則要再跑 soak（028「換回原本的方案」）。
+  （preflight 要求這個 lock 的 soak 通過：`collect run`、`pilot-loop`、`smoke`）。
+  - **順序：soak PASS 之後才能 `collect heldout-freeze`**。freeze 程式不檢查 soak；先 freeze、soak 才失敗時，overlay / lock 已被釘住、
+    又沒有 freeze 後的修正路徑（A4），held-out 會卡死（028「必須在 held-out freeze 之前」）。
+  - **soak 沒有 PASS**（例如 grafana 因缺 plugin 起不來或 crash loop → R1 失敗）：在 freeze 前由使用者決定：逐 byte 還原 overlay 與 lock 換回原方案
+    （沿用 soak #5，不必再跑 soak），或另寫 decision 修正後再跑 soak。
+  - **soak 期間的人工確認（只讀，不是判定條件）**：soak 開始約 5 分鐘後、結束前，另開終端跑一次 `docker logs grafana 2>&1 | grep -iE 'plugin|install'`，
+    結果記到 028 的補註。soak 只能確認 grafana 沒有重啟或被 kill，確認不了它是否真的沒有下載；沒有規則看 grafana 是否正常運作（它不進 snapshot）。
+  - 不重做校準（policy v1 已凍結、014 的門檻固定）。
+  - 換回原方案：只能在 freeze 前另寫 decision；逐 byte 還原 overlay 與 lock 就能沿用 soak #5，重算 lock 則要再跑 soak（028「換回原本的方案」）。
 - **A1 付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
   scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
   - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）

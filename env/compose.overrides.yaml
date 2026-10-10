@@ -28,6 +28,8 @@ services:
     environment:
       # decision 028 (temporary, user decision 2026-10-10): upstream installs grafana-opensearch-datasource from
       # grafana.com at every start; a slow download made grafana restart and aborted 5 Pilot run groups before warm-up.
-      # Set and empty, so the image installs nothing (compose merges environment by key; list vs map form does not matter).
+      # Set and empty: only the install this variable asks for is turned off. Grafana's own defaults (preinstalled plugins,
+      # update checks, other network calls) are unchanged and were not verified (decision 028).
+      # compose merges environment by key; list vs map form does not matter.
       # grafana is not a SUT service (decision 011 X1). Switching back is a new decision before the held-out freeze.
       GF_INSTALL_PLUGINS: ""
