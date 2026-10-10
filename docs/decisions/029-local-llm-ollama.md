@@ -232,3 +232,28 @@
   `tests/test_local_probe.py`（只在合成範例、報告內容、兩種防護自我測試與 GUARD FAILED 時 exit 3、解析不了的參數與快取 prompt 的計數、拒絕的情況、CLI、不寫 `data/`）、
   `tests/test_with_local_ollama.py`（假的 `ollama` 執行檔在測試內綁 loopback：固定的環境、交回 exit code、一定停止 server、沒有 lock 或 port 已被占用時什麼都不啟動）。
   全部用腳本化的 transport 或測試內綁在 loopback 的 stub server，**從不連到真正的 Ollama**。
+
+## 探測結果（2026-10-10，只用合成範例；**不是結果**）
+
+三個模型各一次 heavy lock（`with-local-ollama`，server 只在 lock 內存在），高效能模式 + AC，Ollama 0.35.0，think 關、temperature 0、seed 42、num_predict 8192。
+報告存在 session 的暫存目錄（不進 git、不寫 `data/`）。合成範例很小、fault 很明顯，下面的數字只說明工具呼叫能不能用、防護是否成立、速度多少。
+
+| | qwen3 8B（num_ctx 40,960） | qwen3.5 9B（num_ctx 196,608） | gemma4 12B（num_ctx 196,608） |
+|---|---|---|---|
+| 防護自我測試 | 通過（兩項都是 server 自己拒絕） | 通過 | 通過 |
+| 同一 prompt 兩次 | 相同、prompt_eval_count 相同 | 相同 | 相同 |
+| Agent | 合格答案，9 次呼叫，94 s | 合格答案，15 次呼叫、用了 8 種工具，180 s | 30 回合上限，沒有提交（多數回覆是文字、沒有呼叫工具） |
+| dump-all | server 拒絕：63,148 tokens > 40,960（context_overflow） | 三次提交都被判格式不合格（見下） | 輸出 8,192 tokens 文字、沒有提交 |
+| retrieval | 沒有提交 | 三次提交都被判格式不合格（見下） | 沒有提交 |
+| prefill（8k → 130k proxy） | 300 → 209 tok/s（只測到 24k） | 330 → 166 tok/s | 208 → 114 tok/s |
+| decode | 40 → 28 tok/s | 39 → 23 tok/s | 29 → 17 tok/s |
+| 探測總時間 | 9 分鐘 | 36 分鐘 | 70 分鐘 |
+
+- **qwen3.5 的不合格提交是 harness 的缺陷**：它把 `evidence` 寫成 id 字串清單，harness 回的是 Python 例外訊息，模型三次送出相同答案。
+  已修正更正訊息（decision 020「修正（2026-10-10）」，格式不變、沒有放寬）。修正後重跑同一個診斷：dump-all 與 retrieval 都在一次更正後提交合格答案。
+  三個模型的探測報告都是修正之前跑的；Agent 本來就用物件格式，不受影響。
+- **實際 tokens / proxy tokens**：telemetry 文字約 1.6–1.8（dump-all 1.62–1.76、retrieval 1.61–1.80、Agent 0.86–1.68），產生的填充文字約 1.0。
+  §4 的 fit check 以 proxy tokens 比 num_ctx，所以 qwen3.5 在 196,608 時顯示「放得下」，但 dump-all 填滿 120,000 proxy 預算時實際約 19.5–21 萬 tokens，
+  加上任務說明與輸出會超過 196,608，server 會拒絕（不會靜默截斷，但整個 Pilot 執行會停下來）。用 dump-all 的現行預算時，num_ctx 要接近模型上限 262,144。
+- gemma4 與 qwen3 的「沒有提交」沒有進一步診斷（gemma4 也可能是 Ollama 對它的工具呼叫處理）。qwen3 8B 的 context 放不下 dump-all 與 Agent 的預算。
+- think 開沒有測。

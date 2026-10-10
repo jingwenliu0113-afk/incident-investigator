@@ -316,6 +316,7 @@
     `run_config.json` 的 `llm`、`eval local-probe`（防護自我測試要求 server 自己拒絕，否則 exit 3）。
     `eval/llm_methods.json` 仍是 `proposed`（model null），預算不變；使用者批准之前 `eval run` 的 LLM 方法一律拒絕。
     scripted fake model 與合成範例探測都不產生方法結果。審查（2026-10-10，合併前）的修正見 029 開頭。
+  - **探測完成（2026-10-10）**：結果見 029「探測結果」；qwen3.5 9B 是唯一三個方法都能提交合格答案的模型（dump-all / retrieval 在修正 020 的更正訊息之後）。
   - **待使用者**：看過三個本機模型的合成範例探測報告（下一步 8.1）後，決定模型、`num_ctx`、think，並同意在 Pilot 上執行（提案第 3 步）。
     context 放不下預算的模型（qwen3:8b：40,960 < dump-all 的 130,567 proxy tokens）不能原樣跑 dump-all 與 Agent；要不要改預算是使用者的決定。
     同時要確認（029「不在本文件決定」）：
