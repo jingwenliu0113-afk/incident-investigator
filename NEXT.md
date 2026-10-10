@@ -2,7 +2,7 @@
 
 ## 目前位置（2026-10-10，label review 完成後）
 
-**Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 付費 LLM；A0、A3–A5 是 held-out freeze 前仍未決定的事項）。**
+**Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 LLM 方法用哪個模型；A0 grafana 是 held-out freeze 前仍未決定的事項；A3、A5 已於 2026-10-10 確認）。**
 - **使用者決定（2026-10-10）與實作**（023「使用者決定」的「追加（2026-10-10）」）：
   1. 統計 baseline 在 Pilot 上的那一次修訂**放棄**：stat-anomaly 維持 v2（decision 014「補註（2026-10-10）」；freeze 的 Pilot 修訂宣告 014 = waived，
      freeze 檢查強制這一項）。
@@ -128,7 +128,7 @@
     條件 1 讀 compare 的 origin_top1 paired 下界（對每個統計 baseline，compare 記錄 scores 的 sha，過期就拒絕）；條件 2（held-out 的 K 用 slot 數，缺格不降低 ⌈K/2⌉）；
     條件 3；coverage 比例、各 fault 等權平均 / 缺格清單、§7 的各 fault k/K 與差異方向只描述（每個 `eval score` 也列出等權 / 缺格）。
     held-out 才是 Gate 判定，Pilot 只是診斷、不是 Gate 判定；Agent 沒有分數（A1）時 exit 2、不寫檔。
-    held-out 的 gate 輸出不列 incident id 或 run group id；Pilot 上 K < 2 的 fault 不評估條件 2（**請使用者確認，A5**）。
+    held-out 的 gate 輸出不列 incident id 或 run group id；Pilot 上 K < 2 的 fault 不評估條件 2（使用者 2026-10-10 已確認，原 A5）。
   - **合成範例與 2 分鐘 demo（decision 027）**：
     `uv run python -m collect sample --out data/samples/synthetic` 以程式產生 raw、經真正的 normalize 寫出 `INC-000` / `RG-000`（28 分鐘、280 spans、
     38 logs、112 metric points、全部約 250 KB；snapshot 與 ground truth 的一部分分開），`uv run python -m eval demo` 只讀範例、在記憶體裡跑
@@ -271,7 +271,7 @@
 6. LLM 方法（dump-all / retrieval / agent）已登錄在 `python -m eval run`，但 `eval/llm_methods.json` 是 `proposed`：未經使用者批准模型、預算與成本前一律拒絕執行，
    也還沒有 API adapter（decision 020 §6）。
 7. ✅ 第一張 baseline 表（Pilot，stat-anomaly v2）已產生（README「結果」）。
-8. **剩下的 Core 依序，全部等使用者**：LLM 方法在 Pilot 上執行（A1）→ held-out freeze（A0、A3、A5 在 freeze 前決定；013 正式版要 LLM 結果）→
+8. **剩下的 Core 依序，全部等使用者**：LLM 方法在 Pilot 上執行（A1）→ held-out freeze（A0 在 freeze 前決定；013 正式版要 LLM 結果）→
    held-out 收集（`collect next --set heldout`，K = 5）→ held-out 評測與 Gate。LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
    token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
@@ -288,15 +288,13 @@
     中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
     估算 Pilot 成本時要把這種重跑算進去。
   - LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
-- **A3 decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
 - **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 選**「沒有偏好」** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
   freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
   只用於 023 §6 允許的修正）；freeze 釘住所有程式，之後就無法加入。不影響其他工作。
-- **A5 請確認 Gate 的 Pilot 診斷讀法**（023「實作說明：Gate 計算」解讀 4，2026-10-10 review 修正）：Pilot 上 K < 2 的 fault 不評估條件 2
-  （單一 incident 無法顯示可重現性；標為 not evaluated、不算成立）。只讓 Pilot 診斷更難成立；held-out 照 §7 原文（K = 設計的 slot 數），程式行為不變。
-  程式在 freeze 時一起凍結，所以要在 freeze 之前確認。
 
 已處理（2026-10-10 使用者決定；023「使用者決定」的「追加（2026-10-10）」）：
+- 原 A3 gold 標註量：**照原規定**，不修訂 017（023「追加（2026-10-10，第二次）」第 5 項）。
+- 原 A5 Gate 的 Pilot 診斷讀法：**使用者確認**（Pilot 上 K < 2 的 fault 不評估條件 2；held-out 不變；023 第二次追加第 6 項、Gate 解讀 4）。
 - 原 A2 的 freeze 前事項：統計 baseline 在 Pilot 上的「最多修訂一次」（decision 014）**放棄**，stat-anomaly 維持 v2（014「補註（2026-10-10）」；
   Pilot 的 8 個失敗 = rule_limit 4、mechanism 4，沒有發現設計缺陷；n = 10、每個 fault 1 個 incident）。
 - 原 A4.1 待人處理的 slot：**b，與 Pilot 相同**，`collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`（已實作，026 修訂 2、解讀 11、12）。

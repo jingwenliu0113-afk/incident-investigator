@@ -5,7 +5,8 @@
 - **狀態**：Accepted（2026-10-09，使用者決定：K = 5，其餘依保守預設；見文末「使用者決定」）。本協定寫在任何 held-out 資料與任何方法結果出現之前。
   2026-10-10 使用者追加決定三項（014 放棄 Pilot 修訂、待人處理的 slot 由人確認後重新計數、不允許 held-out 撤回）；
   freeze 之後的修正路徑使用者選「沒有偏好」（不實作、維持現況，freeze 之前仍可決定）。同樣在任何 held-out 資料與 freeze 之前；
-  見文末「使用者決定」的「追加（2026-10-10）」。
+  見文末「使用者決定」的「追加（2026-10-10）」。同日另確認兩項（gold 標註量照 017 現行規定；Gate 解讀 4 的 Pilot 讀法），
+  見「追加（2026-10-10，第二次）」。
   - 標「Pilot 後定稿」的項目，要等 Pilot 的收集、review、leakage audit 與 LLM 方法試跑都完成，並在第一個 held-out run group 之前定稿一次。
   - 定稿之後，每次修改都另寫 decision log。
   - 看到 held-out 方法結果之後，永不修改。
@@ -399,6 +400,14 @@
 - 每個方法的 `eval score` 也在 scores.json 的 `by_fault` 與 table.md 的「Per fault」段列出各 fault 平均、等權平均與缺格清單。
   表中「scored / K」是該 fault 計分的 incident 數 / K，不是答對數（答對數 k/K 見解讀 14）。
 
+### 追加（2026-10-10，第二次；同樣在任何 held-out 資料與 freeze 之前、在任何 LLM 方法結果之前）
+
+使用者確認兩項，都是維持現行規則，不改任何門檻、指標、切分或預算：
+
+5. **gold 標註量（上面 2026-10-09 決定 3；NEXT A3）**：照原規定，**不修訂 017**，不改為抽樣。
+6. **Gate 的 Pilot 診斷讀法（「實作說明：Gate 計算」解讀 4；NEXT A5）**：確認。Pilot 上 K < 2 的 fault 不評估條件 2（not evaluated、不算成立）；
+   held-out 照 §7 原文（K 是設計的 slot 數），程式不變。
+
 ### 解讀
 
 1. **只讀、不重算條件 1**：條件 1 讀 `compare-agent-vs-<baseline>.json`（`eval.compare.paired`），不重新實作。只接受：由目前的 scores.json 算出（sha 相符）、set 與方法相符、
@@ -410,7 +419,7 @@
    缺格不會讓條件 2 比較容易成立。Pilot 用該 fault 實際計分的 incident 數（由資料推得）。只看有計分 incident 的 fault。
    **Pilot 上 K < 2 的 fault 不評估條件 2**（2026-10-10 review 修正）：K = 1 時 ⌈1/2⌉ = 1，一次答錯本身就「過半」，單一 incident 無法顯示可重現性；
    這種 fault 標為 not evaluated、不算成立，gate.md 與印出的摘要註明「one incident cannot show reproducibility」。這只讓 Pilot 診斷更難成立，
-   held-out 照 §7 原文計算（K 是設計的 slot 數），程式行為不變。
+   held-out 照 §7 原文計算（K 是設計的 slot 數），程式行為不變。使用者 2026-10-10 確認這個讀法（「追加（2026-10-10，第二次）」第 6 項）。
 5. **條件 2 的「答錯」與「同一個類別」**：答錯 = origin_top1 = 0，包括放棄作答（013 §2、026 解讀 19）；只有 fault_type 錯（mechanism）不算。
    依 §7 的文字，「同一個類別」是 022 六類中的任一類（包括 no_answer、coverage），輸出寫出是哪一類。「過半」是嚴格大於一半（2/4 不算）。
    「這些失敗」只指 origin 答錯的 incident：過半的分母是 origin 答錯數，不含只有 fault_type 錯的失敗。
