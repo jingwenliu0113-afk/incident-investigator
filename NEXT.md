@@ -11,7 +11,7 @@
      （ground-truth 側 `failure_acks.jsonl` 只附加；沒有通過的 freeze 檢查、未知 slot、不是待人處理的 slot、`heldout_incidents.json` 已存在時拒絕、什麼都不寫；
      被確認的 run group 留在所有紀錄與清單的 run group 清單；清單另記錄確認、載入時比對；「3 個 slot 就停止」數確認之後仍待人處理的 slot；
      未觸發 / 關閉的處理與 Pilot 不變）。decision 026 修訂 2（解讀 11、12）。
-  3. freeze 之後的修正路徑：使用者**先跳過、沒有表示偏好** → 不實作，維持現況（見 A4，freeze 之前仍可決定）。
+  3. freeze 之後的修正路徑：使用者選**「沒有偏好」** → 不實作，維持現況（見 A4，freeze 之前仍可決定）。
   4. held-out 撤回：**不允許**（維持預設，026 解讀 30）。
   - **審查（2026-10-10，026 修訂 2 審查；只拒絕更多）**：讀取端原本接受寫入端永遠不會寫的 held-out 確認（手寫一行就能讓 open 的 slot 提前重新計數），
     改為每一筆都必須等於 `ack-failures` 當時會寫的內容（該 slot 全部未確認的失敗、至少 3 個），否則所有 held-out 步驟停止（026 解讀 11）；
@@ -287,7 +287,7 @@
     估算 Pilot 成本時要把這種重跑算進去。
   - LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
 - **A3 decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
-- **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 **先跳過、沒有表示偏好** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
+- **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 選**「沒有偏好」** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
   freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
   只用於 023 §6 允許的修正）；freeze 釘住所有程式，之後就無法加入。不影響其他工作。
 - **A5 請確認 Gate 的 Pilot 診斷讀法**（023「實作說明：Gate 計算」解讀 4，2026-10-10 review 修正）：Pilot 上 K < 2 的 fault 不評估條件 2
