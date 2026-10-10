@@ -123,6 +123,7 @@
   - soak 沒有 PASS 時，在 freeze 前由使用者決定：逐 byte 還原 overlay 與 lock 換回原方案（沿用 soak #5，見下一節），或另寫 decision 修正後再跑 soak。
   - 這個順序目前只靠流程保證（NEXT A0 與 Core 順序）。要用程式擋（例如在 freeze 檢查加上 `passing_soak(…, env_lock_sha256)`）等於改 freeze 協定
     （023 §6 / 026），要另寫 decision；本文件不改。
+    （2026-10-10 使用者決定「照建議」之後已由程式擋下：`collect heldout-freeze` 沒有目前 lock 的通過 soak 就拒絕，decision 026 修訂 3、解讀 31。）
 
 ## 換回原本的方案（使用者說之後可以考慮）
 
@@ -152,3 +153,5 @@
     背景安裝發生在暖機期間，對方法看到的資料沒有可量測的影響。Pilot 期間同一個 image 應該也有這個背景安裝（推測，Pilot 沒有保存 grafana 的 log，未驗證）。
   - 若要連背景安裝也關掉（Grafana 的 `[plugins]` preinstall 停用設定），是另一個 overlay 設定、需要新的 decision、重算 lock 與再一次 soak；
     目前沒有證據顯示它造成任何無效 run，**不做**，列為使用者可選的後續（NEXT A0）。
+  - **使用者決定（2026-10-10）**：使用者「照建議」（decision 029「使用者決定（2026-10-10）：照建議」第 8 項）：背景安裝器**維持現狀**，
+    不加 overlay、不重算 lock、不再跑 soak；soak #6 的 lock（`sha256:1e749f67…`）就是 held-out 要凍結的 lock。之後要改仍只能在 freeze 之前另寫 decision。

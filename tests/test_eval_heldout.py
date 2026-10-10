@@ -173,14 +173,31 @@ def test_a_failing_freeze_check_refuses_every_heldout_eval_command_and_changes_n
 
 
 def test_without_the_list_or_with_an_unapproved_model_nothing_runs_or_is_written(tmp_path, monkeypatch):
+    import eval.runner as runner
+    from env import soak
+
     project, layout, out = heldout_set(tmp_path, monkeypatch)
     listed = layout.heldout_incidents_path.read_text()
     layout.heldout_incidents_path.unlink()
     with pytest.raises(PermissionError, match="heldout-list"):
         run_method(layout, "stat-anomaly", "heldout", out, project_dir=project)
     layout.heldout_incidents_path.write_text(listed)
+    committed = runner.LLM_CONFIG
+    proposed = tmp_path / "proposed.json"
+    proposed.write_text(json.dumps({**json.loads(committed.read_text()), "status": "proposed", "model": None}))
+    monkeypatch.setattr(runner, "LLM_CONFIG", proposed)
     for method in ("agent", "dump-all", "retrieval"):
-        with pytest.raises(ValueError, match="approved"):  # paid LLM methods stay refused (NEXT A1)
+        with pytest.raises(ValueError, match="approved"):  # an unapproved model never runs (NEXT A1)
+            run_method(layout, method, "heldout", out, project_dir=project)
+    assert not (out / "heldout").exists()
+    monkeypatch.setattr(runner, "LLM_CONFIG", committed)  # approved 2026-10-10 (decision 029): refused at the heavy lock
+
+    def busy(project_dir):
+        raise soak.LockNotHeld("Mac heavy lock not held; run via ./tools/with-mac-lock (MACHINE_POLICY.md)")
+
+    monkeypatch.setattr(soak, "require_heavy_lock", busy)
+    for method in ("agent", "dump-all", "retrieval"):
+        with pytest.raises(soak.LockNotHeld):
             run_method(layout, method, "heldout", out, project_dir=project)
     assert not (out / "heldout").exists()
 

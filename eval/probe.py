@@ -1,7 +1,7 @@
 """`python -m eval local-probe` (decision 029): one local Ollama model on the SYNTHETIC sample only, before the user picks
 the model for the LLM methods. NOT results.
 
-It runs dump-all, retrieval and the Agent (the real method code, the proposed budgets of eval/llm_methods.json, price 0)
+It runs dump-all, retrieval and the Agent (the real method code, the budgets of eval/llm_methods.json, price 0)
 on the synthetic incident and reports per method: tool calls parsed, unparsed or written as text, a valid prediction
 submitted or corrections / abstention, tokens, latency and the real-to-proxy token ratio of every call. It also runs the
 truncation guard's self-test on generated filler with a tiny context (one long message, and a conversation of several
@@ -243,7 +243,7 @@ def run_probe(model_tag: str, *, num_ctx: int | None = None, think: bool = False
     manifest = check_sample(root)  # synthetic: true and every file exactly as listed, or ValueError
     if manifest.get("incident_id") != INCIDENT:
         raise ValueError(f"{root} is not the synthetic sample ({INCIDENT}): the probe runs on nothing else (decision 029)")
-    config = json.loads(Path(config_path or LLM_CONFIG).read_text())  # the proposed settings; never needs approval
+    config = json.loads(Path(config_path or LLM_CONFIG).read_text())  # its budgets and settings, approved or not: never needs approval
     o, budgets = config.get("ollama") or {}, config["budgets"]
     num_predict, seed = o.get("num_predict") or 8192, o.get("seed") or 42
     temperature = config.get("temperature") if config.get("temperature") is not None else 0

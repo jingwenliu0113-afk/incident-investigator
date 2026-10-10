@@ -349,12 +349,17 @@ def test_heldout_plan_and_freeze_commands_write_once(tmp_path, monkeypatch, caps
     import json
 
     import collect.__main__ as cli
-    from eval.runner import METHODS
-    from test_heldout_freeze import REVISIONS, git, project, write
+    from eval.runner import LLM_METHODS, METHODS
+    from ollama_fixtures import approved_config
+    from test_heldout_freeze import REVISIONS, git, pilot_run_config, project, write
 
     repo, layout = project(tmp_path)
     for m in METHODS:
         write(layout.root, f"results/pilot/{m}/scores.json", "{}")
+    for m in LLM_METHODS:  # each LLM method's Pilot run with exactly the frozen settings (decision 026 #32)
+        run_config = pilot_run_config(approved_config(), m)
+        write(layout.root, f"results/pilot/{m}/run_config.json", json.dumps(run_config, indent=2) + "\n")
+        write(layout.root, f"results/pilot/{m}/scores.json", json.dumps({"run_config": run_config}))
     monkeypatch.setattr(cli, "PROJECT_DIR", repo)
     amendments, revisions = tmp_path / "amend.json", tmp_path / "rev.json"
     amendments.write_text(json.dumps({"amend": [], "remove": []}))
@@ -364,7 +369,9 @@ def test_heldout_plan_and_freeze_commands_write_once(tmp_path, monkeypatch, caps
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "plan")
     assert main(["heldout-freeze", "--pilot-revisions", str(revisions)]) == 0
-    assert "one commit" in capsys.readouterr().out
+    printed = json.loads(capsys.readouterr().out)
+    assert "one commit" in printed["next"] and printed["checked"]["soak_report"]["path"].startswith("soak/")
+    assert sorted(printed["checked"]["pilot_run_config_sha256"]) == sorted(LLM_METHODS)
     assert main(["heldout-freeze", "--pilot-revisions", str(revisions)]) == 2
     assert (repo / "docs/heldout/slots.json").exists() and (repo / "docs/heldout/freeze.json").exists()
 

@@ -266,6 +266,18 @@ def test_a_model_from_an_approved_config_is_pinned_or_refused():
         model_from_config(approved_config(url="http://127.0.0.1:1"))
 
 
+def test_the_pinned_record_is_what_a_run_records_once_the_pin_check_passes():
+    # decision 026 #32: the freeze compares the Pilot's run_config.json with the record the config pins, without a server
+    from agent.ollama import model_from_config, pinned_record, run_record
+    from ollama_fixtures import approved_config
+
+    for config in (approved_config(), approved_config(num_ctx=262_144, think=True, seed=7)):
+        _, facts = model_from_config(config, transport=FakeOllama())
+        assert pinned_record(config) == run_record(config, facts)
+    assert pinned_record(approved_config())["ollama_version"] == VERSION
+    assert pinned_record({**approved_config(), "provider": None}) is None  # no local runtime is recorded for it
+
+
 class Stub(BaseHTTPRequestHandler):
     fake = None
 

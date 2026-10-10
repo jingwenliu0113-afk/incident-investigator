@@ -17,10 +17,15 @@
   **修訂 2 審查（2026-10-10，程式審查後；在任何 held-out 資料與 freeze 之前）**：只拒絕更多。讀取端原本接受寫入端永遠不會寫的 held-out 確認
   （手寫一行就能讓 open 的 slot 提前重新計數），改為每一筆都必須等於寫入端當時會寫的內容（解讀 11）；freeze 檢查強制 014 = waived（解讀 10）。
   另補上測試（確認已關閉的 slot、兩行重複確認、格式錯誤的行、CLI 參數防護、清單寫出後損壞的確認檔），並標明上面兩處已被修訂 2 取代的舊說法。
+  **修訂 3（2026-10-10，使用者決定；只會拒絕更多；在任何 held-out 資料、freeze 與 Pilot 上的 LLM 執行之前）**：使用者「照建議」
+  （decision 029「使用者決定（2026-10-10）：照建議」第 7 項；023「使用者決定」的「追加（2026-10-10，第三次）」）：freeze 的兩項條件寫進程式。
+  `collect heldout-freeze` 另外拒絕：要凍結的 env lock 沒有通過的 soak（解讀 31）；任一個 LLM 方法的 Pilot 結果不是用要凍結的 LLM 設定產生的（解讀 32）。
+  freeze 紀錄的格式（`RECORD_KEYS`）、freeze 的驗證（`check_freeze`，held-out 的每一步都用它）、plan 的寫入與其他規則都不變。
 - 影響範圍：`collect/heldout.py`、`collect/freeze.py`（新增）；`collect/__main__.py`（`run|next|status --set heldout`、`heldout-plan`、
   `heldout-freeze`、`heldout-list`、incident 指令的 freeze 檢查；修訂 2：`ack-failures --set heldout --slot`）；`collect/rungroup.py`（`Plan.slot`、`Plan.freeze_sha256`；修訂 1：`up_at` 先寫）；
   `collect/pilot.py`、`collect/labeling.py`、`collect/layout.py`；`eval/runner.py`、`eval/__main__.py`；`agent/harness.py`（`CallError`）；
-  `baselines/dump_all.py`、`baselines/retrieval.py`。
+  `baselines/dump_all.py`、`baselines/retrieval.py`。修訂 3：`collect/freeze.py`（`write_freeze`、`_soak_evidence`、`_pilot_llm_evidence`）、
+  `eval/runner.py`（`pilot_llm_problems`）、`agent/ollama.py`（`pinned_record`）、`collect/__main__.py`（`heldout-freeze` 的說明）。
 
 ## 背景
 
@@ -58,6 +63,7 @@
 2. **023 第 6 行「Pilot 後定稿」**要等 Pilot 收集、review、leakage audit **與 LLM 方法試跑**都完成。所以 `heldout-plan` 與 `heldout-freeze`
    都要求：`eval/llm_methods.json` 已 approved（含 model、model_version、temperature），而且每個已登錄的方法都有 `results/pilot/<m>/scores.json`。
    付費 LLM 方法延後期間，**plan、freeze 與 held-out 收集都被 NEXT A1 擋住**。
+   （修訂 3：freeze 另要求解讀 31、32；plan 不變。）
 3. **「只吸收 Pilot label review 發現的差異」**以程式檢查。修正欄位用 review 的差異欄位名：`affected_services`、`user_symptom`（整個 `{kinds, description}`）、`notes`。
    一個值只有在以下全部成立時才能吸收：
    - 來自 `fault_exercised = true` 而且 `saw_method_outputs = false` 的 review；
@@ -91,6 +97,7 @@
 8. env lock、policy、llm 設定的 sha 依 023 §6 寫進紀錄，在寫入時檢查一次，之後由預設拒絕的 diff 釘住。資料與紀錄的比對仍保留：
    run.json 的 env lock、normalize_report 的 policy、run_config 的 freeze 與清單 sha。
 9. freeze 要求 `llm_methods.json` 已 approved，且 model、model_version、temperature 非 null（這些欄位在批准時加入）。
+   （修訂 3：另比對每個 LLM 方法 Pilot 的 `run_config.json`，解讀 32。）
 10. **「Pilot 上修訂一次」**涵蓋 011、013、014、015、017、019、020、021、022：每一項都要宣告 used（指名 frozen commit 中的 decision 檔，人的聲明）或 waived。
     013 必須是 used（023 §7 用掉）；policy v1 時 011 必須 waived，v2 時必須 used（023 §6）。
     使用者 2026-10-10 決定 014 = waived（stat-anomaly 維持 v2，014「補註（2026-10-10）」）。修訂 2 審查：`pilot_revision_problems`
@@ -206,6 +213,32 @@
     - 因此 `heldout_incidents.json` 沒有撤回的項目，也沒有 `withdrawn_run_groups`；`collect status --set heldout` 的計數沒有 withdrawn。
     - **Pilot 側不變**（decision 025 修訂 3）：撤回的 Pilot incident 不是 held-out plan 的證據。`pilot_evidence` 不計入它（不算 valid、review 或無效 run group）；
       `pilot_problems` 與 plan / freeze 的前置檢查不要求它的 review 與 leakage audit（例如真實 Pilot 撤回的 RG-002）。
+31. **freeze 要求要凍結的 env lock 有通過的 soak**（修訂 3，使用者決定 2026-10-10，029「照建議」第 7 項 a）。
+    - 規則：`write_freeze` 以收集 preflight 的同一個函式 `collect.live.passing_soak(data root, 要凍結的 env lock sha)` 找報告：
+      `data/external/soak/*/report.json` 中 `pass` 是 true、`teardown.verify` 是 `[]`、`env_lock_sha256` 等於目前 checkout 的 lock 的 sha。
+      找不到就拒絕、什麼都不寫（與其他前置條件一起列出）；plan（`heldout-plan`）不需要它。
+    - 理由：decision 028「必須在 held-out freeze 之前」——freeze 釘住 env lock，而 freeze 之後沒有修正路徑（A4 維持現況），先 freeze、soak 才失敗
+      會讓 held-out 卡死。028 寫明當時「只靠流程保證」、改成程式檢查要另寫 decision；使用者 2026-10-10 同意改成程式檢查。
+      現況（soak #6 PASSED，新 lock `sha256:1e749f67…`）已滿足，所以只是把既有的順序變成檢查。
+    - **不寫進 freeze 紀錄**：紀錄的鍵是固定的（`RECORD_KEYS`，`freeze_problems` 要求完全相同），它的驗證只看 git 這一側；紀錄已經釘住 env lock 的 sha，
+      freeze 之後 lock 一改所有 held-out 步驟就停止，所以 freeze 時找到的 soak 一直是凍結的 lock 的 soak；收集的 preflight 每個 run 之前也會再找一次。
+      找到的報告路徑（相對於 data root）與它的 sha256 由 `heldout-freeze` 印在 `checked.soak_report`，可記進 freeze commit 的訊息或 NEXT。
+32. **freeze 要求每個 LLM 方法的 Pilot 結果用的正好是要凍結的 LLM 設定**（修訂 3，使用者決定 2026-10-10，029「照建議」第 7 項 b）。
+    - 規則（`eval/runner.py` 的 `pilot_llm_problems`，讀要凍結的 checkout 的 `eval/llm_methods.json`）：每個已登錄的 LLM 方法（dump-all、retrieval、agent）
+      都要有 `results/pilot/<m>/run_config.json`，而且其中的 `method`、`split`（`pilot`）、`model`、`budgets`（該方法的，`method_budgets`）、
+      `llm`（provider、model、model_version（digest）、ollama_version、num_ctx、num_predict、temperature、seed、think）等於由 `llm_methods.json` 算出的值。
+      `llm` 的期望值是 `agent.ollama.pinned_record`：釘選檢查通過時一次執行寫的內容（server 的 digest 與版本就是釘選的值；有測試守住兩者相同）。
+      任何一項不同、檔案不存在或無法比較 → 拒絕、什麼都不寫，訊息列出不同的鍵。
+    - **保守的讀法（只拒絕更多）**：該方法的 Pilot `scores.json` 存在時，必須內含同一份 run_config（`eval score` 寫的 `run_config`），也就是分數是在這次執行
+      之後算的；`scores.json` 不存在由解讀 2 的檢查拒絕。這樣「Pilot 的結果」包括 plan 記錄的、報告用的分數。
+    - **不比對** `scope`（固定的描述文字）與 `llm_methods.json` 中不進 `run_config.json` 的欄位（`url`、`timeout_s`、`note`）：使用者同意的是 llm 紀錄與預算；
+      整個 `llm_methods.json` 已由 freeze 紀錄的 `llm.config_sha256` 釘住（解讀 8）。
+    - 只有 provider `ollama` 有 runtime 紀錄；其他 provider 的期望 `llm` 是 null。它們現在沒有 adapter、不能執行；換回付費 API 時另寫 decision 並更新這一項。
+    - **已知限制**：Pilot 的執行沒有嘗試紀錄（NEXT A1）；一次在中途停止的 Pilot 執行會留下新的 `run_config.json` 與前一次執行的部分 prediction。
+      prediction 不帶設定（decision 013 的格式不變），所以這種混合無法從檔案判斷，程式不檢查。流程上：Pilot 的 LLM 執行要跑完（exit 0）才評分（NEXT 下一步 8.2）；
+      設定已批准、freeze 之前不改，同一份設定的重跑混在一起沒有影響。
+    - **不寫進 freeze 紀錄**（理由同解讀 31）：紀錄已釘住 `llm_methods.json`，各方法 Pilot `run_config.json` 的 sha256 由 `heldout-freeze` 印在
+      `checked.pilot_run_config_sha256`。
 
 ## 為什麼
 
@@ -251,6 +284,10 @@
 - 修訂 2 審查只拒絕更多：手寫的提前或部分確認讓 held-out 步驟停止（原本被接受）；freeze 紀錄的 014 宣告必須是 waived（原本 used 也通過）。
   寫入端、Pilot 與其他規則不變。
 - 測試全部用 synthetic / tiny generated fixture，沒有真實 snapshot 進 git。
+- 修訂 3 只拒絕更多：freeze 原本在沒有新 lock 的 soak、或 LLM 方法的 Pilot 結果用別的設定時也會寫出；現在拒絕。freeze 紀錄的格式、
+  held-out 的驗證、plan、收集、評分與 Gate 都不變。測試：`tests/test_heldout_freeze.py`（四種沒有通過的 soak、Pilot run_config 每一個不同的欄位、
+  設定在 Pilot 之後被改、過期的 scores.json、統計 baseline 不需要 run_config、印出的 `checked`）、`tests/test_collect_cli.py`（CLI 印出 `checked`）、
+  `tests/test_local_llm.py`（真正的 Pilot 執行寫出的 run_config 通過這項檢查）。
 - 修訂 1 只拒絕更多（held-out 不撤回、run.lock 存在時不評分），或讓紀錄更完整（每個紀錄都有 `up_at`、prediction 最後寫）；
   不改任何協定、門檻、指標、切分或預算。Pilot 的撤回與評分不變；Pilot 的 run.json 形狀不變（`up_at` 一直都有，只是更早寫入）。
 

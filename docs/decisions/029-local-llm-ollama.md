@@ -5,7 +5,11 @@
   寫在任何 LLM 方法的執行（包括合成範例的探測）、任何 held-out 資料與 freeze 之前。使用者之後可以換回原本的方案（付費 API 模型），換回時另寫 decision log
   （見「對實驗的影響」）。「兩個」的另一項（關掉 grafana 的 plugin 下載，NEXT A0）不在本文件。
   **使用者決定的範圍**：先試本機模型，依序做提案的三步（見「背景」）。其餘的實作細節是助理依提案做的設計；比提案更嚴格、使用者還沒確認的部分
-  （Ollama 版本釘選）列在「不在本文件決定」，等使用者確認。
+  （Ollama 版本釘選）列在「不在本文件決定」，等使用者確認（2026-10-10 已確認：釘選，見下一段）。
+  **使用者決定（2026-10-10，探測之後、任何 Pilot 上的 LLM 執行之前）**：使用者原話「照建議」，一次同意助理在探測之後提出的八項建議：
+  模型 qwen3.5 9B、`num_ctx` 262,144、think 關、Ollama 版本釘選、LLM 執行也要求高效能模式 + AC 並記錄電力狀態、`num_predict` 8192、
+  freeze 的兩項檢查寫進程式、grafana 的背景安裝器維持現狀。`eval/llm_methods.json` 改為 `approved`；「不在本文件決定」的各項都已決定。
+  見文末「使用者決定（2026-10-10）：照建議」。只拒絕更多或只增加紀錄，預算、指標、切分、門檻都不變。
   **審查（2026-10-10，合併前、任何執行之前）**：每個 incident 的釘選檢查移到嘗試開始之前；整個執行只用開始時讀到的設定；
   解析不了的 tool call 參數由 harness 拒收；回覆檢查加上兩項不依賴 `truncate: false` 的檢查；探測的防護自我測試要求 server 自己拒絕並加上多則訊息的情況；
   server 與模型只在一次 heavy lock 內存在（`tools/with-local-ollama`、執行結束時卸載模型）；Ollama 版本釘選改列為待使用者確認；探測記錄電力狀態。
@@ -14,6 +18,9 @@
   `eval/runner.py`（`load_llm_config`、`llm_fit`、`start_llm`、`pinned_model`、`finish_llm`、`run_llm`、`_llm`、`run_config.json` 的 `llm`、評分表多一行）；
   `agent/harness.py`（`_arguments`：adapter 標記為解析不了的參數照 020 §3 拒收；`CallError` 的說明）；`eval/__main__.py`；
   `eval/llm_methods.json`（只新增欄位，仍是 `proposed`）；decision 020 §6 與 021 的補註；README 的狀態句；`tools/README.md`。
+  **使用者決定（2026-10-10）之後**：`eval/llm_methods.json`（`approved`，`timeout_s` 7200）；`eval/runner.py`（電力條件 `formal_power`、
+  `power.jsonl`、評分的 `latency_power`、`pilot_llm_problems`）；`agent/ollama.py`（`pinned_record`）；`collect/freeze.py`（026 修訂 3）；
+  decision 023、026、028 的補註；README；NEXT。
   **不改**任何預算數值、指標、切分、門檻、freeze 協定，也不改 decision 013、020–024、026 的任何規則（`RETRYABLE` 仍只有 `api_error`、`transport_error`）。
 
 ## 背景
@@ -106,7 +113,7 @@
 1. `model_version` = `/api/tags` 的 manifest digest（`sha256:<64 hex>`）。manifest 以 sha256 指名權重、template、參數與 license 的每一層，
    所以 freeze 的 model / model_version / temperature 檢查（026 解讀 9）釘住的就是完全相同的模型；freeze 另外釘住整個 `llm_methods.json` 的 sha。
 2. **Ollama 版本**：使用者同意的提案是「記錄」。程式目前**照助理的提案釘選**（`ollama.version` 必填、不符就拒絕），比提案嚴格，**待使用者確認**
-   （見「不在本文件決定」）：tool call 的 renderer / parser 與 context 的處理都隨 Ollama 版本改變，Pilot 與 held-out 之間 Homebrew 升級會在不知不覺中改變方法；
+   （見「不在本文件決定」；**2026-10-10 使用者決定釘選**，見文末「使用者決定（2026-10-10）：照建議」第 4 項）：tool call 的 renderer / parser 與 context 的處理都隨 Ollama 版本改變，Pilot 與 held-out 之間 Homebrew 升級會在不知不覺中改變方法；
    代價是 held-out 結束前不能升級 Ollama。使用者若只要記錄：拿掉版本的拒絕，版本仍記在 `run_config.json`（held-out 續跑仍要求相同的 `run_config.json`，
    所以同一次 held-out 執行中途還是不能換版本）。
 3. 什麼時候檢查：每次執行開始時（`start_llm`，在開任何 snapshot、寫任何檔案之前）；每個 incident 的每次嘗試開始之前（`pinned_model`，§2.3，
@@ -130,7 +137,7 @@
 
 ### 4. `eval/llm_methods.json`
 
-- 仍是 `status: "proposed"`、`model: null`；新增欄位：`provider: null`、`model_version: null`、`temperature: 0`、`price_per_mtok: null`、
+- （寫定時）仍是 `status: "proposed"`、`model: null`（**2026-10-10 批准**，內容見文末「使用者決定（2026-10-10）：照建議」）；新增欄位：`provider: null`、`model_version: null`、`temperature: 0`、`price_per_mtok: null`、
   `ollama: {url: "http://127.0.0.1:11434", version: null, num_ctx: null, num_predict: 8192（建議值）, seed: 42, think: null, timeout_s: 3600}`；
   `budgets` 不變。
 - 批准時（使用者決定之後）填：`provider: "ollama"`、model、model_version、`price_per_mtok` 0、`ollama.version`、`ollama.num_ctx`、`ollama.think`。
@@ -164,18 +171,26 @@
   速度取決於它）。
 - think：有 thinking 能力的模型要開、關各探測一次，使用者才有兩者的數字可選。
 
-## 不在本文件決定
+## 不在本文件決定（2026-10-10 使用者決定之後：全部已決定）
+
+寫定時列在這裡、等使用者決定的事項；每一項後面註明 2026-10-10 的決定（文末「使用者決定（2026-10-10）：照建議」）。
 
 - **用哪個模型、`num_ctx`、think**：使用者看過三個模型的探測報告之後決定。
+  **→ 已決定**：qwen3.5 9B（`qwen3.5:9b-q4_K_M`）、`num_ctx` 262,144、think 關（第 1–3 項）。
 - **預算數值**：不變（B = 120,000、q = 8、k = 25、Agent 40 次 / 120,000 / 30 回合）。選定的模型放不下時，要不要改預算是使用者的決定（另寫 decision log）。
+  **→ 不變**：`num_ctx` 262,144 放得下（第 2 項）。
 - `llm_methods.json` 維持 `proposed`；三個 LLM 方法在 Pilot 上執行要等使用者同意（提案第 3 步）。
-- `num_predict` 8192 只是建議值，隨模型一起由使用者批准。
+  **→ 已批准**（`approved`）；Pilot 上的執行是下一步（NEXT）。
+- `num_predict` 8192 只是建議值，隨模型一起由使用者批准。**→ 維持 8192**（第 6 項）。
 - **Ollama 版本是釘選（不符就拒絕）還是只記錄**：§3.2；程式目前釘選，待使用者確認，確認後以補註定案。
+  **→ 釘選**（第 4 項；held-out 結束前不升級 Ollama）。
 - **電力條件**：本機 LLM 的 Pilot / held-out 執行要不要套用 decision 025 的正式條件（高效能模式 + AC、執行中取樣），以及要不要把電力狀態記進執行紀錄，
   由使用者在 Pilot 執行前決定（latency 是 SPEC §7 要報告的數字，取決於電力模式）。目前只有探測記錄電力狀態；`eval run` 沒有記錄。
   不記進 `run_config.json`：held-out 續跑要求它完全相同，記進去等於多一條使用者還沒定的規則。
+  **→ 套用並記錄**（第 5 項）：開始時與每次嘗試之前檢查、前後取樣記在 `power.jsonl`（不在 `run_config.json`），見文末。
 - **freeze 是否強制「Pilot 的 LLM 結果用的是凍結的模型」**：目前只是書面規則（見「對實驗的影響」）。freeze 檢查只看 Pilot 的 `scores.json` 存在，
   不比對 Pilot 的 `run_config.json`（model / `llm`）與 `llm_methods.json`；加上這項比對是 freeze 協定（023 §6、026）的變更，不在本文件做，待使用者決定。
+  **→ 強制**（第 7 項）：decision 026 修訂 3（解讀 31、32），同時加上「目前 env lock 有通過的 soak」。
 
 ## 為什麼
 
@@ -215,6 +230,7 @@
   重跑 Pilot 的三個 LLM 方法（以及補 evidence gold，decision 017），held-out 不能混用兩個模型；freeze 之後換模型是設計變更（023 §6），不允許。
   換回時需要另寫 decision、加付費 API 的 adapter，並在第一次呼叫前依 MACHINE_POLICY 報告成本。
   **這一條目前沒有程式強制**（見「不在本文件決定」）：freeze 之前要由人比對三個 LLM 方法 Pilot 的 `run_config.json`（`model`、`llm`）與 `llm_methods.json`。
+  （2026-10-10 使用者決定之後由程式強制：freeze 比對每個 LLM 方法 Pilot 的 `run_config.json` 與要凍結的 `llm_methods.json`，026 解讀 32。）
 - **context 放不下 dump-all 預算的模型不能原樣執行 dump-all**（Agent 的工具輸出預算也一樣；例如 qwen3:8b 的 40,960 遠小於約 13 萬 proxy tokens 的 need）：
   fit check 拒絕；改預算是使用者的決定。
 - 本機運算沒有外部費用（`cost_usd` = 0），但有時間成本：探測的速度量測用來估計 Pilot 的執行時間；多小時的執行是 heavy workload，透過 `with-mac-lock` 與 `with-local-ollama`。
@@ -257,3 +273,70 @@
   加上任務說明與輸出會超過 196,608，server 會拒絕（不會靜默截斷，但整個 Pilot 執行會停下來）。用 dump-all 的現行預算時，num_ctx 要接近模型上限 262,144。
 - gemma4 與 qwen3 的「沒有提交」沒有進一步診斷（gemma4 也可能是 Ollama 對它的工具呼叫處理）。qwen3 8B 的 context 放不下 dump-all 與 Agent 的預算。
 - think 開沒有測。
+
+## 使用者決定（2026-10-10）：照建議
+
+- 使用者原話：「照建議」。一次同意助理看完探測結果（上一節；harness 的修正見 decision 020「修正（2026-10-10）」）之後提出的八項建議，
+  時間在任何 Pilot 上的 LLM 執行、任何 held-out 資料與 freeze 之前。只記錄這八項，不延伸到其他規則、指標、切分、門檻或預算。
+- 依據只有合成範例的探測（tool calling、防護、速度），沒有看任何 Pilot 資料或結果（本文件「為什麼」最後一項）。
+
+| # | 建議（使用者同意的原內容） | 落地 |
+|---|---|---|
+| 1 | 模型 qwen3.5 9B：Ollama tag `qwen3.5:9b-q4_K_M`，digest `sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7`（探測看到的），Ollama 0.35.0；GGUF context_length 262,144，capabilities completion / vision / tools / thinking | `eval/llm_methods.json`：`status: "approved"`、`provider: "ollama"`、`model`、`model_version`（完整 digest）、`temperature` 0、`price_per_mtok` `{input: 0, output: 0}`、`ollama.version` `"0.35.0"`；`note` 記下批准（誰、何時、原話、本節） |
+| 2 | `num_ctx` = 262,144（模型上限），dump-all 的預算維持 120,000 proxy tokens（telemetry 的實際 token 約是 proxy 的 1.6–1.8 倍；196,608 會讓 server 在執行中途拒絕 dump-all）；預算不變 | `ollama.num_ctx: 262144`；`budgets` 逐項不變（fit check：dump-all 與 Agent 的 need 都在 262,144 以內） |
+| 3 | think 關 | `ollama.think: false` |
+| 4 | Ollama 版本**釘選**（不符就拒絕；held-out 結束前不升級 Ollama） | 程式本來就是這個行為（§3.2，`pin_problems`）；現在是使用者的決定，不再只是助理的提案。Homebrew 的自動升級也要避免，直到 held-out 評測結束 |
+| 5 | 電力：LLM 方法的執行也要求高效能模式 + AC（025 修訂 3 的 `FORMAL_POWER`、`collect.provenance.power_problems`），並記錄電力狀態（latency 要報告） | 見下面「電力條件的實作」 |
+| 6 | `num_predict` 8192 維持 | `ollama.num_predict: 8192` |
+| 7 | freeze 的檢查寫進程式（只會更嚴格）：(a) `collect heldout-freeze` 要求目前 env lock 有通過的 soak（`collect.live.passing_soak`，與收集 preflight 同一條規則；028「必須在 held-out freeze 之前」）；(b) 每個 LLM 方法的 Pilot 結果用的正好是凍結的 LLM 設定（Pilot `run_config.json` 的 `llm` 等於 `llm_methods.json` 規定的 provider、model、digest、Ollama 版本、num_ctx、num_predict、temperature、seed、think，預算也相同） | `collect/freeze.py` 的 `write_freeze`、`eval/runner.py` 的 `pilot_llm_problems`、`agent/ollama.py` 的 `pinned_record`；decision 026 修訂 3（解讀 31、32）；023「使用者決定」的「追加（2026-10-10，第三次）」 |
+| 8 | grafana 的背景 plugin 安裝器維持現狀 | 不實作；記在 028「結果」與 NEXT A0 |
+
+### `timeout_s`：3600 → 7200（設定檔的值，不是預算）
+
+- `ollama.timeout_s` 是 adapter 的 socket timeout（`http.client`）。`stream: false` 時 Ollama 在整個回覆完成之前不送任何資料，所以它實際上限制
+  一次呼叫的總時間。它不影響方法看到什麼，只決定「server 沒有回應」要等多久才算 `transport_error`。
+- **估計**（探測的 qwen3.5 速度：`num_ctx` 196,608、think 關、高效能模式 + AC；四個 prefill 大小 8,147 / 32,647 / 101,950 / 132,721 個實際 tokens
+  → 329.5 / 286.2 / 185.5 / 165.6 tok/s）：每個 token 的平均 prefill 時間隨長度大致線性增加（1/速度 ≈ a + b·n，相鄰兩點的 b 是 1.9–2.7 × 10⁻⁸ 秒），
+  取最陡的 b 從 132,721 往上外插：
+  - 230,000 tokens（dump-all 用滿 120,000 proxy 時約 19.5–21 萬實際 tokens，加上 system、任務說明與 tool schema）：prefill 約 2,000 秒（33 分鐘）；
+  - 最長可能的 prompt（262,144 − 8,192 = 253,952）：prefill 約 2,380 秒（40 分鐘）；
+  - 輸出用滿 `num_predict` 8,192：decode 從 39 tok/s（8k）降到約 23 tok/s（13 萬），外插到 25 萬約 13.5 tok/s → 約 600 秒（10 分鐘）。
+  - 合計一次呼叫最壞約 2,600–3,000 秒（43–50 分鐘），已到 3,600 的約 83%；而且是外插到量測範圍的約 2 倍，262,144 沒有實測過。
+- **超時的代價不對稱**：Pilot 上整個執行停止、要重跑；held-out 上是可重試的 `transport_error`，第二次嘗試多半同樣超時 → 該 incident 關閉、
+  算放棄作答（026 解讀 17、19），等於把一個執行參數算成方法答錯。加長等待只會讓真的卡住的 server 晚一點被發現。
+  所以改為 **7,200 秒**（估計最壞情況的約 2.4 倍）。`config_problems` 對它只要求正數，沒有其他規則改變。
+
+### 電力條件的實作（第 5 項）
+
+- **範圍**：只對本機模型的執行（provider `ollama`；與 heavy lock、釘選檢查相同）。統計 baseline 不變。換回付費 API 時另寫 decision。
+- **檢查**（`eval/runner.py` 的 `formal_power`，唯讀的 `pmset`，`collect.provenance.power_facts` / `power_problems`）：
+  - 執行開始時（`start_llm`：heavy lock 之後、釘選檢查之前；開任何 snapshot、寫任何檔案之前）；
+  - 每個 incident 的每次嘗試之前，與釘選檢查在同一個位置：Pilot 在每個 incident 之前，held-out 在寫下嘗試的 `start` **之前**。
+  - 不符（不是 AC、`powermode` 不是 2、`lowpowermode` 不是 0、讀不到 `pmset`）→ 整個執行停止（ValueError，CLI 印 `error: …`、exit 2），
+    **該 incident 什麼都不寫、不用掉 held-out 嘗試**；電力恢復之後續跑即可（與釘選檢查相同，§2.3）。
+- **紀錄**：每次嘗試結束後（held-out 在嘗試的 `end` 事件之後；Pilot 在 prediction 寫出之後）再讀一次，連同之前的樣本附加一行到
+  `results/<set>/<method>/power.jsonl`（只附加、fsync）：`{incident_id, attempt（Pilot 為 null）, before, after, formal, problems}`。
+  **不寫進** `run_config.json`（held-out 續跑要求它完全相同），也**不寫進** prediction（decision 013 的格式不變）。
+- **之後的樣本不符**：執行在這裡停止（ValueError、exit 2）。這次嘗試產生的東西照常保留（prediction、transcript、嘗試紀錄的 `ok`），
+  `power.jsonl` 的那一行是 `formal: false`。temperature 0 的輸出不取決於電力，只有 latency 會受影響，所以**只報告、不丟棄**；
+  held-out 的 incident 已有 prediction，永不重跑（023 §5）。
+  - 嘗試以不可重試的錯誤或不合格的 prediction 結束時，照樣先寫那一行，原本的錯誤照常停止執行（不被電力的訊息蓋掉）；
+  - 可重試的錯誤（`api_error` / `transport_error`）之後樣本不符：執行停止，第二次嘗試留到續跑（續跑時嘗試之前的檢查照常）。
+- **報告**（024 的「Budgets, usage and visible data」）：`eval score` 在 scores.json 的 `usage.latency_power`
+  （`{condition, incidents_timed, not_formal: [{incident_id, attempt, reason}]}`）與 table.md 列出 latency 不是在正式條件下量測的 incident：
+  每個有 latency 的 incident 看它在 `power.jsonl` 的最後一行（held-out 就是產生 prediction 的那次嘗試；Pilot 是最近一次執行），
+  `formal` 不是 true、或沒有任何一行，都列出。usage 的數字**不剔除**它們（只報告）。都符合時表上寫一句「全部在 AC、高效能模式下量測」。
+  統計 baseline 與沒有本機模型的執行：`latency_power` 為 null，表上不出現。
+- **限制**：只在每次嘗試的前後（與執行開始時）取樣，不像收集時每分鐘取樣；呼叫中途切換又切回不會被發現。Pilot 的執行中途停止時，
+  `power.jsonl` 會留下前一次執行的行；評分只看每個 incident 的最後一行，與它目前的 prediction 對應（Pilot 重跑會重寫所有 prediction）。
+
+### 測試（使用者決定之後新增或修改）
+
+- `tests/test_local_llm.py`：committed 設定就是使用者批准的值（預算不變，`load_llm_config` 通過、不需要 server）；committed 設定在沒有 heavy lock 時
+  三個方法都拒絕、什麼都不寫、不讀電力也不連 server（`eval run --method retrieval --set pilot` 在 lock 外的行為）；開始時電力不符就不開始
+  （連釘選檢查都沒做）；Pilot 與 held-out 在嘗試之前電力不符就停止、不用掉嘗試；之後的樣本不符就停止、結果保留、評分列出；
+  可重試的錯誤之後不符、第二次嘗試留到續跑；沒有樣本的 incident 也列出；統計 baseline 沒有這條規則。電力一律以 monkeypatch 給定，**從不執行真的 `pmset`**。
+- `tests/test_ollama.py`：`pinned_record` 等於釘選檢查通過後一次執行寫的 `run_record`。
+- `tests/test_heldout_freeze.py`、`tests/test_collect_cli.py`：見 026 修訂 3。
+- `tests/test_eval_runner.py`、`tests/test_eval_heldout.py`：原本以「committed 設定是 proposed」測試的拒絕，改用測試內寫的 proposed 設定；
+  另測 committed 設定在 held-out 上也在 heavy lock 拒絕。

@@ -353,7 +353,9 @@ def write_heldout_plan(project_dir: Path, layout, amendments: dict, *, methods, 
 def write_freeze(project_dir: Path, layout, pilot_revisions: dict, *, methods, results_root: Path, now: str,
                  run: Run | None = None) -> dict:
     """docs/heldout/slots.json and freeze.json (decision 023 §4, §6), written once on a clean checkout whose HEAD has the
-    committed plan; frozen_from_commit = HEAD, so the next commit must add exactly these two files."""
+    committed plan; frozen_from_commit = HEAD, so the next commit must add exactly these two files. Also refused without a
+    passing soak of the lock being frozen and unless every LLM method's Pilot run used exactly the LLM settings being
+    frozen (user decision 2026-10-10, decision 026 #31, #32); what was found is returned under "checked"."""
     from collect.heldout import build_heldout_plan, pilot_evidence, write_once
 
     project_dir = Path(project_dir)
@@ -390,6 +392,9 @@ def write_freeze(project_dir: Path, layout, pilot_revisions: dict, *, methods, r
     if policy is None or policy.get("status") != "frozen":
         problems.append("the normalize policy is not frozen (decision 011 §4)")
     problems += pilot_revision_problems(pilot_revisions, set(observed["decisions"]), (policy or {}).get("version"))
+    soak_problems, soak = _soak_evidence(layout, observed["env_lock_sha256"])
+    llm_problems, run_shas = _pilot_llm_evidence(project_dir, results_root, methods)
+    problems += soak_problems + llm_problems
     if problems:
         raise ValueError("held-out freeze refused: " + "; ".join(problems))
     faults = [[e["flag"], e["variant"]] for e in plan["entries"]]
@@ -400,5 +405,34 @@ def write_freeze(project_dir: Path, layout, pilot_revisions: dict, *, methods, r
     freeze_sha = write_once(project_dir / FREEZE_FILE, record)
     return {"slots": {"path": SLOTS_FILE.as_posix(), "sha256": slots_sha, "count": len(slots_doc["slots"])},
             "freeze": {"path": FREEZE_FILE.as_posix(), "sha256": freeze_sha, "frozen_from_commit": observed["head"]},
+            "checked": {"soak_report": soak, "pilot_run_config_sha256": run_shas},
             "next": f"commit exactly these two files in one commit (git add {SLOTS_FILE} {FREEZE_FILE} && git commit), "
                     "then `collect status --set heldout`"}
+
+
+def _soak_evidence(layout, lock_sha: str | None) -> tuple[list[str], dict | None]:
+    """decision 026 #31 (user decision 2026-10-10, 「照建議」 item 7a; decision 028 「必須在 held-out freeze 之前」): a
+    soak report that passed, tore down cleanly and ran on exactly the lock being frozen, by the collection preflight's
+    own rule (collect.live.passing_soak). Not written into the record (its keys are fixed): the record pins the lock,
+    so the soak found here stays the one of the frozen lock. Returns (problems, {path, sha256} of the report)."""
+    if lock_sha is None:
+        return [], None  # "no env lock to freeze" already
+    from collect.live import passing_soak
+    from env.lock import sha256_path
+
+    found = passing_soak(Path(layout.root), lock_sha)
+    if found is None:
+        return [f"no passing soak of the env lock {lock_sha} under {Path(layout.root) / 'soak'} (a report with pass true, "
+                "teardown.verify [] and this env_lock_sha256, the rule of the collection preflight): run "
+                "`./tools/with-mac-lock uv run python -m env soak --minutes 30 --warmup-minutes 5` first "
+                "(decision 028; 026 #31)"], None
+    report = found / "report.json"
+    return [], {"path": report.relative_to(layout.root).as_posix(), "sha256": sha256_path(report)}
+
+
+def _pilot_llm_evidence(project_dir: Path, results_root: Path, methods) -> tuple[list[str], dict]:
+    """decision 026 #32 (user decision 2026-10-10, item 7b): eval.runner.pilot_llm_problems with the llm_methods.json
+    of the checkout being frozen (the file the record pins)."""
+    from eval.runner import pilot_llm_problems
+
+    return pilot_llm_problems(results_root, _read(Path(project_dir) / "eval" / "llm_methods.json"), methods)

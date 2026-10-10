@@ -257,17 +257,37 @@ def test_code_that_git_status_does_not_show_still_fails_the_check_of_a_real_chec
     assert len(problems) == 1 and needle in problems[0], problems
 
 
-# ---------------------------------------------------------------- the two writers (after the Pilot, blocked by A1 today)
+# ---------------------------------------------------------------- the two writers (after the Pilot and its LLM runs)
 
 METHODS = ["agent", "stat-anomaly"]
 NOW = "2026-10-20T00:00:00Z"
+PROJECT_LOCK = {"lock_version": 1}
+SOAK = "soak/20261010T053643Z/report.json"
+
+
+def pilot_run_config(config, method):
+    """The run_config.json `eval run --method <m> --set pilot` writes with `config` (decision 024 / 029)."""
+    from agent.ollama import pinned_record
+    from eval.runner import SCOPES, method_budgets
+
+    return {"method": method, "split": "pilot", "model": config["model"], "budgets": method_budgets(method, config),
+            "scope": SCOPES[method], "llm": pinned_record(config)}
+
+
+def soak_report(layout, *, lock=None, passed=True, verify=(), rel=SOAK):
+    from env.lock import lock_sha256
+
+    write(layout.root, rel, json.dumps({"pass": passed, "env_lock_sha256": lock or lock_sha256(PROJECT_LOCK),
+                                        "teardown": {"verify": list(verify)}}))
 
 
 def project(tmp_path, llm=None):
-    """A committed tiny project whose data/external (gitignored) holds a complete, reviewed, audited Pilot and Pilot
-    scores of every method."""
+    """A committed tiny project with the approved local model (decision 029) whose data/external (gitignored) holds a
+    complete, reviewed, audited Pilot, Pilot scores of every method, the agent's Pilot run with exactly that model and
+    a passing soak of the project's lock (decision 026 #31, #32)."""
     from collect.layout import DataLayout
     from heldout_fixtures import complete_pilot
+    from ollama_fixtures import approved_config
 
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
@@ -276,16 +296,20 @@ def project(tmp_path, llm=None):
     write(repo, "NEXT.md", "# NEXT\n")
     write(repo, D011, "011\n")
     write(repo, D013, "013\n")
-    write(repo, "env/otel-demo.lock.json", json.dumps({"lock_version": 1}, indent=2) + "\n")
+    write(repo, "env/otel-demo.lock.json", json.dumps(PROJECT_LOCK, indent=2) + "\n")
     write(repo, "collect/canonical_policy.v1.json", json.dumps({"version": 1, "status": "frozen"}))
-    write(repo, "eval/llm_methods.json", json.dumps(llm if llm is not None else
-                                                     {k: LLM[k] for k in ("status", "model", "model_version", "temperature")}))
+    config = llm if llm is not None else approved_config()
+    write(repo, "eval/llm_methods.json", json.dumps(config))
     git(repo, "add", "-A")
     git(repo, "commit", "-q", "-m", "project")
     layout = DataLayout(repo / "data/external")
     complete_pilot(layout)
     for m in METHODS:
         write(layout.root, f"results/pilot/{m}/scores.json", "{}")
+    run_config = pilot_run_config(approved_config(), "agent")
+    write(layout.root, "results/pilot/agent/run_config.json", json.dumps(run_config, indent=2) + "\n")
+    write(layout.root, "results/pilot/agent/scores.json", json.dumps({"run_config": run_config}))
+    soak_report(layout)
     return repo, layout
 
 
@@ -313,8 +337,16 @@ def test_plan_then_freeze_then_one_commit_passes_the_check_and_each_is_written_o
     git(repo, "add", S, F)
     git(repo, "commit", "-q", "-m", "held-out freeze")
     record, problems = check_freeze(repo)
-    assert problems == [] and record["llm"]["model_version"] == LLM["model_version"]
+    from ollama_fixtures import DIGEST
+
+    assert problems == [] and record["llm"]["model_version"] == DIGEST
     assert freeze.freeze_sha256(repo) == out["freeze"]["sha256"]
+    assert list(record) == list(freeze.RECORD_KEYS)  # the record keeps its shape: the two checks are refusals (026 #31, #32)
+    from env.lock import sha256_path
+
+    assert out["checked"] == {  # printed by `collect heldout-freeze`, for the freeze commit's message or NEXT
+        "soak_report": {"path": SOAK, "sha256": sha256_path(layout.root / SOAK)},
+        "pilot_run_config_sha256": {"agent": sha256_path(layout.root / "results/pilot/agent/run_config.json")}}
 
 
 def no_scores(repo, layout):
@@ -432,3 +464,96 @@ def test_a_withdrawn_pilot_run_group_needs_no_review_or_audit_before_the_plan(tm
         plan_it(repo, layout)
     withdraw(layout, "RG-020", reason="collected in the automatic power mode", decided_by="user", now=NOW)
     assert plan_it(repo, layout)["faults"] == 10
+
+
+# ---------------------------------------------------------------- user decision 2026-10-10 「照建議」 item 7 (026 revision 3)
+
+def no_soak(layout):
+    import shutil
+
+    shutil.rmtree(layout.root / "soak")
+
+
+def run_config_edit(change):
+    def apply(layout):
+        path = layout.root / "results/pilot/agent/run_config.json"
+        doc = json.loads(path.read_text())
+        change(doc)
+        path.write_text(json.dumps(doc, indent=2) + "\n")
+        scores = layout.root / "results/pilot/agent/scores.json"
+        scores.write_text(json.dumps({"run_config": doc}))  # scored after that run: only the settings differ
+    return apply
+
+
+@pytest.mark.parametrize("breaks", [
+    no_soak,
+    lambda layout: soak_report(layout, lock="sha256:" + "0" * 64),  # the soak of the lock before (e.g. soak #5)
+    lambda layout: soak_report(layout, passed=False),
+    lambda layout: soak_report(layout, verify=["ii-otel-demo containers left"]),
+], ids=["no-soak", "other-lock", "failed", "teardown"])
+def test_the_freeze_needs_a_passing_soak_of_the_lock_it_freezes(tmp_path, breaks):
+    # decision 026 #31 (user decision 2026-10-10, item 7a; decision 028 「必須在 held-out freeze 之前」): the rule of the
+    # collection preflight, collect.live.passing_soak with the current lock
+    repo, layout = project(tmp_path)
+    if breaks is not no_soak:
+        no_soak(layout)
+    breaks(layout)
+    plan_it(repo, layout)  # the plan does not need it
+    git(repo, "add", P)
+    git(repo, "commit", "-q", "-m", "held-out plan")
+    with pytest.raises(ValueError, match="no passing soak of the env lock sha256:[0-9a-f]{64}.*026 #31"):
+        freeze_it(repo, layout)
+    assert not (repo / S).exists() and not (repo / F).exists()
+
+
+def llm_config_changed(repo, layout):
+    from ollama_fixtures import approved_config
+
+    write(repo, "eval/llm_methods.json", json.dumps(approved_config(num_ctx=262_144)))  # after the Pilot ran
+    git(repo, "commit", "-q", "-am", "llm")
+
+
+def stale_scores(repo, layout):
+    path = layout.root / "results/pilot/agent/scores.json"
+    path.write_text(json.dumps({"run_config": {**json.loads(path.read_text())["run_config"], "model": "earlier"}}))
+
+
+@pytest.mark.parametrize("breaks, needle", [
+    (lambda repo, layout: (layout.root / "results/pilot/agent/run_config.json").unlink(), "agent has no Pilot run_config"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(num_ctx=262_144))(layout), "agent.*llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(model_version="sha256:" + "cd" * 32))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(ollama_version="0.34.0"))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(think=True))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(num_predict=4096))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(seed=7))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["llm"].update(temperature=0.6))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d.pop("llm"))(layout), "llm"),
+    (lambda repo, layout: run_config_edit(lambda d: d["budgets"].update(turns=20))(layout), "budgets"),
+    (lambda repo, layout: run_config_edit(lambda d: d.update(model="other:1b"))(layout), "model"),
+    (lambda repo, layout: run_config_edit(lambda d: d.update(split="heldout"))(layout), "split"),
+    (llm_config_changed, "agent.*llm"),
+    (stale_scores, "scores.json"),
+], ids=["no-run-config", "num-ctx", "digest", "ollama-version", "think", "num-predict", "seed", "temperature", "no-llm",
+        "budgets", "model", "split", "config-changed-after-the-pilot", "stale-scores"])
+def test_the_freeze_needs_pilot_llm_runs_with_exactly_the_settings_it_freezes(tmp_path, breaks, needle):
+    # decision 026 #32 (user decision 2026-10-10, item 7b): every LLM method's Pilot run_config.json records the model,
+    # runtime (provider, model, digest, Ollama version, num_ctx, num_predict, temperature, seed, think) and budgets of the
+    # llm_methods.json being frozen, and its Pilot scores were computed from that run
+    repo, layout = project(tmp_path)
+    plan_it(repo, layout)
+    git(repo, "add", P)
+    git(repo, "commit", "-q", "-m", "held-out plan")
+    breaks(repo, layout)
+    with pytest.raises(ValueError, match=needle) as e:
+        freeze_it(repo, layout)
+    assert "026 #32" in str(e.value)
+    assert not (repo / S).exists() and not (repo / F).exists()
+
+
+def test_only_llm_methods_need_a_pilot_run_config(tmp_path):
+    repo, layout = project(tmp_path)
+    assert not (layout.root / "results/pilot/stat-anomaly/run_config.json").exists()  # a result from before decision 024
+    plan_it(repo, layout)
+    git(repo, "add", P)
+    git(repo, "commit", "-q", "-m", "held-out plan")
+    assert freeze_it(repo, layout)["checked"]["pilot_run_config_sha256"].keys() == {"agent"}

@@ -86,8 +86,9 @@ def fit_problems(config: dict) -> list[str]:
 
 def start_llm(config: dict | None, project_dir: Path | None) -> dict | None:
     """The start of an LLM run on the local model (decision 029), before any snapshot is opened or anything written: the
-    Mac heavy lock (a local model run is a heavy workload, MACHINE_POLICY), the pin check against the running Ollama and
-    a loud report of worst cases above num_ctx. Returns the runtime for run_config.json; None for no local config.
+    Mac heavy lock (a local model run is a heavy workload, MACHINE_POLICY), the formal power state (user decision
+    2026-10-10), the pin check against the running Ollama and a loud report of worst cases above num_ctx. Returns the
+    runtime for run_config.json; None for no local config.
     The run keeps this `config` to the end: a config file changed during the run changes nothing in it."""
     if not config or config.get("provider") != "ollama":
         return None
@@ -98,6 +99,7 @@ def start_llm(config: dict | None, project_dir: Path | None) -> dict | None:
     from env.soak import require_heavy_lock
 
     require_heavy_lock(Path(project_dir) if project_dir is not None else PROJECT_DIR)
+    formal_power("at the start of the run")
     _, facts = model_from_config(config)
     num_ctx = config["ollama"]["num_ctx"]
     for method, entry in llm_fit(config["budgets"], num_ctx, config["ollama"]["num_predict"]).items():
@@ -140,6 +142,51 @@ def pinned_model(config: dict) -> dict:
         raise ValueError(f"{e}; the run stops before the incident's next attempt starts, so no attempt is used "
                          "(decision 029)") from e
     return {"model": model, "config": config}
+
+
+POWER_LOG = "power.jsonl"  # per-incident power samples of a local-model run, beside its results (append-only)
+POWER_CONDITION = "AC Power, powermode 2 (decision 025 revision 3)"
+
+
+def _power_sample() -> dict:
+    """One read-only pmset sample (decision 025) and why it is not the formal condition of decision 025 revision 3."""
+    from collect.provenance import power_facts, power_problems
+
+    facts = power_facts()
+    return {"at": _now(), "power": facts, "problems": power_problems(facts)}
+
+
+def formal_power(when: str) -> dict:
+    """decision 029, user decision 2026-10-10 (「照建議」 item 5): a local-model run needs the formal power state of the
+    collection (high power mode on AC power, decision 025 revision 3), because its latency is reported. Checked at the
+    start of the run and before every incident's attempt, at the place of the pin check: when it fails the run stops
+    (ValueError) before the attempt starts, so nothing of the incident is written and no held-out attempt is used.
+    Returns the sample for the incident's line in POWER_LOG."""
+    sample = _power_sample()
+    if sample["problems"]:
+        raise ValueError(f"the power state is not formal {when}: " + "; ".join(sample["problems"]) + "; a local-model run "
+                         "needs the high power mode on AC power because its latency is reported (decision 029, user "
+                         "decision 2026-10-10; decision 025 revision 3); the run stops before the next incident's attempt, "
+                         "so nothing of it is written and no attempt is used")
+    return {"at": sample["at"], "power": sample["power"]}
+
+
+def _power_after(out_dir: Path, incident_id: str, attempt: int | None, before: dict, *, stop: bool = True) -> None:
+    """The power sample after an incident's attempt (attempt None on the Pilot), appended to POWER_LOG with the one taken
+    before it; never in run_config.json (a resumed held-out run needs it unchanged) nor in a prediction (decision 013).
+    A sample that is not formal stops the run (unless an error already does): what the attempt produced stands and its
+    latency is reported as measured under non-formal power (a held-out incident is never run again, decision 023 §5)."""
+    sample = _power_sample()
+    _append(out_dir, {"incident_id": incident_id, "attempt": attempt, "before": before,
+                      "after": {"at": sample["at"], "power": sample["power"]}, "formal": not sample["problems"],
+                      "problems": sample["problems"]}, name=POWER_LOG)
+    if stop and sample["problems"]:
+        label = incident_id if attempt is None else f"{incident_id}'s attempt {attempt}"
+        held = "" if attempt is None else "; a held-out incident with a prediction is never run again (decision 023 §5)"
+        raise ValueError(f"the power state after {label} is not formal: " + "; ".join(sample["problems"]) + "; the run "
+                         "stops here (decision 029, user decision 2026-10-10): what the attempt produced stands, "
+                         f"{POWER_LOG} marks its latency as measured under non-formal power and the score lists it{held}; "
+                         "restore the high power mode on AC power before running again")
 
 
 def finish_llm(config: dict | None) -> None:
@@ -192,6 +239,48 @@ def method_budgets(method: str, config: dict | None) -> dict:
             "retrieval": {"queries": b["retrieval_queries"], "k": b["retrieval_k"]},
             "agent": {"tool_calls": b["agent_max_tool_calls"], "proxy_tokens": b["agent_max_proxy_tokens"],
                       "turns": b["agent_max_turns"]}}[method]
+
+
+def pilot_llm_problems(results_root: Path, config: dict | None, methods) -> tuple[list[str], dict]:
+    """decision 026 #32 (user decision 2026-10-10, 「照建議」 item 7b), read by the held-out freeze: every LLM method's
+    Pilot results were produced with exactly the LLM settings being frozen. Its Pilot run_config.json records a Pilot run
+    of that method with this config's model, budgets and local runtime (agent.ollama.pinned_record: provider, model,
+    digest, Ollama version, num_ctx, num_predict, temperature, seed, think); its Pilot scores.json, once written, embeds
+    that run_config (scored after that run; a missing scores.json is the freeze's other check). Returns
+    (problems, {method: sha256 of its run_config.json})."""
+    from agent.ollama import pinned_record
+    from env.lock import sha256_path
+
+    problems, shas = [], {}
+    for m in [m for m in methods if m in LLM_METHODS]:
+        path = Path(results_root) / "pilot" / m / "run_config.json"
+        if not path.exists():
+            problems.append(f"{m} has no Pilot run_config.json ({path}): run it on the Pilot with the settings of "
+                            "eval/llm_methods.json first (decision 026 #32)")
+            continue
+        scores = path.with_name("scores.json")
+        try:
+            doc = json.loads(path.read_text())
+            want = {"method": m, "split": "pilot", "model": config["model"], "budgets": method_budgets(m, config),
+                    "llm": pinned_record(config)}
+            differ = [k for k in want if doc.get(k) != want[k]]
+            stale = not differ and scores.exists() and json.loads(scores.read_text()).get("run_config") != doc
+        except (ValueError, KeyError, TypeError, AttributeError) as e:
+            problems.append(f"{m}: its Pilot run_config.json cannot be compared with eval/llm_methods.json "
+                            f"({type(e).__name__}: {e}) (decision 026 #32)")
+            continue
+        if differ:
+            problems.append(f"{m}: its Pilot results were not produced with the LLM settings being frozen: run_config.json "
+                            f"differs from eval/llm_methods.json in {', '.join(differ)} (decision 026 #32); run it on the "
+                            "Pilot again with these settings and score it")
+        elif stale:
+            problems.append(f"{m}: its Pilot scores.json was not computed from the run in run_config.json (decision 026 "
+                            f"#32): `python -m eval score --method {m} --set pilot`")
+        else:
+            shas[m] = sha256_path(path)
+    return problems, shas
+
+
 MAIN_METRICS = ("fault_type", "origin_top1", "affected_f1", "symptom_exact")  # decision 013: one per layer
 DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 
@@ -255,10 +344,10 @@ def _ledger(out_dir: Path) -> dict[str, list[dict]]:
     return events
 
 
-def _append(out_dir: Path, event: dict) -> None:
+def _append(out_dir: Path, event: dict, *, name: str = "attempts.jsonl") -> None:
     import os
 
-    with (out_dir / "attempts.jsonl").open("a") as f:
+    with (out_dir / name).open("a") as f:
         f.write(json.dumps(event) + "\n")
         f.flush()
         os.fsync(f.fileno())
@@ -326,6 +415,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
             attempt = len({e["attempt"] for e in events if e["event"] == "start"})
             while attempt < HELDOUT_MAX_ATTEMPTS:
                 kw = pinned_model(config) if llm else {}  # decision 029: before the attempt starts (raises: no attempt used)
+                before = formal_power(f"before {inc}'s attempt {attempt + 1}") if llm else None  # the same (user 2026-10-10)
                 attempt += 1
                 _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "start", "at": _now()})
 
@@ -333,21 +423,29 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
                     _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "end", "outcome": outcome,
                                       "detail": detail[:300], "usage": usage, "at": _now()})
 
+                def power_after(stop: bool = True) -> None:  # after the attempt's end event (decision 029, 2026-10-10)
+                    if llm:
+                        _power_after(out_dir, inc, attempt, before, stop=stop)
+
                 try:
                     out = METHODS[method](snapshot, inc, **kw)
                 except CallError as e:
                     if e.reason in RETRYABLE:
                         end(e.reason, e.detail, e.usage)
+                        power_after()
                         continue
                     end("error", f"CallError {e.reason}: {e.detail}", e.usage)
+                    power_after(stop=False)
                     raise
                 except Exception as e:
                     end("error", f"{type(e).__name__}: {e}")
+                    power_after(stop=False)
                     raise
                 pred, transcript = out if isinstance(out, tuple) else (out, None)
                 usage = (pred.get("usage") or {}) if isinstance(pred, dict) else {}
                 if problems := check_prediction(pred):
                     end("invalid_prediction", "; ".join(problems[:5]), {k: usage.get(k) for k in LEDGER_USAGE})
+                    power_after(stop=False)
                     raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
                 for target in (transcript_path, pred_path):
                     if target.exists():
@@ -356,6 +454,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
                     write_atomic(transcript_path, transcript)
                 write_atomic(pred_path, pred)  # last: the prediction file alone marks a complete attempt
                 end("ok", usage={k: usage.get(k) for k in LEDGER_USAGE})
+                power_after()
                 break
         return [i["incident_id"] for i in listing["doc"]["incidents"]
                 if not (out_dir / f"{i['incident_id']}.json").exists()]
@@ -398,6 +497,7 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
     try:
         for inc, _ in incidents_in(layout, split):
             kw = pinned_model(config) if llm else {}  # decision 029: the pin check before every incident
+            before = formal_power(f"before {inc}") if llm else None  # and the power state (user decision 2026-10-10)
             snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
             out = METHODS[method](snapshot, inc, **kw)
             pred, transcript = out if isinstance(out, tuple) else (out, None)
@@ -408,6 +508,8 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
             if transcript is not None:  # LLM methods: messages, exposure, stop reason (decisions 020, 022)
                 (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
             written.append(path)
+            if llm:
+                _power_after(out_dir, inc, None, before)
     finally:
         finish_llm(config if llm else None)
     return written
@@ -499,6 +601,29 @@ def _usage_aggregate(rows: list[dict]) -> dict:
             "stop_reasons": {k: reasons.count(k) for k in sorted(set(reasons))},
             "exposure": {k: _spread([e[k] for e in seen]) for k in ("records_seen", "records_share", "overview_share")}
             if seen else None}
+
+
+def _latency_power(out_dir: Path, rows: list[dict], run_config: dict | None) -> dict | None:
+    """decision 029, user decision 2026-10-10 (item 5): the scored incidents whose latency was not measured under the
+    formal power state, from the latest POWER_LOG line of each (the attempt that produced its prediction; on the Pilot,
+    the latest run). Reported next to the latency, never removed from it. None for a run without a local model."""
+    if not (run_config or {}).get("llm"):
+        return None
+    latest, path = {}, out_dir / POWER_LOG
+    for line in path.read_text().splitlines() if path.exists() else []:
+        if line.strip():
+            entry = json.loads(line)
+            latest[entry["incident_id"]] = entry
+    timed = [r["incident_id"] for r in rows if r["usage"].get("latency_s") is not None]  # abstentions have no latency
+    not_formal = []
+    for inc in timed:
+        entry = latest.get(inc)
+        if entry is None:
+            not_formal.append({"incident_id": inc, "attempt": None, "reason": f"no power sample in {POWER_LOG}"})
+        elif entry.get("formal") is not True:
+            not_formal.append({"incident_id": inc, "attempt": entry.get("attempt"),
+                               "reason": "; ".join(entry.get("problems") or []) or "not formal"})
+    return {"condition": POWER_CONDITION, "incidents_timed": len(timed), "not_formal": not_formal}
 
 
 def _evidence_aggregate(rows: list[dict]) -> dict:
@@ -628,6 +753,7 @@ def score_method(layout: DataLayout, method: str, split: str, out_root: Path, *,
               "review_differences": differences,
               "run_config": json.loads(config_path.read_text()) if config_path.exists() else None,
               "usage": _usage_aggregate(rows)}
+    result["usage"]["latency_power"] = _latency_power(out_dir, rows, result["run_config"])
     if held:  # decision 023 §5, §6: what the list left out and what the run could not answer
         result["heldout"] = held["report"]
         result["usage"]["failed_attempts"] = held["failed_attempts"]
@@ -790,6 +916,15 @@ def _usage_lines(result: dict) -> list[str]:
         lines.append(f"| {name} | {s['n']} | {_fmt(s['mean'])} | {_fmt(s['median'])} | {_fmt(s['max'])} |")
     cost = "-" if usage["cost_total"] is None else f"{usage['cost_total']:.2f}"
     lines += ["", f"Total cost (USD): {cost}."]
+    if (power := usage.get("latency_power")) is not None:  # decision 029, user decision 2026-10-10
+        if power["not_formal"]:
+            lines.append("Latency NOT measured under the formal power condition (AC power, high power mode; decision 029, "
+                         "user decision 2026-10-10; kept in the numbers above): " + "; ".join(
+                             f"{e['incident_id']} ({e['reason']})" for e in power["not_formal"]) + ".")
+        else:
+            lines.append(f"Power: the latency of all {power['incidents_timed']} timed incidents was measured on AC power in "
+                         "the high power mode (pmset before and after each incident; decision 029, user decision "
+                         "2026-10-10).")
     if usage["stop_reasons"]:
         lines.append("Stop reasons: " + ", ".join(f"{k} {n}" for k, n in usage["stop_reasons"].items()) + ".")
     if usage["exposure"] is None:

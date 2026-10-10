@@ -416,3 +416,12 @@ def run_record(config: dict, facts: dict) -> dict:
     return {"provider": "ollama", "model": config["model"], "model_version": facts["digest"],
             "ollama_version": facts["ollama_version"], "num_ctx": o["num_ctx"], "num_predict": o["num_predict"],
             "temperature": config["temperature"], "seed": o["seed"], "think": o["think"]}
+
+
+def pinned_record(config: dict) -> dict | None:
+    """The run_config.json `llm` a run with `config` writes once its pin check has passed (the server's digest and
+    version are then the pinned ones), read from the config alone; None when the config has no local runtime. The
+    held-out freeze compares each LLM method's Pilot run with it (decision 026 #32)."""
+    if config.get("provider") != "ollama":
+        return None
+    return run_record(config, {"digest": config["model_version"], "ollama_version": config["ollama"]["version"]})

@@ -374,7 +374,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                                               "review evidence and a person's amendments and removals (after the Pilot)")
     hpl.add_argument("--amendments", type=Path, required=True, help='{"amend": [...], "remove": [...]} (decision 026)')
     hfz = sub.add_parser("heldout-freeze", help="decision 023 §4, §6: write docs/heldout/slots.json and freeze.json once, on a "
-                                                "clean checkout with the plan committed; commit exactly those two files next")
+                                                "clean checkout with the plan committed; refused without a passing soak of "
+                                                "the current env lock or with Pilot LLM runs of other settings (decision "
+                                                "026 #31, #32); commit exactly those two files next")
     hfz.add_argument("--pilot-revisions", type=Path, required=True, help="used / waived for each decision's one Pilot revision")
     sub.add_parser("heldout-list", help="decision 023 §5.5: write heldout_incidents.json once (ground-truth side), after every "
                                         "slot is filled or closed, processed, audited and reviewed; prints counts only")
