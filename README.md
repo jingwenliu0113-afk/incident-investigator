@@ -5,7 +5,8 @@
 在 OpenTelemetry Demo 3.1.0（鎖定 image digest）上以 flagd 注入故障，收集 traces / logs / metrics，凍結成 Agent 唯一可讀的 snapshot，
 再用分層指標比較 Agent 與三種 baseline。Ground truth 與 Agent 可讀資料在檔案系統上物理隔離。
 
-> 狀態（2026-10-09）：Core 的工具鏈完成並測試（600+ 個測試），兩次非正式冒煙測試在真實 stack 上走通整條 pipeline；Pilot Set（10 個 incident）待收集，**目前還沒有任何方法的結果**。
+> 狀態（2026-10-10）：Core 的工具鏈完成並測試（900+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集**（高效能模式 + AC，leakage audit 詞彙命中 0），
+> 正在做 label review；統計 baseline 的 Pilot 分數在 review 完成後公布。LLM 方法延後。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 
 ## 結果

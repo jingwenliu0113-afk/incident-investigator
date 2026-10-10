@@ -1,14 +1,30 @@
 # NEXT
 
-## 目前位置（2026-10-09 17:45Z，台北 10-10 01:45）
+## 目前位置（2026-10-10 00:10Z，台北 08:10）
 
-**Core 的工具鏈都已完成並測試；Pilot 正式收集「依使用者指示暫停」（2026-10-09 17:45Z，台北 10-10 01:45：使用者要用 Mac 跑重要的東西，等使用者指令再繼續）。**
-- 暫停時沒有任何 run 在進行；自動重啟的監看已停止。繼續時：確認高效能模式 + AC、heavy lock 空出，再啟動 `uv run python -m collect pilot-loop --labeler agent:claude-code`
-  （intlShippingSlowdown 已由使用者 ack，修訂 5 的 flag 寫入已在 main）。
-- 本地分支 `heldout-protocol`（含 gate-analysis、synthetic-sample 與整合審查修正，918 passed）尚未合併：Pilot 收完、main 閒置後再合併並 push。
-- **Pilot 有效 incident（高效能模式 + AC）**：INC-002 paymentFailure（RG-003）、INC-003 productCatalogFailure（RG-007）、INC-004 paymentUnreachable（RG-008）、
-  INC-005 cartFailure（RG-010；RG-009 無效）。RG-002（INC-001）撤回。剩 intlShippingSlowdown 與之後 5 個 fault。
-- **leakage audit（4 個有效 incident，2026-10-09 17:50Z，只寫 ground-truth 側、沒有方法輸出）**：詞彙命中全部 0；難度全部 easy（origin 自己發出只在 fault 期間出現的 error 等級訊息）。label review 工作表已產生（`label_review_todo.json` 與好讀版 `.md`）。
+**Pilot Set 正式收集完成（10 個有效 incident，高效能模式 + AC）；下一步是使用者的 label review（A2）。**
+- **Pilot incident**（每個 fault 一個；RG-002 / INC-001 撤回）：
+
+  | incident | fault | run group | 難度（leakage audit） |
+  |---|---|---|---|
+  | INC-002 | paymentFailure 100% | RG-003 | easy |
+  | INC-003 | productCatalogFailure on | RG-007 | easy |
+  | INC-004 | paymentUnreachable on | RG-008 | easy |
+  | INC-005 | cartFailure 100% | RG-010（RG-009 無效） | easy |
+  | INC-006 | intlShippingSlowdown 10sec | RG-014（RG-011–013 無效，使用者 ack） | hard |
+  | INC-007 | productCatalogLockContention on | RG-015 | hard |
+  | INC-008 | adHighCpu on | RG-016 | hard |
+  | INC-009 | adManualGc on | RG-017 | hard |
+  | INC-010 | emailMemoryLeak 1000x | RG-018 | hard |
+  | INC-011 | recommendationCacheFailure on | RG-019（fault 期間 recommendation 重啟 4 次，review 時確認） | easy |
+
+  - 有效 run group 10 / 收集的 run group 18（RG-001、004–006、009、011–013 無效；grafana plugin 下載逾時 5 次、fault 關閉沒生效 2 次、RG-001 暖機不穩定）。
+    修訂 5 之後（RG-014–019）6 個 run 全部一次有效，12 次 flag 切換都一次寫入就在 1.3 s 內生效。
+  - leakage audit：10 個 incident 的詞彙命中全部 0（policy v1 經得起 Pilot）；難度 easy 5、hard 5、medium 0。
+  - normalize / replay / a priori label 全部完成；label review 工作表（`label_review_todo.json` 與好讀版 `.md`）全部產生。
+- **統計 baseline（stat-anomaly）已在 Pilot 上執行並評分**（`data/external/results/pilot/stat-anomaly/`），**但在使用者完成 label review 之前不在任何地方報告數字**：
+  decision 018 §4 要求 review 在看到方法輸出之前完成（看過的會在表上註明）。review 完成後再列出分數、寫第一張 baseline 表。
+- **合併**：分支 `heldout-protocol`（held-out 工具、Gate 計算、合成範例與 demo，decision 026、027）已在 Pilot 收完後快轉合併進 main 並 push；918 passed。
 - **兩種失敗原因**：
   1. **grafana 下載 plugin 逾時**（RG-004–006、RG-011、RG-012）：暖機前 aborted_unstable，只浪費約 5 分鐘、不影響資料；網路慢時發生（grafana.com 3–9 s）。
   2. **fault 關閉沒生效**（RG-009 cartFailure、RG-013 intlShippingSlowdown，`flag_unconfirmed`）：開啟都在 0.1–0.7 s 內確認，關閉在 10 s 內沒確認；
@@ -245,8 +261,12 @@
    - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）
      中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
      估算 Pilot 成本時要把這種重跑算進去。
-2. **Pilot 的人工作業**（資料產生後由使用者處理）：每個有效 incident 的 label review（decision 018，`python -m collect review-sheet --incident <INC>`）
-   與 evidence gold 標註（decision 017，`python -m eval gold-todo --set pilot`）。
+2. **Pilot 的人工作業（現在可以做）**：
+   - **label review（decision 018）**：10 份工作表在 `data/external/ground_truth/incidents/INC-002…011/`，好讀版是同目錄的 `label_review_todo.md`。
+     請在**看到任何方法結果之前**完成（不要開 `data/external/results/`）。填好 `label_review_todo.json` 的 `review` 欄位後：
+     `uv run python -m collect review --incident INC-0xx --file data/external/ground_truth/incidents/INC-0xx/label_review_todo.json --reviewer human:<名字>`。
+     要特別確認：fault 是否真的被觸發（emailMemoryLeak 在 10 分鐘內沒有 OOM / 重啟；recommendationCacheFailure 有重啟 4 次）、affected 與 user symptom。
+   - **evidence gold 標註（decision 017）**：label review 之後，`uv run python -m eval gold-todo --set pilot`（目前只有 stat-anomaly 的引用；LLM 方法延後）。
 3. **decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
 4. **held-out freeze 之前必須決定（026「待使用者決定」1–3）**：023 與使用者決定都沒有涵蓋，程式目前都是拒絕的一側；freeze 釘住所有程式，
    **freeze 之後就無法加入任何機制**。不影響 Pilot 收集。
