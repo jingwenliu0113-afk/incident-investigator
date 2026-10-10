@@ -332,6 +332,11 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
+- **A6 系統的 git 壞了（2026-10-10 晚上發現，不是本 Project 造成的）**：`/var/db/xcode_select_link` 在 2026-10-10 19:25（台北）被改成指向
+  `/Applications/Xcode.app/Contents/Developer`，那個 Xcode 的 `libxcrun.dylib` 是 arm64、系統要 arm64e，所以 `/usr/bin/git` 等所有 xcrun 工具都失敗
+  （`xcrun: error: unable to load libxcrun … incompatible architecture`）。不改任何系統設定；本 session 只在自己的指令前加
+  `DEVELOPER_DIR=/Library/Developer/CommandLineTools`（只影響那一個程序）。**請使用者處理**（例如把 xcode-select 切回 Command Line Tools，或修好 Xcode）；
+  之後的 session 在修好之前也要這樣執行 git 與測試（測試裡有 29 個會呼叫 git）。
 只列仍未處理的事項；編號沿用（其他地方引用 A1 等），已處理的移到下方「已處理」。
 
 - **A1 LLM 方法（dump-all / retrieval / agent）**：付費 API 由使用者決定先延後（2026-10-09）；2026-10-10 使用者暫時同意先試本機模型
