@@ -1,8 +1,15 @@
 # NEXT
 
-## 目前位置（2026-10-10 00:10Z，台北 08:10）
+## 目前位置（2026-10-10，label review 完成後）
 
-**Pilot Set 正式收集完成（10 個有效 incident，高效能模式 + AC）；下一步是使用者的 label review（A2）。**
+**Pilot Set 正式收集完成，10 個 incident 的 label review 已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。下一步：evidence gold 標註（A2）。**
+- **label review 結果**：10 個都是 `fault_exercised = true`、`saw_method_outputs = false`；affected 與 user symptom 全部維持 a priori；
+  7 個補了 notes（實際觀察，例如 emailMemoryLeak 沒有 OOM、recommendationCacheFailure 4 次 OOM、adHighCpu 時多數服務 p95 小幅上升）。
+  coverage：traces origin 10；metrics origin 9、symptom_only 1；logs none 5、origin 3、symptom_only 2（逐案見 `label_review.json`）。
+- **第一張 baseline 表（stat-anomaly v2，Pilot，n = 10，用 reviewed label）**：fault_type 0.30、origin_top1 0.60（top3 0.90）、affected_f1 0.77、symptom_exact 0.50；
+  失敗 8 個 = mechanism 4 + rule_limit 4；easy / hard 的 origin_top1 都是 0.60。evidence existence 1.0、弱標籤 temporal / service 1.0、origin 0.625。
+  （`data/external/results/pilot/stat-anomaly/table.md`）。**不依 Pilot 分數調整統計 baseline**（decision 014 只允許為修正設計缺陷修訂一次；目前沒有發現缺陷）。
+- **evidence gold 工作表已產生**（`eval gold-todo --set pilot`，每個有引用的 incident 最多 5 筆、方法盲標；目前只有 stat-anomaly 的引用）。
 - **Pilot incident**（每個 fault 一個；RG-002 / INC-001 撤回）：
 
   | incident | fault | run group | 難度（leakage audit） |
@@ -261,12 +268,8 @@
    - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）
      中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
      估算 Pilot 成本時要把這種重跑算進去。
-2. **Pilot 的人工作業（現在可以做）**：
-   - **label review（decision 018）**：10 份工作表在 `data/external/ground_truth/incidents/INC-002…011/`，好讀版是同目錄的 `label_review_todo.md`。
-     請在**看到任何方法結果之前**完成（不要開 `data/external/results/`）。填好 `label_review_todo.json` 的 `review` 欄位後：
-     `uv run python -m collect review --incident INC-0xx --file data/external/ground_truth/incidents/INC-0xx/label_review_todo.json --reviewer human:<名字>`。
-     要特別確認：fault 是否真的被觸發（emailMemoryLeak 在 10 分鐘內沒有 OOM / 重啟；recommendationCacheFailure 有重啟 4 次）、affected 與 user symptom。
-   - **evidence gold 標註（decision 017）**：label review 之後，`uv run python -m eval gold-todo --set pilot`（目前只有 stat-anomaly 的引用；LLM 方法延後）。
+2. **evidence gold 標註（decision 017，現在可以做）**：label review 已完成（2026-10-10）。gold 工作表在各 incident 的 ground-truth 目錄（`evidence_gold_todo.json`），
+   每筆引用判斷「是否為這個故障的相關證據」（方法盲標、只能由人標、標了不能改）。可以像 label review 一樣由我互動帶著做。
 3. **decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
 4. **held-out freeze 之前必須決定（026「待使用者決定」1–3）**：023 與使用者決定都沒有涵蓋，程式目前都是拒絕的一側；freeze 釘住所有程式，
    **freeze 之後就無法加入任何機制**。不影響 Pilot 收集。

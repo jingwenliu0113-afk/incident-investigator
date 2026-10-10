@@ -5,14 +5,23 @@
 在 OpenTelemetry Demo 3.1.0（鎖定 image digest）上以 flagd 注入故障，收集 traces / logs / metrics，凍結成 Agent 唯一可讀的 snapshot，
 再用分層指標比較 Agent 與三種 baseline。Ground truth 與 Agent 可讀資料在檔案系統上物理隔離。
 
-> 狀態（2026-10-10）：Core 的工具鏈完成並測試（900+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集**（高效能模式 + AC，leakage audit 詞彙命中 0），
-> 正在做 label review；統計 baseline 的 Pilot 分數在 review 完成後公布。LLM 方法延後。
+> 狀態（2026-10-10）：Core 的工具鏈完成並測試（900+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集並完成人工 label review**；
+> 第一張 baseline 表（統計 baseline、Pilot）在下方。LLM 方法延後；held-out 在 freeze 之後收集。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 
 ## 結果
 
-尚無結果。Pilot 收集與 label review 完成後，這裡會放：各方法在 Pilot 上的分層分數（含 run-group bootstrap 95% 區間）、
-依難度（Easy / Medium / Hard）分層的主要指標、失敗分類的比例。LLM 方法要等模型、預算與成本經使用者批准後才會執行。
+**Pilot Set（10 個 incident，每個 fault 一個；用途是驗證 pipeline、label 與 baseline 難度，不是 test，不進 held-out）**。
+label 全部經人工 review（decision 018，review 時未看任何方法輸出）。區間：run-group cluster bootstrap 95%（n = 10，區間很寬）。
+
+| 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact |
+|---|---:|---:|---:|---:|---:|
+| stat-anomaly（統計 baseline v2） | 0.30 [0.00, 0.60] | 0.60 [0.30, 0.90] | 0.90 [0.70, 1.00] | 0.77 [0.66, 0.87] | 0.50 [0.20, 0.80] |
+| dump-all / retrieval / Agent | — | — | — | — | — |
+
+- 依難度（leakage audit）：easy 5 個、hard 5 個；origin_top1 兩者都是 0.60。
+- 失敗（origin 或 fault type 錯）8 個：`mechanism`（origin 對、機制錯）4、`rule_limit`（統計規則本身的限制）4。
+- LLM 方法（dump-all、retrieval、Agent）延後，尚無結果；held-out（每個 fault 5 個）在 freeze 之後收集，Gate 只在 held-out 上判定。
 
 ## Pipeline
 
