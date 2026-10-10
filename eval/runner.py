@@ -25,24 +25,144 @@ def _stat(snapshot, incident_id):
 
 
 LLM_CONFIG = Path(__file__).resolve().parent / "llm_methods.json"
+LLM_METHOD_VERSION = "1"  # harness v1 (decision 020), dump-all / retrieval structure v1 (decision 021)
+TASK_ALLOWANCE = 2_000  # proxy tokens for the task text (the synthetic sample's, 18 services: 425)
+CORRECTION_ALLOWANCE = 500  # proxy tokens for one correction or limit message
 
 
-def load_llm_config(path: Path = LLM_CONFIG, *, need_client: bool = True) -> dict:
+def load_llm_config(path: Path | None = None, *, need_client: bool = True) -> dict:
     """The approved model, prices and budgets of the LLM methods; refuses anything not approved (MACHINE_POLICY:
-    no paid call before the user approves the cost). The API client is an adapter added after approval (decision 020 §6)."""
-    config = json.loads(Path(path).read_text())
+    no paid call before the user approves the cost). The only adapter is the local Ollama one (decision 029): an
+    approved local config must pin every runtime field and fit its budgets in num_ctx; any other provider is refused."""
+    path = Path(path or LLM_CONFIG)
+    config = json.loads(path.read_text())
     if config.get("status") != "approved" or not config.get("model"):
         raise ValueError(f"the LLM methods are not approved yet ({path.name}: status {config.get('status')!r}); the model, "
-                         "budgets and estimated cost go to the user first (MACHINE_POLICY, decisions 020 / 021)")
+                         "budgets and estimated cost go to the user first (MACHINE_POLICY, decisions 020 / 021 / 029)")
     if need_client:
-        raise ValueError("no model API adapter is installed yet: it is added only after the cost is approved (decision 020 §6)")
+        if config.get("provider") != "ollama":
+            raise ValueError("no model API adapter is installed yet: it is added only after the cost is approved (decision "
+                             f"020 §6); the only adapter is the local Ollama one (decision 029), not {config.get('provider')!r}")
+        from agent.ollama import config_problems
+
+        problems = config_problems(config)
+        if not problems:
+            problems = fit_problems(config)
+        if problems:
+            raise ValueError(f"{path.name} cannot run the LLM methods on the local model (decision 029): " + "; ".join(problems))
     return config
 
 
+def llm_fit(budgets: dict, num_ctx: int, num_predict: int) -> dict:
+    """Does each LLM method's proxy-token budget plus overhead fit num_ctx (decision 029)? `need`: the overhead (system
+    text, tool schemas, task text allowance), the budget and one reply: if it is above num_ctx the method cannot run
+    unchanged. `worst_case`: also every reply and correction the conversation can hold (reported, not refused).
+    Retrieval has no proxy-token budget (q x k records and the overview): its calls are left to the runtime guard.
+    Proxy tokens undercount real tokens (decision 011 §5), so fitting is necessary, not sufficient."""
+    from agent.harness import MAX_CORRECTIONS, api_tools
+    from agent.prompt import SYSTEM
+    from collect.snapshot import proxy_tokens
+
+    base = proxy_tokens(SYSTEM) + TASK_ALLOWANCE + num_predict
+    submit = proxy_tokens(json.dumps([t for t in api_tools() if t["name"] == "submit_diagnosis"]))
+    reply = num_predict + CORRECTION_ALLOWANCE
+    dump = base + submit + budgets["dump_all_proxy_tokens"]
+    agent = base + proxy_tokens(json.dumps(api_tools())) + budgets["agent_max_proxy_tokens"]
+    fit = {"dump-all": {"need": dump, "worst_case": dump + MAX_CORRECTIONS * reply},
+           "retrieval": {"need": None, "worst_case": None},
+           "agent": {"need": agent, "worst_case": agent + (budgets["agent_max_turns"] + MAX_CORRECTIONS) * reply}}
+    for entry in fit.values():
+        entry["fits"] = None if entry["need"] is None else entry["need"] <= num_ctx
+    return fit
+
+
+def fit_problems(config: dict) -> list[str]:
+    num_ctx = config["ollama"]["num_ctx"]
+    return [f"{method}: its budget plus overhead needs at least {entry['need']:,} proxy tokens but num_ctx is {num_ctx:,}, "
+            "so it cannot run unchanged; changing a budget is the user's decision"
+            for method, entry in llm_fit(config["budgets"], num_ctx, config["ollama"]["num_predict"]).items()
+            if entry["fits"] is False]
+
+
+def start_llm(config: dict | None, project_dir: Path | None) -> dict | None:
+    """The start of an LLM run on the local model (decision 029), before any snapshot is opened or anything written: the
+    Mac heavy lock (a local model run is a heavy workload, MACHINE_POLICY), the pin check against the running Ollama and
+    a loud report of worst cases above num_ctx. Returns the runtime for run_config.json; None for no local config.
+    The run keeps this `config` to the end: a config file changed during the run changes nothing in it."""
+    if not config or config.get("provider") != "ollama":
+        return None
+    import sys
+
+    from agent.ollama import model_from_config, run_record
+    from env.lock import PROJECT_DIR
+    from env.soak import require_heavy_lock
+
+    require_heavy_lock(Path(project_dir) if project_dir is not None else PROJECT_DIR)
+    _, facts = model_from_config(config)
+    num_ctx = config["ollama"]["num_ctx"]
+    for method, entry in llm_fit(config["budgets"], num_ctx, config["ollama"]["num_predict"]).items():
+        if entry["worst_case"] is not None and entry["worst_case"] > num_ctx:
+            print(f"WARNING (decision 029): {method}'s worst case ({entry['worst_case']:,} proxy tokens with every reply "
+                  f"kept) is above num_ctx {num_ctx:,}; such a call stops with CallError context_overflow, never truncated",
+                  file=sys.stderr)
+    return run_record(config, facts)
+
+
+def run_llm(kind: str, snapshot, incident_id: str, model, config: dict, *, cache_root: Path):
+    """One LLM method on one snapshot with `model` (decisions 020, 021), the budgets and prices of `config`."""
+    from agent.harness import investigate
+    from baselines.dump_all import dump_all
+    from baselines.retrieval import retrieval
+
+    method, b, price = {"name": kind, "version": LLM_METHOD_VERSION}, config["budgets"], config.get("price_per_mtok")
+    if kind == "dump-all":
+        return dump_all(snapshot, incident_id, model, method=method, budget=b["dump_all_proxy_tokens"], price_per_mtok=price)
+    if kind == "retrieval":
+        return retrieval(snapshot, incident_id, model, method=method, cache_root=cache_root, q=b["retrieval_queries"],
+                         k=b["retrieval_k"], price_per_mtok=price)
+    if kind == "agent":
+        return investigate(snapshot, incident_id, model, cache_root=cache_root, method=method, max_turns=b["agent_max_turns"],
+                           max_tool_calls=b["agent_max_tool_calls"], max_proxy_tokens=b["agent_max_proxy_tokens"],
+                           price_per_mtok=price)
+    raise ValueError(f"not an LLM method: {kind}")
+
+
+def pinned_model(config: dict) -> dict:
+    """decision 029: the pin check before an incident's attempt, against the configuration read at the start of the run.
+    It runs before the attempt starts, never inside it: an unreachable server or another model stops the run (ValueError)
+    without using a held-out attempt (026 #17), and the run can go on once the server or the pinned model is back.
+    Returns the keyword arguments of an LLM method in METHODS."""
+    from agent.ollama import model_from_config
+
+    try:
+        model, _ = model_from_config(config)
+    except ValueError as e:
+        raise ValueError(f"{e}; the run stops before the incident's next attempt starts, so no attempt is used "
+                         "(decision 029)") from e
+    return {"model": model, "config": config}
+
+
+def finish_llm(config: dict | None) -> None:
+    """decision 029: the local model leaves memory before the run (and with it the heavy lock) ends; reported, never raised."""
+    if not config or config.get("provider") != "ollama":
+        return
+    import sys
+
+    import agent.ollama as ollama
+
+    o = config["ollama"]
+    if problem := ollama.unload(ollama.default_transport(o["url"], o.get("timeout_s", ollama.DEFAULT_TIMEOUT_S)),
+                                config["model"]):
+        print(f"WARNING (decision 029): {problem}", file=sys.stderr)
+
+
 def _llm(kind: str):
-    def run(snapshot, incident_id):
-        config = load_llm_config()
-        raise AssertionError(f"unreachable until an adapter exists: {kind} {config['model']}")
+    def run(snapshot, incident_id, *, model=None, config=None):
+        if model is None or config is None:
+            raise ValueError(f"{kind} runs only through run_method, which takes the heavy lock and checks the pinned model "
+                             "at the start of the run and before every incident's attempt (decision 029)")
+        cache = Path(snapshot.path).parents[2] / "cache"  # <data root>/cache, beside the Agent tools' index (decision 019)
+        return run_llm(kind, snapshot, incident_id, model, config, cache_root=cache)
     return run
 
 
@@ -170,7 +290,8 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
     from collect.heldout import write_once
 
     freeze, listing = heldout_guard(layout, project_dir)
-    config = load_llm_config() if method in LLM_METHODS else None  # still refuses: not approved, no adapter
+    config = load_llm_config() if method in LLM_METHODS else None  # refuses: not approved, no adapter, not pinned
+    llm = start_llm(config, project_dir)  # decision 029: heavy lock and pin check before anything is written
     out_dir = Path(out_root) / "heldout" / method
     out_dir.mkdir(parents=True, exist_ok=True)
     lock = out_dir / "run.lock"
@@ -185,7 +306,8 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
     try:
         run_config = {"method": method, "split": "heldout", "model": config["model"] if config else None,
                       "budgets": method_budgets(method, config), "scope": SCOPES.get(method),
-                      "freeze_sha256": freeze["sha256"], "heldout_incidents_sha256": listing["sha256"]}
+                      "freeze_sha256": freeze["sha256"], "heldout_incidents_sha256": listing["sha256"],
+                      **({"llm": llm} if llm else {})}
         path = out_dir / "run_config.json"
         if path.exists():
             if json.loads(path.read_text()) != run_config:
@@ -203,6 +325,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
             snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
             attempt = len({e["attempt"] for e in events if e["event"] == "start"})
             while attempt < HELDOUT_MAX_ATTEMPTS:
+                kw = pinned_model(config) if llm else {}  # decision 029: before the attempt starts (raises: no attempt used)
                 attempt += 1
                 _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "start", "at": _now()})
 
@@ -211,7 +334,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
                                       "detail": detail[:300], "usage": usage, "at": _now()})
 
                 try:
-                    out = METHODS[method](snapshot, inc)
+                    out = METHODS[method](snapshot, inc, **kw)
                 except CallError as e:
                     if e.reason in RETRYABLE:
                         end(e.reason, e.detail, e.usage)
@@ -237,6 +360,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
         return [i["incident_id"] for i in listing["doc"]["incidents"]
                 if not (out_dir / f"{i['incident_id']}.json").exists()]
     finally:
+        finish_llm(config if llm else None)
         try:
             if json.loads(lock.read_text()).get("token") == token:  # only this process's own lock
                 lock.unlink()
@@ -263,24 +387,29 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
     if split == "heldout":
         return _run_heldout(layout, method, out_root, project_dir)
     config = load_llm_config() if method in LLM_METHODS else None  # refuses before any snapshot is opened
+    llm = start_llm(config, project_dir)  # decision 029: heavy lock and pin check before anything is written
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     # decision 024: the budgets of this run stay with its results, written before any prediction
     run_config = {"method": method, "split": split, "model": config["model"] if config else None,
-                  "budgets": method_budgets(method, config), "scope": SCOPES.get(method)}
+                  "budgets": method_budgets(method, config), "scope": SCOPES.get(method), **({"llm": llm} if llm else {})}
     (out_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
     written = []
-    for inc, _ in incidents_in(layout, split):
-        snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        out = METHODS[method](snapshot, inc)
-        pred, transcript = out if isinstance(out, tuple) else (out, None)
-        if problems := check_prediction(pred):
-            raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
-        path = out_dir / f"{inc}.json"
-        path.write_text(json.dumps(pred, indent=2) + "\n")
-        if transcript is not None:  # LLM methods: messages, exposure, stop reason (decisions 020, 022)
-            (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
-        written.append(path)
+    try:
+        for inc, _ in incidents_in(layout, split):
+            kw = pinned_model(config) if llm else {}  # decision 029: the pin check before every incident
+            snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
+            out = METHODS[method](snapshot, inc, **kw)
+            pred, transcript = out if isinstance(out, tuple) else (out, None)
+            if problems := check_prediction(pred):
+                raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
+            path = out_dir / f"{inc}.json"
+            path.write_text(json.dumps(pred, indent=2) + "\n")
+            if transcript is not None:  # LLM methods: messages, exposure, stop reason (decisions 020, 022)
+                (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
+            written.append(path)
+    finally:
+        finish_llm(config if llm else None)
     return written
 
 
@@ -650,6 +779,11 @@ def _usage_lines(result: dict) -> list[str]:
     else:
         budgets = ", ".join(f"{k} {v}" for k, v in config["budgets"].items()) or "none"
         lines += [f"Visible data: {config['scope'] or 'not described'}.", f"Model: {config['model'] or '-'}. Budgets: {budgets}."]
+        if llm := config.get("llm"):
+            lines.append(f"Model runtime (decision 029): {llm['provider']} {llm['ollama_version']}, {llm['model']} @ "
+                         f"{llm['model_version']}, num_ctx {llm['num_ctx']}, num_predict {llm['num_predict']}, temperature "
+                         f"{llm['temperature']}, seed {llm['seed']}, think {str(llm['think']).lower()}; cost 0 = a local "
+                         "model on this Mac, no external cost.")
     lines += ["", f"Usage over the {result['aggregate']['n_incidents']} scored incidents:", "",
               "| quantity | n | mean | median | max |", "|---|---:|---:|---:|---:|"]
     for name, s in usage["fields"].items():

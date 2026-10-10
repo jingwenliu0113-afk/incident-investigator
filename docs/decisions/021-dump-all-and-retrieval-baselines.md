@@ -59,3 +59,9 @@
 
 - dump-all（B = 120,000）：打包 3 秒、119,338 proxy tokens；概覽 703 行（約 1.8 萬 tokens）、error 樣板 5 組、時間分層樣本 509 筆。
 - retrieval：FTS5 索引建立 7 秒、347 MiB（依 content digest 快取）；每個查詢 < 0.1 秒。
+
+## 補註（2026-10-10，decision 029）
+
+- 使用者暫時同意 LLM 方法先試本機模型（Ollama）。本文件的結構與建議的預算數值**不變**；三個 LLM 方法仍用同一個模型（§4）。
+- B = 120,000 是為約 200k context 的模型設計。本機模型的 `num_ctx` 必須放得下「預算 + overhead」（`eval/runner.py` 的 `llm_fit`；
+  建議的設定、num_predict 8192 時 dump-all 需要 130,567、Agent 需要 131,586 proxy tokens），放不下就拒絕執行、不自動縮預算；改預算是使用者的決定。

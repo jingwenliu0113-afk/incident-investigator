@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# with-local-ollama（decision 029）
+#
+# 用法（一律包在 heavy lock 裡、從 project 根目錄執行）：
+#   ./tools/with-mac-lock ./tools/with-local-ollama <command> [args...]
+# 例如：
+#   ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model <tag> --out <path>
+#   ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval run --method agent --set pilot
+#
+# 本機模型的 server 與載入的模型只在這一次 heavy lock 的期間存在（MACHINE_POLICY：在 workload 整個存活期間持有 lock）：
+#   1. heavy lock 必須由這個目錄的 with-mac-lock 持有（owner.txt 的 cwd 相同、pid 還活著），否則拒絕（exit 3）。
+#   2. 127.0.0.1:<port> 已經有程式在聽 → 拒絕（exit 3）：那不是這次啟動的 server，不使用、也不停止它。
+#   3. 以固定的環境啟動 ollama serve：OLLAMA_HOST=127.0.0.1:<port>、OLLAMA_NUM_PARALLEL=1、OLLAMA_NO_CLOUD=1（其他沿用預設）；
+#      log 寫到 $OLLAMA_SERVE_LOG（預設：一個暫存檔，結束時印出路徑）。
+#   4. 等 /api/version 回應（最多 60 秒；沒有回應或 server 先結束 → exit 3，不執行指令），再執行指令。
+#   5. 不論指令成功、失敗或被中斷，停止 server 並等它結束（模型隨 server 一起卸載），回傳指令的 exit code。
+#
+# 只供測試覆寫：OLLAMA_BIN（預設 /opt/homebrew/bin/ollama）、II_OLLAMA_PORT（預設 11434；host 永遠是 127.0.0.1）、
+# II_HEAVY_LOCK_DIR（預設 /tmp/ai-portfolio-mac-heavy.lock，與 with-mac-lock 相同）。
+
+set -u
+
+OLLAMA_BIN="${OLLAMA_BIN:-/opt/homebrew/bin/ollama}"
+PORT="${II_OLLAMA_PORT:-11434}"
+LOCK_DIR="${II_HEAVY_LOCK_DIR:-/tmp/ai-portfolio-mac-heavy.lock}"
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: ./tools/with-mac-lock $0 <command> [args...]" >&2
+  exit 64
+fi
+case "$PORT" in
+  '' | *[!0-9]*) echo "ERROR: II_OLLAMA_PORT must be a port number, got '$PORT'" >&2; exit 64 ;;
+esac
+
+owner="$LOCK_DIR/owner.txt"
+if [ ! -f "$owner" ]; then
+  echo "ERROR: the Mac heavy lock is not held; run via ./tools/with-mac-lock (MACHINE_POLICY.md, decision 029)" >&2
+  exit 3
+fi
+lock_pid="$(sed -n 's/^pid=//p' "$owner" | head -n 1)"
+lock_cwd="$(sed -n 's/^cwd=//p' "$owner" | head -n 1)"
+if [ -z "$lock_cwd" ] || [ "$(cd "$lock_cwd" 2>/dev/null && pwd -P)" != "$(pwd -P)" ]; then
+  echo "ERROR: the Mac heavy lock is held by another workload (cwd=$lock_cwd); do not preempt it" >&2
+  exit 3
+fi
+if [ -z "$lock_pid" ] || ! kill -0 "$lock_pid" 2>/dev/null; then
+  echo "ERROR: the lock owner pid '$lock_pid' is not alive (stale lock?); report it, do not delete it" >&2
+  exit 3
+fi
+
+if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+  echo "ERROR: something already listens on 127.0.0.1:$PORT: a server not started under this lock is neither used nor" \
+       "stopped here; stop it yourself (or ask the user) and run again" >&2
+  exit 3
+fi
+
+log="${OLLAMA_SERVE_LOG:-$(mktemp -t ii-ollama-serve.XXXXXX)}"
+OLLAMA_HOST="127.0.0.1:$PORT" OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 "$OLLAMA_BIN" serve >"$log" 2>&1 &
+server=$!
+
+stop_server() {
+  if kill -0 "$server" 2>/dev/null; then
+    kill -TERM "$server" 2>/dev/null
+    for _ in $(seq 60); do
+      kill -0 "$server" 2>/dev/null || break
+      sleep 0.5
+    done
+    kill -0 "$server" 2>/dev/null && kill -KILL "$server" 2>/dev/null
+  fi
+  wait "$server" 2>/dev/null
+  echo "ollama serve stopped; its log: $log" >&2
+}
+trap stop_server EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+ready=0
+for _ in $(seq 120); do
+  kill -0 "$server" 2>/dev/null || break
+  if curl --noproxy '*' -sf -m 2 "http://127.0.0.1:$PORT/api/version" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+if [ "$ready" -ne 1 ]; then
+  echo "ERROR: ollama serve did not answer on 127.0.0.1:$PORT (log: $log); nothing was run" >&2
+  exit 3
+fi
+
+"$@"
+exit $?

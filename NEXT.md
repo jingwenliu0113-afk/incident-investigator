@@ -269,11 +269,31 @@
      （preflight 與 normalize 都拒絕 dirty tree）；可以改 `eval/`、`agent/`、`baselines/`、文件。
 5. ✅ **Gate 前請使用者做的人工作業**（2026-10-10 完成，human:jingwen）：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
 6. LLM 方法（dump-all / retrieval / agent）已登錄在 `python -m eval run`，但 `eval/llm_methods.json` 是 `proposed`：未經使用者批准模型、預算與成本前一律拒絕執行，
-   也還沒有 API adapter（decision 020 §6）。
+   付費 API 的 adapter 沒有；本機 Ollama 的 adapter 已加入（decision 029），也要等使用者選模型、改 `approved` 才會執行。
 7. ✅ 第一張 baseline 表（Pilot，stat-anomaly v2）已產生（README「結果」）。
-8. **剩下的 Core 依序，全部等使用者**：LLM 方法在 Pilot 上執行（A1）→ held-out freeze（A0 在 freeze 前決定；013 正式版要 LLM 結果）→
-   held-out 收集（`collect next --set heldout`，K = 5）→ held-out 評測與 Gate。LLM baseline / Agent：**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、
-   token 量與預估成本並等批准**；模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
+8. **剩下的 Core 依序**（LLM 方法暫時改試本機模型，decision 029，見 A1）：
+   0. **新 lock 的 soak**（A0，decision 028；`028` 與 `029` 都已合併進 main）。
+   1. **主 session，grafana soak 之後**：在 main checkout 對三個本機模型跑合成範例探測
+      （只用合成範例、不讀 label、不是結果、不寫 `data/`），然後向使用者報告建議的模型與時間估計。
+      每個探測一次 heavy lock，`with-local-ollama` 在 lock 內啟動 server、跑完一定停掉（029 §3.8；lock 被占用時 exit 75、不搶；
+      11434 已經有 server 在跑時 exit 3，不用它、也不停它，回報使用者）。**時間未量測**：Agent 最多 30 回合、每次輸出上限 8192，速度量測要 prefill 到 13 萬 tokens；
+      先跑第一個，依它的 `speed` 與 `per_call` 時間再估其他的。先跑 think 關；think 開只對 `ollama.capabilities` 有 `thinking` 的模型再跑一次（加 `--think`）：
+      ```bash
+      ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model qwen3:8b-q4_K_M --num-ctx 40960 --context-sizes 8000,24000 --out <scratch>/probe-qwen3-8b.json
+      ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model qwen3.5:9b-q4_K_M --num-ctx 196608 --context-sizes 8000,32000,100000,130000 --out <scratch>/probe-qwen3.5-9b.json
+      ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model gemma4:12b-it-q4_K_M --num-ctx 196608 --context-sizes 8000,32000,100000,130000 --out <scratch>/probe-gemma4-12b.json
+      # think 開（同上再加 --think，--out 改名 *-think.json；只對有 thinking 能力的模型）
+      ```
+      看：`guard_selftest.passed`（兩項都必須是 server 自己拒絕，`guard` = `server`；否則 warnings 有 GUARD FAILED、exit 3：不用這個 Ollama 版本，回報使用者）、
+      各方法的 `valid_prediction`、`tool_calls_parsed` / `unparsed_tool_calls` / `text_tool_calls`、`corrections`、`error`（含 `guard`）；
+      `proxy_to_real`（決定 `num_ctx` 的餘裕）；`speed`（prefill / decode tok/s，估 Pilot 時間）；`repeat_check`（回覆相同、兩次 `prompt_eval_counts` 相同；
+      不同就是 Ollama 只算沒快取的部分，防護與 tokens_in 不能依賴它，回報使用者）；`unloaded`；`power`；`warnings`
+      （qwen3:8b 的 fit 必然不過：40,960 < dump-all 的 130,567 proxy tokens）。`<scratch>` 是 `data/` 以外的任何目錄（`--out` 在 `data/` 下會被拒絕）。
+   2. 使用者選模型、`num_ctx`、think，確認 Ollama 版本釘選與電力條件（A1），並同意 → 依探測的 `config_if_approved` 填 `eval/llm_methods.json`、改 `approved` →
+      三個 LLM 方法在 Pilot 上執行（`./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval run --method <m> --set pilot`，A1）。
+   3. held-out freeze（新 lock 的 soak 必須先 PASS；013 正式版要 LLM 結果）→ held-out 收集（`collect next --set heldout`，K = 5）→ held-out 評測與 Gate。
+   - 若使用者之後換回付費 API：另寫 decision、加 adapter，**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、token 量與預估成本並等批准**，
+     並在 freeze 之前用那個模型重跑 Pilot（029「對實驗的影響」）。模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
 
 ## Blocked / 需要使用者（回來時一次處理）
 
@@ -295,11 +315,25 @@
     結果記到 028 的補註。soak 只能確認 grafana 沒有重啟或被 kill，確認不了它是否真的沒有下載；沒有規則看 grafana 是否正常運作（它不進 snapshot）。
   - 不重做校準（policy v1 已凍結、014 的門檻固定）。
   - 換回原方案：只能在 freeze 前另寫 decision；逐 byte 還原 overlay 與 lock 就能沿用 soak #5，重算 lock 則要再跑 soak（028「換回原本的方案」）。
-- **A1 付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
-  scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
-  - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）
-    中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
-    估算 Pilot 成本時要把這種重跑算進去。
+- **A1 LLM 方法（dump-all / retrieval / agent）**：付費 API 由使用者決定先延後（2026-10-09）；**2026-10-10 使用者暫時同意先試本機模型**
+  （decision 029；原話「先暫時兩個都同意，先關掉 grafana 下載再測本地模型，之後可以考慮再換回來原本的方案」，之後可能換回付費 API）。
+  - 已完成並合併進 main（decision 029）：Ollama adapter（只連 loopback、拒絕 cloud 模型；`truncate` / `shift` 關閉、每個回覆檢查——包括不依賴
+    `truncate: false` 的送出量與計數下限——截斷或無法確認未截斷一律是不可重試的 `CallError`；解析不了的 tool call 參數照 020 §3 拒收）、
+    模型 digest 與 Ollama 版本釘選（每個 incident 的檢查在嘗試開始之前：server 不在或模型被換時執行停止、不用掉 held-out 嘗試）、整個執行只用開始時的設定、
+    執行前的 fit check（放不下就拒絕，不改預算）、heavy lock 與 `tools/with-local-ollama`（server 只在 lock 內存在、結束時卸載模型）、
+    `run_config.json` 的 `llm`、`eval local-probe`（防護自我測試要求 server 自己拒絕，否則 exit 3）。
+    `eval/llm_methods.json` 仍是 `proposed`（model null），預算不變；使用者批准之前 `eval run` 的 LLM 方法一律拒絕。
+    scripted fake model 與合成範例探測都不產生方法結果。審查（2026-10-10，合併前）的修正見 029 開頭。
+  - **待使用者**：看過三個本機模型的合成範例探測報告（下一步 8.1）後，決定模型、`num_ctx`、think，並同意在 Pilot 上執行（提案第 3 步）。
+    context 放不下預算的模型（qwen3:8b：40,960 < dump-all 的 130,567 proxy tokens）不能原樣跑 dump-all 與 Agent；要不要改預算是使用者的決定。
+    同時要確認（029「不在本文件決定」）：
+    1. **Ollama 版本**：提案是「記錄」；程式目前照助理的提案**釘選**（不符就拒絕），代價是 held-out 結束前不能升級 Ollama（含 Homebrew 自動更新）。釘選或只記錄？
+    2. **電力條件**：本機 LLM 的 Pilot / held-out 執行要不要套用 decision 025 的正式條件（高效能模式 + AC）並記錄；latency 取決於它。目前只有探測記錄。
+    3. **freeze 是否強制** Pilot 的 LLM 結果用的是凍結的模型（比對 Pilot 的 `run_config.json` 與 `llm_methods.json`）：目前只是書面規則，freeze 之前要人比對；
+       加上檢查是 freeze 協定的變更，要使用者同意。
+  - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤，
+    或 029 的 `context_overflow` 等）中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫，
+    `run_config.json` 與所有 prediction 都重寫。本機模型重跑只花時間；換回付費 API 時，估算 Pilot 成本要把這種重跑算進去。
   - LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
 - **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 選**「沒有偏好」** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
   freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
