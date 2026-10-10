@@ -134,3 +134,21 @@
     soak #5（`data/external/soak/20261008T143533Z/`，PASS、teardown 乾淨）重新符合 preflight，**不需要再跑 soak**。
   - 如果改用重算（`python -m env resolve`，或上面的離線方式）產生 lock，`generated_at` 會不同 → sha 不同 → 需要再跑一次 soak。
 - 換回之後的 held-out 會與 Pilot 在同一個 lock 上；plugin 下載逾時造成的無效 run 也會回來。
+
+## 結果（2026-10-10，soak #6；在 held-out freeze 與任何 held-out 資料之前）
+
+- **soak #6 PASSED**：`data/external/soak/20261010T053643Z/`（commit `0319280`，lock `sha256:1e749f67…`；開始前確認高效能模式 + AC；heavy lock 等 rust-hnsw 的 benchmark 釋放後才開始，
+  沒有搶占）。視窗 2026-10-10T05:42:23Z – 06:12:31Z，R1–R9 全部通過（R1：141 筆狀態樣本，沒有任何 container 重啟；R3：2124 個請求 0 個 5xx），
+  teardown 乾淨。ambient（decision 005）與之前同性質：ask_agent 失敗 111 次、OpenSearch mapping 拒收 8706。
+  `collect.live.passing_soak(data/external, 新 lock)` 回傳這份報告 → **收集的 preflight 接受新 lock**；本文件「必須在 held-out freeze 之前」的順序已滿足。
+- **grafana 的人工確認**（只讀，不是判定條件；grafana 啟動 5 分鐘後讀一次 `docker logs grafana`，`RestartCount = 0`）：
+  - `grafana-opensearch-datasource` **沒有**被安裝：關掉的正是 Pilot 中造成無效 run 的同步安裝。
+  - **但 Grafana 13.1.0 自己的背景安裝器（`plugin.backgroundinstaller`，預設的 preinstall 清單）仍會連網**：暖機期間（05:37:14–05:37:29Z，視窗開始之前）
+    從網路下載並安裝 `grafana-lokiexplore-app` v3.0.0、`grafana-pyroscope-app` v2.3.1、`grafana-exploretraces-app` v2.2.1、`grafana-metricsdrilldown-app` v3.0.0
+    （版本沒有固定），`elasticsearch` 與 `zipkin` 嘗試更新失敗（bundled 目錄 permission denied），失敗只寫 log、grafana 沒有重啟。
+    這就是決策 1 寫的「其他網路行為不改、也沒有驗證過」，現在有了證據。
+  - 判讀：本決定的目的（不再因下載逾時讓 run 在暖機前無效）由這次的證據支持：背景安裝是非同步的，失敗不會讓 grafana 結束。
+    **環境並沒有因此完全離線、完全固定**：grafana 仍會連到 grafana.com、安裝沒有固定版本的介面 app。grafana 是 X1 非 SUT 服務、不進 snapshot，
+    背景安裝發生在暖機期間，對方法看到的資料沒有可量測的影響。Pilot 期間同一個 image 應該也有這個背景安裝（推測，Pilot 沒有保存 grafana 的 log，未驗證）。
+  - 若要連背景安裝也關掉（Grafana 的 `[plugins]` preinstall 停用設定），是另一個 overlay 設定、需要新的 decision、重算 lock 與再一次 soak；
+    目前沒有證據顯示它造成任何無效 run，**不做**，列為使用者可選的後續（NEXT A0）。
