@@ -275,3 +275,52 @@ def test_a_valid_record_that_carries_power_not_formal_is_never_listed(tmp_path, 
     path.write_text(json.dumps({**json.loads(path.read_text()), **judged, "power_samples": 30}))
     with pytest.raises(ValueError, match="RG-050: valid without window power samples all on the formal power"):
         listing(layout)
+
+
+# ---------------------------------------------------------------- a needs-person slot (user decision 2026-10-10)
+
+def test_acknowledged_run_groups_stay_listed_and_nothing_is_acknowledged_after_the_list(tmp_path):
+    from collect.heldout import acknowledge_slot_failures
+    from collect.pilot import ACKS
+
+    layout = DataLayout(tmp_path / "data")
+    complete_pilot(layout, KEPT)
+    write_heldout_incident(layout, 50, SLOTS["slots"][0])
+    for n in (51, 52, 53):
+        write_run(layout, f"RG-{n:03d}", SLOTS["slots"][1]["flag"], SLOTS["slots"][1]["variant"], "invalid", split="heldout",
+                  slot="H02", freeze_sha=FREEZE_SHA)
+    with pytest.raises(ValueError, match="H02 is needs_person"):
+        listing(layout)
+
+    def ack():
+        return acknowledge_slot_failures(layout, SLOTS, "H02", freeze_sha=FREEZE_SHA, reason="grafana", decided_by="user",
+                                         now=NOW)
+
+    record = ack()
+    write_heldout_incident(layout, 54, SLOTS["slots"][1])
+    doc = listing(layout)
+    assert [i["run_group_id"] for i in doc["incidents"]] == ["RG-050", "RG-054"]
+    assert doc["run_groups"] == [["RG-050", "valid"], ["RG-051", "invalid"], ["RG-052", "invalid"], ["RG-053", "invalid"],
+                                 ["RG-054", "valid"]]  # nothing deleted
+    assert doc["acknowledgments"] == [record]
+    write_once(layout.heldout_incidents_path, doc)
+    assert load_heldout_incidents(layout, freeze_sha=FREEZE_SHA) == doc
+    with pytest.raises(ValueError, match="heldout_incidents.json"):  # 023 §5.5 / §6: the list never changes
+        ack()
+    with (layout.ground_truth_root / ACKS).open("a") as f:  # written by hand anyway: fail closed
+        f.write(json.dumps(record) + "\n")
+    with pytest.raises(PermissionError, match="acknowledg"):
+        load_heldout_incidents(layout, freeze_sha=FREEZE_SHA)
+
+
+def test_a_list_without_acknowledgments_records_none_and_pilot_acknowledgments_never_enter_it(tmp_path):
+    from collect.pilot import acknowledge_failures
+
+    layout = full(tmp_path)
+    for n in (3, 4, 5):
+        write_run(layout, f"RG-{n:03d}", "cartFailure", "100%", "invalid", up_at=BEFORE)  # a Pilot fault's failures
+    acknowledge_failures(layout, "pilot", "cartFailure", "100%", reason="r", decided_by="user", now=NOW)
+    doc = listing(layout)
+    assert doc["acknowledgments"] == []
+    write_once(layout.heldout_incidents_path, doc)
+    assert load_heldout_incidents(layout, freeze_sha=FREEZE_SHA) == doc

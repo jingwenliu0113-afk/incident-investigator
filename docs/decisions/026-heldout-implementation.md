@@ -8,8 +8,12 @@
   另修正解讀 18、19、24 的實作缺口（見各項）。023 沒有涵蓋、需要使用者決定的事項列在文末「待使用者決定」，**這些事項的程式行為不變**。
   **更正（2026-10-10，合併審查；只改文字，程式行為不變）**：解讀 11 原本說 slot 的無效上限「與 Pilot 的規則相同」，合併 main 之後已不成立
   （Pilot 有 `collect ack-failures`，held-out 沒有）；解讀 11 與「待使用者決定」1 已更正並註明 Pilot 的前例。
+  **修訂 2（2026-10-10，使用者決定之後；在任何 held-out 資料、freeze 與方法結果之前）**：使用者處理了文末「待使用者決定」三項（023「使用者決定」的
+  「追加（2026-10-10）」）：1 選 b，與 Pilot 相同（人看過 run record 後確認，slot 重新計數；實作見解讀 11、12，程式新增 `collect ack-failures --set heldout --slot`）；
+  2 沒有偏好，不實作、維持現況（freeze 之前仍可決定）；3 不允許 held-out 撤回（維持解讀 30）。同日使用者也放棄 014 的 Pilot 修訂（解讀 10 的宣告：014 = waived）。
+  只有 1 改變程式行為：待人處理的 slot 原本永遠待人處理，現在由人確認後再收；其他規則、門檻、指標、切分與預算不變。
 - 影響範圍：`collect/heldout.py`、`collect/freeze.py`（新增）；`collect/__main__.py`（`run|next|status --set heldout`、`heldout-plan`、
-  `heldout-freeze`、`heldout-list`、incident 指令的 freeze 檢查）；`collect/rungroup.py`（`Plan.slot`、`Plan.freeze_sha256`；修訂 1：`up_at` 先寫）；
+  `heldout-freeze`、`heldout-list`、incident 指令的 freeze 檢查；修訂 2：`ack-failures --set heldout --slot`）；`collect/rungroup.py`（`Plan.slot`、`Plan.freeze_sha256`；修訂 1：`up_at` 先寫）；
   `collect/pilot.py`、`collect/labeling.py`、`collect/layout.py`；`eval/runner.py`、`eval/__main__.py`；`agent/harness.py`（`CallError`）；
   `baselines/dump_all.py`、`baselines/retrieval.py`。
 
@@ -33,10 +37,12 @@
 | freeze 紀錄 | `docs/heldout/freeze.json` | 是（與 slots 同一個 commit） | `collect heldout-freeze` |
 | run group 的 slot 與 freeze sha | `ground_truth/run_groups/<RG>/run.json` 的 `plan.slot`、`plan.freeze_sha256` | 否 | `collect run --set heldout` |
 | held-out 清單 | `data/external/ground_truth/heldout_incidents.json` | 否 | `collect heldout-list` |
+| 待人處理 slot 的確認（修訂 2） | `data/external/ground_truth/failure_acks.jsonl`（與 Pilot 同一個檔案；`split: "heldout"`、`slot`） | 否 | `collect ack-failures --set heldout --slot` |
 | 嘗試紀錄 | `data/external/results/heldout/<method>/attempts.jsonl` | 否 | `eval run --set heldout` |
 | 執行鎖 | `data/external/results/heldout/<method>/run.lock` | 否 | `eval run --set heldout` |
 
 - 四個 JSON 紀錄都以 `json.dumps(doc, indent=2) + "\n"`、exclusive create（`"x"`）寫一次，sha 一律是 `env.lock.sha256_path`。
+  `failure_acks.jsonl` 不是寫一次的紀錄：每筆確認附加一行，既有的行不改、不刪（與 Pilot 相同）。
 - 進 git 的三個檔案只描述設計，**不得出現任何 `INC-` / `RG-` id**（`tests/test_repo_hygiene.py` 檢查）。
 - Pilot 的 run.json 沒有 `slot` / `freeze_sha256` 這兩個鍵，形狀與今天完全相同；`injection.json` 不變（schema 是 `additionalProperties: false`）。
 
@@ -82,18 +88,39 @@
 9. freeze 要求 `llm_methods.json` 已 approved，且 model、model_version、temperature 非 null（這些欄位在批准時加入）。
 10. **「Pilot 上修訂一次」**涵蓋 011、013、014、015、017、019、020、021、022：每一項都要宣告 used（指名 frozen commit 中的 decision 檔，人的聲明）或 waived。
     013 必須是 used（023 §7 用掉）；policy v1 時 011 必須 waived，v2 時必須 used（023 §6）。
+    使用者 2026-10-10 決定 014 = waived（stat-anomaly 維持 v2，014「補註（2026-10-10）」）。
 11. **以 slot 計算的無效上限**：累計該 slot 所有非 valid 的 run group（invalid 與所有 aborted_*）；在 run group 產生之前就被拒絕的 run 不算。
-    **更正（2026-10-10）**：原文寫「與 Pilot 的規則相同」。「非 valid」的範圍（invalid 與所有 aborted_*）與 Pilot 相同，但計數方式已不同：
-    Pilot 自 016「實作說明（2026-10-09）」起有 `collect ack-failures`（ground-truth 側 `failure_acks.jsonl`），人看過 run record 之後，
-    被確認的失敗 run group 不再計入，該 fault 重新計數（已用過兩次：productCatalogFailure 的 RG-004–006、intlShippingSlowdown）。
-    held-out 沒有這種確認：一個 slot 的非 valid run group 一律累計、永不重新計數（`collect/heldout.py` 的 `_slot_detail`；
-    `ack-failures` 只接受 `--set pilot`）。程式行為不變；held-out 是否要類似的機制是文末「待使用者決定」1。
+    **修訂 2（2026-10-10，使用者決定「待使用者決定」1 選 b，與 Pilot 相同）**：沒有被確認涵蓋的非 valid run group 達 `MAX_INVALID_ATTEMPTS`（3）個、
+    又沒有可用 incident 時，該 slot 待人處理。人看過 run record 之後以
+    `python -m collect ack-failures --set heldout --slot <slot> --reason … --decided-by …` 記錄確認（`collect.heldout.acknowledge_slot_failures`），
+    該 slot 的無效次數重新計數、回到 `collect next`；再 3 個非 valid 的 run group 又待人處理，再確認一次才再收。
+    - **Pilot 的前例**：016「實作說明（2026-10-09）」的 `collect ack-failures --set pilot`（以 fault 為單位，已用過兩次）。held-out 用同一個
+      ground-truth 側、只附加的 `failure_acks.jsonl`，以 slot 為單位；一筆紀錄是
+      `{split: "heldout", slot, flag, variant, run_groups, reason, decided_by, acknowledged_at, freeze_sha256}`，`run_groups` 是該 slot 還沒被確認的非 valid run group。
+    - **次數與條件**（原選項 b 要求寫進 decision）：每次確認讓該 slot 再有 `MAX_INVALID_ATTEMPTS`（3）次無效的額度；確認的次數不設上限，
+      與 Pilot 相同（使用者決定「與 Pilot 相同」，沒有另訂上限）。每次都要有人看過 run record、非空的理由與決定的人。
+    - **只確認待人處理的 slot**（保守讀法：使用者的決定針對「累計 3 個無效 run group」的 slot）。open（失敗少於 3 個）、filled、closed 的 slot
+      「沒有可確認的失敗」，拒絕；所以不能事先確認、提前重新計數。
+    - **拒絕、什麼都不寫**（fail closed）：沒有 freeze 紀錄或 freeze 檢查不通過（CLI 先檢查）；未知的 slot；不是待人處理的 slot；沒有理由或決定的人；
+      `heldout_incidents.json` 已存在（023 §5.5、§6：清單永不改變）；任何損壞或不符的 held-out 紀錄（解讀 12）。
+    - **不刪任何東西**：被確認的 run group 留在 run record、`collect status --set heldout`（`non_valid_run_groups` 列出全部、`counts.non_valid` 照舊累計，
+      另列 `acknowledged_run_groups`）與 `heldout_incidents.json` 的 `run_groups`。清單另記錄 `acknowledgments`（held-out 的確認紀錄原樣）；
+      `load_heldout_incidents` 比對磁碟上的 held-out 確認，清單之後多出來或被改的確認讓所有 held-out 方法執行與評分停止（PermissionError），與多出來的 run group 一樣。
+    - **確認紀錄也 fail closed**：任何點名 held-out run group 的確認，必須是 held-out 的確認、同一份 freeze 紀錄、該 slot 的 fault、點名該 slot 的非 valid run group、
+      每個只確認一次；Pilot 的確認點名 held-out run group、未知的 slot、別的 freeze、別的 fault、valid 或別的 slot 的 run group、重複、格式錯誤的行，
+      都讓所有讀 slot 狀態的 held-out 步驟 ValueError（exit 2），不過濾、不忽略。
+    - **不改變其他處理**：確認只讓無效次數重新計數。未觸發的 incident 照舊計數（解讀 13）：已有 2 個未觸發的 slot 確認後是 closed，不重新打開；
+      有 1 個未觸發的 slot 確認後回到 open，§5.3 那一次重收仍是唯一的一次。Pilot 不變：`ack-failures --set pilot --flag --variant` 照舊；
+      Pilot 的計數只比對 Pilot 的 run group（held-out 確認點名的 run group 永遠不是 Pilot 的），held-out 只採用 `split: "heldout"` 的確認。
+    - `collect next --set heldout` 跳過待人處理的 slot 時，在 stderr 印出該 slot 的確認指令；停止時（解讀 12）的訊息也提示確認。
+    - （歷史）同日稍早的更正原本寫「held-out 沒有這種確認：一個 slot 的非 valid run group 一律累計、永不重新計數」，那時程式行為如此；使用者決定之後由本修訂取代。
 12. **slot 狀態的優先順序**：filled > needs_person > closed > open。以下是 ValueError（exit 2）：
     - 一個 slot 有超過 1 個可用的 incident；
     - 一個 slot 有超過 2 個未觸發的 incident；
     - 任何損壞或不符的 held-out 紀錄，包括 freeze sha 不是目前的 freeze（直接停止，不過濾）。
     需要人處理時是 RuntimeError（exit 3）：3 個以上 slot 待人處理時 `next` 停止；沒有 open 的 slot、但有 1–2 個待人處理時也停止，不回報「收齊」。
-    目前沒有解除機制：待人處理的 slot 會讓 `heldout-list` 一直拒絕（見文末「待使用者決定」1）。
+    「待人處理」與「3 個 slot」都在確認之後計算（解讀 11）。**解除**（修訂 2）：人看過 run record 後以 `collect ack-failures --set heldout --slot` 確認，
+    該 slot 重新計數再收；確認之前，待人處理的 slot 讓 `heldout-list` 拒絕。損壞或不符的確認紀錄也是 ValueError（exit 2）。
 13. **未觸發的 slot**：用新的 run group、新的 seed 再收一次；再次未觸發就預設關閉並列出（023 §5.3）。詞彙命中的 incident 排除並列出，該 slot **不重收**（023 沒有給重收規則）。
 14. `collect run --set heldout` 自己算出下一個 open 的 slot，`--flag` / `--variant` 必須等於它；slot 與 freeze sha 寫進 run.json 的 `plan`，永不寫進 injection.json。
 15. **seed**：`--set heldout` 拒絕 `--seed`。`fresh_seed` 用 SystemRandom 抽，直到沒有任何 set 的 run.json 用過。Pilot 的 seed 路徑不變。
@@ -140,12 +167,13 @@
     而且紀錄不能改、程式在 freeze 後也不能改，所以會讓清單永遠拒絕；這種紀錄只可能來自這個修正之前的程式，held-out 收集一定用 freeze 時（已含修正）的程式。
 25. **使用者決定 6 是約束性規則**：需要新 policy 或改 env lock 時排除受影響的 incident。在 freeze 修訂指令存在之前，任何不符都讓收集、清單與 eval 停止（fail closed，023 §6）。
     將來寫這個指令時，必須排除受影響的 incident，永不混用兩種設定。**因為 freeze 釘住所有程式（解讀 7），這個指令只能在 freeze 之前 commit；
-    freeze 之後就無法加入**（見文末「待使用者決定」2）。
+    freeze 之後就無法加入**（見文末「待使用者決定」2：使用者 2026-10-10 沒有偏好，不實作、維持現況；freeze 之前仍可決定）。
 26. **仍存在的暴露**：slots.json 進 git，id 又依收集順序配發，所以同時有 git 與資料目錄的人可以把 held-out id 對應到 fault。
     incident id 永遠不在任何方法的 prompt 裡（有測試）；方法看不到 git 或 slot 清單。023 §4 要求清單進 git，所以接受這個暴露。
 27. 因為 freeze 釘住所有程式，held-out 結果需要的一切都必須在 freeze **之前** commit：模型 API adapter、Gate 條件 2 與 3 的程式、各 fault 等權平均與缺格表、
-    013 正式版，以及文末「待使用者決定」1–3 中使用者決定要有的機制（待人處理的 slot 如何解除、023 §6 的修正路徑、held-out 撤回）。
-    NEXT 把它們列為 freeze 前的項目。
+    013 正式版，以及文末「待使用者決定」1–3 中使用者決定要有的機制。修訂 2：1（待人處理的 slot 由人確認後再收）已實作（解讀 11）；
+    2（023 §6 的修正路徑）使用者沒有偏好、維持現況，若使用者在 freeze 之前改變決定，那個機制也要在 freeze 之前 commit；3（held-out 撤回）不允許，不需要程式。
+    NEXT 把仍未完成的列為 freeze 前的項目。
 28. **這一批不做 held-out loop**：023 的「程式」沒有列它；它在 A1 與 Pilot review 之前無法執行；而且要改 `pilot_loop.py`（正在跑 Pilot 的檔案）。
     手動的 `next` → `run` → `process` → `eval leakage` 就能完成 held-out 收集。
 29. **電力條件（decision 025 修訂 2、3：高效能模式 + AC，時間窗內每分鐘取樣）對 held-out 一樣成立**。held-out 沒有自己的收集路徑：
@@ -162,7 +190,7 @@
     - `collect.pilot.withdraw` 拒絕 held-out run group（run.json 或 injection.json 任一說 held-out），什麼都不寫。
     - 仍有人手寫 `withdrawn.json` 到 held-out run group 時 **fail closed**：所有 held-out 讀 run group 的共同入口（`collect.heldout._run_groups`）拋 ValueError，
       `collect next|status|run --set heldout`、`heldout-list`、`eval leakage --set heldout` 都 exit 2；清單寫出之後 `load_heldout_incidents` 拋 PermissionError，
-      所有 held-out 方法執行與評分停止。不過濾、不忽略，由人以新的 decision 決定（見文末「待使用者決定」3）。
+      所有 held-out 方法執行與評分停止。不過濾、不忽略，由人以新的 decision 決定（見文末「待使用者決定」3：使用者 2026-10-10 決定**不允許** held-out 撤回）。
     - 因此 `heldout_incidents.json` 沒有撤回的項目，也沒有 `withdrawn_run_groups`；`collect status --set heldout` 的計數沒有 withdrawn。
     - **Pilot 側不變**（decision 025 修訂 3）：撤回的 Pilot incident 不是 held-out plan 的證據。`pilot_evidence` 不計入它（不算 valid、review 或無效 run group）；
       `pilot_problems` 與 plan / freeze 的前置檢查不要求它的 review 與 leakage audit（例如真實 Pilot 撤回的 RG-002）。
@@ -178,6 +206,10 @@
 - **held-out 不撤回**：清單之後的撤回等於依方法結果修改測試集；清單之前的撤回也可能在看過 label review 與 audit 難度之後發生，
   而且讓 slot 不受限地重收。唯一的已知理由（電力）已由收集時的判定處理。
 - **電力證據在清單時再查一次**：preflight 與時間窗判定已經保證這件事；清單時再查，是讓不是由這套程式產生的紀錄無法混進 held-out。
+- **待人處理的 slot 由人確認後再收**（修訂 2，使用者決定）：與 Pilot 的 `ack-failures` 相同；無效的 run 不產生 incident、不是挑選測試集的機會
+  （確認只看 run record，不看 label、review 或 audit），而且一個卡住的 slot 不會讓整個 held-out 評測無法進行（原估計約 55%）。
+  只確認待人處理的 slot、清單之後拒絕、所有紀錄保留：確認只解除 §4 的待人處理，不放寬其他規則（每個 slot 仍只填一個 incident，023 §2；
+  無效的 run 本來就以新的 run group 重收同一個 slot，§4；未觸發與詞彙命中的處理不變，§5.3、§5.4）。
 
 ## 放棄的替代方案
 
@@ -190,23 +222,36 @@
 - **held-out run group 可撤回、不填 slot、不算無效嘗試**（補充時的解讀 30）：放寬 023 §2、§4、§5.3，見解讀 30。
 - **prediction 先寫、transcript 後寫**（修訂 1 之前）：兩者之間被中止會留下沒有 transcript 的 prediction，而且不能重跑。
 - **沒有 `up_at` 的非 valid run group 只看 commit 與編號**：可行，但放寬一項防竄改檢查；在 `run_group` 先記 `up_at` 不放寬任何檢查。
+- **待人處理的 slot 關閉為缺格（「待使用者決定」1 選項 a）、或維持現況（選項 c）**：使用者 2026-10-10 選 b（修訂 2）。
+- **任何有失敗的 slot 都能確認（Pilot 的程式不檢查次數）**：會讓人在達到 3 次之前就重新計數；使用者的決定針對待人處理的 slot，取保守的一側。
+- **為確認另開一個檔案或以 fault 為單位**：使用者要求與 Pilot 同一個機制；同一個 `failure_acks.jsonl` 以 `split` 與 `slot` 區分，held-out 的 fault 有 K 個 slot，必須以 slot 為單位。
 
 ## 對實驗的影響
 
 - 不改任何協定、門檻、指標、切分、預算或 Gate 定義；Pilot 的收集、run.json 形狀與評分路徑不變（回歸測試守住）。
 - **held-out 的 plan、freeze 與收集都被 NEXT A1（付費 LLM 方法延後）擋住**；在 freeze 紀錄存在之前，所有 held-out 收集與方法執行一律拒絕。
 - freeze 之前必須 commit 的項目：模型 API adapter、Gate 條件 2 / 3 的程式、各 fault 等權平均與缺格表、013 正式版、需要乾淨 checkout 的 review 說明，
-  以及下面「待使用者決定」中使用者決定要有的機制。
+  以及下面「待使用者決定」中使用者決定要有的機制（修訂 2：1 已實作；2 維持現況、freeze 之前仍可決定；3 不允許）。
+- 修訂 2 只改待人處理的 slot：原本永遠待人處理、held-out 清單寫不出來，現在由人確認後再收（與 Pilot 相同）。協定、門檻、指標、切分、預算、
+  Pilot 的收集與確認都不變；`heldout_incidents.json` 多一個 `acknowledgments` 欄位，`collect status --set heldout` 多一個 `acknowledged_run_groups` 欄位。
 - 測試全部用 synthetic / tiny generated fixture，沒有真實 snapshot 進 git。
 - 修訂 1 只拒絕更多（held-out 不撤回、run.lock 存在時不評分），或讓紀錄更完整（每個紀錄都有 `up_at`、prediction 最後寫）；
   不改任何協定、門檻、指標、切分或預算。Pilot 的撤回與評分不變；Pilot 的 run.json 形狀不變（`up_at` 一直都有，只是更早寫入）。
 
-## 待使用者決定
+## 待使用者決定（2026-10-10：1、3 已決定，2 沒有偏好）
+
+**使用者決定（2026-10-10，修訂 2；023「使用者決定」的「追加（2026-10-10）」）**：
+- 1：**已決定，選 b**（與 Pilot 相同）。實作見解讀 11、12。
+- 2：**使用者先跳過這一項、沒有表示偏好** → 不實作任何機制，維持現況（目前的行為：freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定）。
+  **freeze 之前仍可決定**；若要 a 的修訂路徑，必須在 freeze 之前寫 decision 並 commit 程式。
+- 3：**已決定，不允許**（維持預設：`withdraw` 拒絕 held-out run group；手寫的撤回紀錄讓所有 held-out 步驟停止，解讀 30）。
+
+以下保留決定之前的原文（2026-10-09 寫定、2026-10-10 合併審查補註）。
 
 以下三項 023 與使用者決定都沒有涵蓋，**程式目前的行為不變**（都是拒絕的一側）。因為 freeze 釘住所有程式（解讀 7），
 使用者若要其中任何一種機制，必須在 freeze **之前**決定、寫 decision 並 commit 程式；freeze 之後就無法加入。在決定之前不影響 Pilot 收集。
 
-1. **待人處理的 slot 如何解除**（023 §4 只說「標為待人處理」，沒有說人可以做什麼）。
+1. **待人處理的 slot 如何解除**（023 §4 只說「標為待人處理」，沒有說人可以做什麼）。**→ 2026-10-10 已決定：b，與 Pilot 相同（解讀 11）。**
    - 現況：一個 slot 累計 3 個非 valid 的 run group、又沒有可用 incident，就永遠是待人處理；`withdraw` 只接受 valid run group，無效紀錄不能刪（009 §4），
      而 `heldout_incidents` 在有任何待人處理的 slot 時拒絕。所以只要有一個這樣的 slot，held-out 清單就永遠寫不出來，任何方法都不能在 held-out 上執行。
    - 估計：依 023 假設的無效率 25%，一個 slot 在第一個 valid 之前連續 3 個無效的機率約 0.25³ ≈ 1.6%；約 50 個 slot 加上 §5.3 的重收，
@@ -219,7 +264,7 @@
         Pilot 的確認沒有次數上限，b 則要把次數與條件寫進 decision（如上）；
      c. 維持現況（一個卡住的 slot 就讓 held-out 評測無法進行）。**注意**：c 與 Pilot 的規則**不同**（Pilot 有 `ack-failures`，見解讀 11 的更正）。
    - 附帶：狀態優先順序 needs_person > closed（解讀 12），所以 2 個未觸發加 3 個非 valid 的 slot 也是待人處理（實際上幾乎不會發生）；選項 a / b 也要涵蓋它。
-2. **freeze 之後的修正路徑**（023 §6 的 bug 修正程序與使用者決定 6）。
+2. **freeze 之後的修正路徑**（023 §6 的 bug 修正程序與使用者決定 6）。**→ 2026-10-10 使用者沒有偏好：不實作、維持現況；freeze 之前仍可決定。**
    - 現況：freeze 預設拒絕（解讀 7），任何程式、env lock 或 policy 的變動都讓所有 held-out 收集、清單與 eval 停止；slots / freeze 只能寫一次，
      held-out run group 出現之後也不能重新 freeze。所以 023 §6 允許的「修好收集或 normalize 的 bug 後全部重新 normalize」、
      「方法執行後修好評分或稽核的 bug、所有方法重新評分（Gate 用修正後的數字，前後都報告）」，以及使用者決定 6 的「排除受影響的 incident」，
@@ -228,7 +273,7 @@
      a. freeze 之前實作一條窄的修訂路徑：新的 decision 檔加上一份接續的 freeze 紀錄，只允許變動指名的檔案，只用於 023 §6 允許的修正
         （評分 / 稽核修正與原始數字一起報告；使用者決定 6 的排除受影響 incident、永不混用）；
      b. 接受現況：freeze 之後發現任何 bug，held-out 評測就停止，由使用者另寫 decision 決定（可能要重新設計一個新的 held-out set）。
-3. **held-out 撤回**（修訂 1 改為一律拒絕，見解讀 30）。
+3. **held-out 撤回**（修訂 1 改為一律拒絕，見解讀 30）。**→ 2026-10-10 已決定：不允許（維持預設）。**
    - 若使用者認為 held-out 需要撤回（例如 `power_not_formal` 以外、收集時沒有偵測到的收集條件問題），審查建議的保守設計：
      撤回的 run group 算該 slot 的一次無效嘗試（或算 §5.3 那唯一的一次重收），永不免費重收；incident 已有 `label_review.json`、
      `label.reviewed.json` 或 `leakage_audit.json` 之後拒絕撤回；原因限定在固定的收集條件清單。

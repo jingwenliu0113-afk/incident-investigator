@@ -3,7 +3,8 @@
     ./tools/with-mac-lock uv run python -m collect run --set pilot --flag paymentFailure --variant 100%
 
 Held-out (decisions 023, 026): heldout-plan -> heldout-freeze -> per slot next / run --set heldout / process -> heldout-list;
-every held-out step is refused without a passing freeze record.
+every held-out step is refused without a passing freeze record. A slot that needs a person is collected again after
+`ack-failures --set heldout --slot S` (user decision 2026-10-10).
 """
 
 from __future__ import annotations
@@ -184,6 +185,10 @@ def _heldout_progress(command: str) -> int:
     if slot is not None:
         print(f"--flag {slot['flag']} --variant {slot['variant']}")
         print(json.dumps({"slot": slot["slot"], "skipped_needs_person": slot["skipped"]}), file=sys.stderr)
+        for s in slot["skipped"]:
+            print(f"{s['slot']} needs a person: after looking at its run records, `python -m collect ack-failures --set "
+                  f"heldout --slot {s['slot']} --reason … --decided-by …` collects it again (user decision 2026-10-10)",
+                  file=sys.stderr)
     return 0
 
 
@@ -220,6 +225,32 @@ def _heldout_writer(ns: argparse.Namespace) -> int:
         print(f"error: {e}", file=sys.stderr)
         return 2
     print(json.dumps(out, indent=2))
+    return 0
+
+
+def _heldout_ack(ns: argparse.Namespace) -> int:
+    """`ack-failures --set heldout --slot S` (user decision 2026-10-10; decision 026 #11): a person looked at the run records
+    of a slot that needs a person. Refused, writing nothing, under a missing or failing freeze record (fail closed)."""
+    from datetime import UTC, datetime
+
+    from collect import freeze
+    from collect.heldout import acknowledge_slot_failures
+
+    if ns.slot is None or ns.flag is not None or ns.variant is not None:
+        print("error: --set heldout acknowledges a slot: --slot, never --flag / --variant (the slot list names its fault)",
+              file=sys.stderr)
+        return 2
+    if problems := freeze.check_freeze(PROJECT_DIR)[1]:
+        print("error: the held-out acknowledgment is refused: " + "; ".join(problems), file=sys.stderr)
+        return 2
+    try:
+        out = acknowledge_slot_failures(DataLayout(PROJECT_DIR / "data/external"), _heldout_docs()[1], ns.slot,
+                                        freeze_sha=freeze.freeze_sha256(PROJECT_DIR), reason=ns.reason,
+                                        decided_by=ns.decided_by, now=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    except (ValueError, OSError, KeyError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+    print(json.dumps(out, indent=2))  # slot, fault and non-valid run-group ids only (decision 026 #23)
     return 0
 
 
@@ -326,10 +357,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     lp.add_argument("--labeler", required=True, help="who writes the a priori labels, e.g. agent:claude-code")
     lp.add_argument("--max-runs", type=int, help="stop after this many run groups")
     ack = sub.add_parser("ack-failures", help="decision 016 §5: record that a person looked at the failed run groups of a "
-                                              "fault, so it is collected again and its invalid attempts count anew")
-    ack.add_argument("--set", dest="split", required=True, choices=["pilot"])
-    ack.add_argument("--flag", required=True)
-    ack.add_argument("--variant", required=True)
+                                              "fault (Pilot: --flag / --variant) or of a held-out slot that needs a person "
+                                              "(--slot, user decision 2026-10-10), so it is collected again and its "
+                                              "invalid attempts count anew")
+    ack.add_argument("--set", dest="split", required=True, choices=["pilot", "heldout"])
+    ack.add_argument("--flag", help="Pilot only")
+    ack.add_argument("--variant", help="Pilot only")
+    ack.add_argument("--slot", help="held-out only, e.g. H07 (the slot list names its fault)")
     ack.add_argument("--reason", required=True)
     ack.add_argument("--decided-by", required=True, help="the person who looked, e.g. user")
     sta = sub.add_parser("status", help="decision 016: run groups and incidents of every planned fault of a set")
@@ -406,11 +440,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _heldout_progress(ns.command)
     if ns.command in ("heldout-plan", "heldout-freeze", "heldout-list"):
         return _heldout_writer(ns)
+    if ns.command == "ack-failures" and ns.split == "heldout":
+        return _heldout_ack(ns)
     if ns.command == "ack-failures":
         from datetime import UTC, datetime
 
         from collect.pilot import acknowledge_failures
 
+        if ns.slot is not None or ns.flag is None or ns.variant is None:
+            print("error: --set pilot acknowledges a fault: --flag and --variant, never --slot (decision 016 §5)",
+                  file=sys.stderr)
+            return 2
         try:
             out = acknowledge_failures(DataLayout(PROJECT_DIR / "data/external"), ns.split, ns.flag, ns.variant,
                                        reason=ns.reason, decided_by=ns.decided_by,

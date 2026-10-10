@@ -213,3 +213,181 @@ def test_a_withdrawal_record_on_a_heldout_run_group_stops_every_heldout_step(tmp
                   lambda: fresh_seed(layout)):
         with pytest.raises(ValueError, match="never withdrawn"):
             check()
+
+
+# ---------------------------------------------------------------- user decision 2026-10-10: a needs-person slot (026 #11)
+
+ACKED_AT = "2026-10-22T01:00:00Z"
+
+
+def ack(layout, slot="H01", **kw):
+    from collect.heldout import acknowledge_slot_failures
+
+    slots = kw.pop("slots", SLOTS)
+    args = {"freeze_sha": FREEZE_SHA, "reason": "grafana plugin download timed out", "decided_by": "user", "now": ACKED_AT,
+            **kw}
+    return acknowledge_slot_failures(layout, slots, slot, **args)
+
+
+def ack_lines(layout):
+    from collect.pilot import ACKS
+
+    path = layout.ground_truth_root / ACKS
+    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+def row(layout, slot="H01", slots=SLOTS):
+    return next(s for s in slot_status(layout, slots, freeze_sha=FREEZE_SHA) if s["slot"] == slot)
+
+
+def test_after_a_person_looked_a_needs_person_slot_is_collected_again_and_three_new_failures_stop_it_again(tmp_path):
+    # user decision 2026-10-10 (026 "待使用者決定" 1, option b, like the Pilot's ack-failures of decision 016)
+    layout, ids, slot = DataLayout(tmp_path), Counter(), SLOTS["slots"][0]
+    failed = [held(layout, ids, slot, status) for status in ("invalid", "aborted_unstable", "aborted_error")]
+    assert row(layout)["state"] == "needs_person"
+    record = ack(layout)
+    assert record == {"split": "heldout", "slot": "H01", "flag": slot["flag"], "variant": slot["variant"],
+                      "run_groups": failed, "reason": "grafana plugin download timed out", "decided_by": "user",
+                      "acknowledged_at": ACKED_AT, "freeze_sha256": FREEZE_SHA}
+    assert ack_lines(layout) == [record]  # ground-truth side, append-only
+    status = row(layout)
+    assert status["state"] == "open" and status["acknowledged_run_groups"] == failed
+    assert status["non_valid_run_groups"] == failed and status["counts"]["non_valid"] == 3  # nothing deleted or uncounted
+    assert all((layout.run_group_truth_dir(rg) / "run.json").exists() for rg in failed)
+    assert next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)["slot"] == "H01"
+    with pytest.raises(ValueError, match="needs a person"):  # nothing left to acknowledge
+        ack(layout)
+    again = [held(layout, ids, slot, "invalid") for _ in range(2)]
+    assert row(layout)["state"] == "open"
+    with pytest.raises(ValueError, match="needs a person"):  # two new failures: not yet a person's slot
+        ack(layout)
+    again.append(held(layout, ids, slot, "aborted_unstable"))
+    assert row(layout)["state"] == "needs_person"  # three new failures stop it again
+    assert next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)["skipped"][0]["slot"] == "H01"
+    assert ack(layout, now="2026-10-23T00:00:00Z")["run_groups"] == again  # only the new failures
+    assert len(ack_lines(layout)) == 2 and row(layout)["acknowledged_run_groups"] == failed + again
+
+
+def test_an_acknowledgment_is_refused_for_an_unknown_slot_nothing_to_acknowledge_or_once_the_list_exists(tmp_path):
+    layout, ids, slots = DataLayout(tmp_path), Counter(), SLOTS["slots"]
+    with pytest.raises(ValueError, match="H99"):
+        ack(layout, "H99")
+    with pytest.raises(ValueError, match="needs a person"):  # no failure at all
+        ack(layout)
+    for _ in range(2):
+        held(layout, ids, slots[0], "invalid")
+    with pytest.raises(ValueError, match="needs a person"):  # open with two failures
+        ack(layout)
+    for _ in range(3):
+        held(layout, ids, slots[1], "invalid")
+    held(layout, ids, slots[1])
+    with pytest.raises(ValueError, match="needs a person"):  # filled: its failures need no person
+        ack(layout, "H02")
+    for _ in range(3):
+        held(layout, ids, slots[2], "invalid")
+    for kw in ({"reason": " "}, {"decided_by": ""}):
+        with pytest.raises(ValueError, match="reason and who decided"):
+            ack(layout, "H03", **kw)
+    layout.heldout_incidents_path.write_text("{}")  # 023 §5.5 / §6: the list never changes
+    with pytest.raises(ValueError, match="heldout_incidents.json"):
+        ack(layout, "H03")
+    assert ack_lines(layout) == []
+
+
+def test_an_acknowledgment_keeps_the_closed_and_unexercised_handling(tmp_path):
+    # 023 §5.3: two unexercised incidents close a slot; an acknowledgment only restarts the invalid count (026 #12, #13)
+    layout, ids, slot = DataLayout(tmp_path), Counter(), SLOTS["slots"][0]
+    held(layout, ids, slot, exercised=False)
+    held(layout, ids, slot, exercised=False)
+    for _ in range(3):
+        held(layout, ids, slot, "invalid")
+    assert states(layout, STATES) == ["needs_person"]
+    ack(layout, slots=STATES)
+    assert states(layout, STATES) == ["closed"]  # not reopened: no third incident
+
+    layout, ids = DataLayout(tmp_path / "b"), Counter()
+    held(layout, ids, slot, exercised=False)
+    for _ in range(3):
+        held(layout, ids, slot, "invalid")
+    ack(layout, slots=STATES)
+    assert states(layout, STATES) == ["open"]  # the one recollection (016 §5) is still the only one
+    held(layout, ids, slot, exercised=False)
+    assert states(layout, STATES) == ["closed"]
+
+
+def test_the_three_slot_stop_counts_slots_that_need_a_person_after_acknowledgments(tmp_path):
+    layout, ids = DataLayout(tmp_path), Counter()
+    for slot in SLOTS["slots"][:3]:
+        for _ in range(3):
+            held(layout, ids, slot, "invalid")
+    with pytest.raises(RuntimeError, match="3 slots"):
+        next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)
+    ack(layout, "H02")
+    nxt = next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA)
+    assert nxt["slot"] == "H02" and [s["slot"] for s in nxt["skipped"]] == ["H01", "H03"]
+
+
+def write_ack_line(layout, record):
+    from collect.pilot import ACKS
+
+    path = layout.ground_truth_root / ACKS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write((record if isinstance(record, str) else json.dumps(record)) + "\n")
+
+
+def heldout_ack(slot, run_groups, **kw):
+    return {"split": "heldout", "slot": slot["slot"], "flag": slot["flag"], "variant": slot["variant"],
+            "run_groups": run_groups, "reason": "r", "decided_by": "user", "acknowledged_at": ACKED_AT,
+            "freeze_sha256": FREEZE_SHA, **kw}
+
+
+@pytest.mark.parametrize("make", [
+    lambda s, bad, good, other: heldout_ack({**s, "slot": "H99"}, bad),
+    lambda s, bad, good, other: heldout_ack(s, bad, freeze_sha256="sha256:" + "a" * 64),
+    lambda s, bad, good, other: heldout_ack(s, bad, flag="adFailure"),  # not the slot's fault
+    lambda s, bad, good, other: heldout_ack(s, [good]),  # a valid run group
+    lambda s, bad, good, other: heldout_ack(s, [other]),  # another slot's run group
+    lambda s, bad, good, other: heldout_ack(s, []),
+    lambda s, bad, good, other: heldout_ack(s, [bad[0], bad[0]]),
+    lambda s, bad, good, other: {"split": "pilot", "flag": s["flag"], "variant": s["variant"], "run_groups": bad,
+                                 "reason": "r", "decided_by": "user", "acknowledged_at": ACKED_AT},
+    lambda s, bad, good, other: "not json",
+    lambda s, bad, good, other: {"split": "heldout", "slot": "H01", "run_groups": "RG-001"},
+], ids=["unknown-slot", "other-freeze", "other-fault", "valid-run-group", "other-slot", "empty", "twice", "pilot-names-heldout",
+        "malformed", "run-groups-not-a-list"])
+def test_a_corrupt_or_foreign_acknowledgment_stops_every_heldout_step(tmp_path, make):
+    # fail closed like every held-out record (026 #12): never filtered, never ignored
+    layout, ids, slots = DataLayout(tmp_path), Counter(), SLOTS["slots"]
+    bad = [held(layout, ids, slots[0], "invalid") for _ in range(3)]
+    other = held(layout, ids, slots[1], "invalid")
+    good = held(layout, ids, slots[2])
+    write_ack_line(layout, make(slots[0], bad, good, other))
+    for check in (lambda: slot_status(layout, SLOTS, freeze_sha=FREEZE_SHA),
+                  lambda: next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA), lambda: ack(layout)):
+        with pytest.raises(ValueError, match="acknowledg"):
+            check()
+
+
+def test_a_heldout_acknowledgment_and_a_pilot_one_never_touch_each_other(tmp_path):
+    from collect.pilot import acknowledge_failures, next_planned, plan_status
+
+    layout, ids = DataLayout(tmp_path), Counter()
+    for _ in range(3):
+        ids("RG")
+        write_run(layout, f"RG-{ids.n:03d}", "paymentFailure", "100%", "invalid")  # the Pilot's first fault
+    for _ in range(3):
+        held(layout, ids, SLOTS["slots"][0], "invalid")
+    ack(layout)
+    with pytest.raises(RuntimeError):  # the Pilot fault still waits for its own acknowledgment (decision 016)
+        next_planned(layout, "pilot")
+    assert plan_status(layout, "pilot")[0]["acknowledged"] == []
+    layout, ids = DataLayout(tmp_path / "b"), Counter()
+    for _ in range(3):
+        ids("RG")
+        write_run(layout, f"RG-{ids.n:03d}", "paymentFailure", "100%", "invalid")
+    for _ in range(3):
+        held(layout, ids, SLOTS["slots"][0], "invalid")
+    acknowledge_failures(layout, "pilot", "paymentFailure", "100%", reason="r", decided_by="user", now=ACKED_AT)
+    assert next_planned(layout, "pilot")["flag"] == "paymentFailure"
+    assert row(layout)["state"] == "needs_person" and row(layout)["acknowledged_run_groups"] == []

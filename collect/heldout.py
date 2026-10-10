@@ -404,14 +404,70 @@ def heldout_slots(faults, k: int = HELDOUT_K, seed: int = HELDOUT_MASTER_SEED) -
     return slots
 
 
+def _ack_records(layout) -> list[dict]:
+    """Every line of the ground-truth failure_acks.jsonl (Pilot and held-out), in file order; ValueError when a line is not
+    an acknowledgment record (fail closed)."""
+    from collect.pilot import ACKS
+
+    path = layout.ground_truth_root / ACKS
+    out = []
+    for n, line in enumerate(path.read_text().splitlines() if path.exists() else [], start=1):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except ValueError as e:
+            raise ValueError(f"{ACKS} line {n} is not an acknowledgment record: {e}") from e
+        if not isinstance(record, dict) or not isinstance(record.get("run_groups"), list) or not all(
+                isinstance(rg, str) for rg in record["run_groups"]):
+            raise ValueError(f"{ACKS} line {n} is not an acknowledgment record (run_groups is a list of run-group ids)")
+        out.append(record)
+    return out
+
+
+def heldout_acknowledgments(layout) -> list[dict]:
+    """The held-out acknowledgments of needs-person slots (user decision 2026-10-10; decision 026 #11), in file order."""
+    return [r for r in _ack_records(layout) if r.get("split") == "heldout"]
+
+
+def _apply_acknowledgments(layout, slots: dict, detail: dict, *, freeze_sha: str) -> None:
+    """Adds each slot's acknowledged run groups. Every acknowledgment that names a held-out run group must be a held-out
+    one of this freeze and of its slot's fault, naming that slot's non-valid run groups, each once; anything else raises
+    ValueError."""
+    heldout_rgs = {rg for d in detail.values() for rg in d["non_valid"] + d["valid"]}
+    for record in _ack_records(layout):
+        rgs = record["run_groups"]
+        if record.get("split") != "heldout":
+            if foreign := sorted(set(rgs) & heldout_rgs):
+                raise ValueError(f"a {record.get('split')!r} acknowledgment names held-out run groups {foreign}: only a "
+                                 "held-out acknowledgment of their slot does (fail closed)")
+            continue
+        slot = record.get("slot")
+        if slot not in detail:
+            raise ValueError(f"a held-out acknowledgment names {'no' if slot is None else 'an unknown'} slot {slot!r}")
+        if (record.get("flag"), record.get("variant")) != (slots[slot]["flag"], slots[slot]["variant"]):
+            raise ValueError(f"a held-out acknowledgment of {slot} names {record.get('flag')} {record.get('variant')}, not "
+                             "that slot's fault")
+        if record.get("freeze_sha256") != freeze_sha:
+            raise ValueError(f"a held-out acknowledgment of {slot} was recorded under freeze record "
+                             f"{record.get('freeze_sha256')}, not the one in force ({freeze_sha})")
+        d = detail[slot]
+        if not rgs or len(set(rgs)) != len(rgs) or not set(rgs) <= set(d["non_valid"]) or set(rgs) & set(d["acknowledged"]):
+            raise ValueError(f"a held-out acknowledgment of {slot} names {rgs}: only that slot's non-valid run groups, "
+                             "each acknowledged once")
+        d["acknowledged"] += rgs
+
+
 def _slot_detail(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
     """Per slot, in slot order: its state and, internally, the ids behind it. Raises ValueError on any corrupt or
-    mismatched held-out record, including one collected under another freeze record or withdrawn (fail closed, never
-    filtered)."""
+    mismatched held-out record, including one collected under another freeze record or withdrawn, and any such
+    acknowledgment (fail closed, never filtered). A slot needs a person at MAX_INVALID_ATTEMPTS non-valid run groups that
+    no acknowledgment covers (user decision 2026-10-10: like the Pilot's ack-failures, decision 016)."""
     from collect.pilot import MAX_INVALID_ATTEMPTS
 
     slots = {s["slot"]: s for s in slots_doc["slots"]}
-    detail = {name: {"usable": [], "unexercised": [], "non_valid": [], "valid": [], "power": []} for name in slots}
+    detail = {name: {"usable": [], "unexercised": [], "non_valid": [], "valid": [], "power": [], "acknowledged": []}
+              for name in slots}
     for run, injection in _run_groups(layout):
         if run_split(run) != "heldout":
             continue
@@ -438,42 +494,82 @@ def _slot_detail(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
             review = _review_paths(layout, inc)[1]
             unexercised = review.exists() and _json(review).get("fault_exercised") is False
             d["unexercised" if unexercised else "usable"].append(inc)
+    _apply_acknowledgments(layout, slots, detail, freeze_sha=freeze_sha)
     out = []
     for s in slots_doc["slots"]:
         d = detail[s["slot"]]
         if len(d["usable"]) > 1 or len(d["unexercised"]) > 2:
             raise ValueError(f"{s['slot']} holds {len(d['usable'])} usable and {len(d['unexercised'])} unexercised incidents: "
                              "a slot holds one incident, recollected at most once (decision 023 §4, §5.3)")
-        state = ("filled" if d["usable"] else "needs_person" if len(d["non_valid"]) >= MAX_INVALID_ATTEMPTS
+        failed = [rg for rg in d["non_valid"] if rg not in d["acknowledged"]]
+        state = ("filled" if d["usable"] else "needs_person" if len(failed) >= MAX_INVALID_ATTEMPTS
                  else "closed" if len(d["unexercised"]) == 2 else "open")
         out.append({**s, "state": state, **d})
     return out
 
 
 def slot_status(layout, slots_doc: dict, *, freeze_sha: str) -> list[dict]:
-    """Public per-slot progress: slot, fault, state, counts, non-valid run-group ids and the power settings of valid run
-    groups (decision 025). Never an incident id or a valid run-group id (held-out ids would map to faults)."""
+    """Public per-slot progress: slot, fault, state, counts, non-valid run-group ids (every one, acknowledged or not), the
+    acknowledged ones and the power settings of valid run groups (decision 025). Never an incident id or a valid run-group
+    id (held-out ids would map to faults)."""
     return [{"slot": d["slot"], "block": d["block"], "flag": d["flag"], "variant": d["variant"], "state": d["state"],
              "counts": {"usable": len(d["usable"]), "unexercised": len(d["unexercised"]), "non_valid": len(d["non_valid"])},
-             "non_valid_run_groups": d["non_valid"], "power": d["power"]}
+             "non_valid_run_groups": d["non_valid"], "acknowledged_run_groups": d["acknowledged"], "power": d["power"]}
             for d in _slot_detail(layout, slots_doc, freeze_sha=freeze_sha)]
+
+
+ACK_HINT = ("a person looks at the run records, then `collect ack-failures --set heldout --slot <slot> --reason … "
+            "--decided-by …` collects that slot again (user decision 2026-10-10)")
 
 
 def next_slot(layout, slots_doc: dict, *, freeze_sha: str) -> dict | None:
     """The first open slot (with the needs-person slots skipped), or None when every slot is filled or closed. RuntimeError
-    when MAX_SLOTS_NEEDING_PERSON slots wait for a person, or when nothing else is open (decision 023 §4)."""
+    when MAX_SLOTS_NEEDING_PERSON slots wait for a person, or when nothing else is open (decision 023 §4); a slot stops
+    needing a person once a person's acknowledgment covers its failures (acknowledge_slot_failures)."""
     status = slot_status(layout, slots_doc, freeze_sha=freeze_sha)
     needs = [{"slot": s["slot"], "non_valid_run_groups": s["non_valid_run_groups"]} for s in status
              if s["state"] == "needs_person"]
     if len(needs) >= MAX_SLOTS_NEEDING_PERSON:
         raise RuntimeError(f"{len(needs)} slots need a person ({needs}): every held-out collection stops, the stack itself "
-                           "may be the problem (decision 023 §4)")
+                           f"may be the problem (decision 023 §4); {ACK_HINT}")
     first = next((s for s in status if s["state"] == "open"), None)
     if first is None:
         if needs:
-            raise RuntimeError(f"no slot is open and {needs} need a person: the set is not complete (decision 023 §4)")
+            raise RuntimeError(f"no slot is open and {needs} need a person: the set is not complete (decision 023 §4); "
+                               f"{ACK_HINT}")
         return None
     return {**first, "skipped": needs}
+
+
+def acknowledge_slot_failures(layout, slots_doc: dict, slot: str, *, freeze_sha: str, reason: str, decided_by: str,
+                              now: str) -> dict:
+    """User decision 2026-10-10 (decision 026 "待使用者決定" 1, option b): a person looked at the run records of a slot that
+    needs a person; the acknowledgment is appended to the ground-truth failure_acks.jsonl (as the Pilot's, decision 016)
+    and the slot's invalid attempts count anew, so it is collected again and three new failures stop it again. Nothing is
+    changed or deleted. ValueError, writing nothing, once heldout_incidents.json exists (023 §5.5, §6), for an unknown slot,
+    a slot that does not need a person (nothing to acknowledge), without a reason or a person, or on any corrupt or foreign
+    held-out record. The caller checks the freeze record first (fail closed)."""
+    from collect.pilot import ACKS, MAX_INVALID_ATTEMPTS
+
+    if layout.heldout_incidents_path.exists():
+        raise ValueError("heldout_incidents.json exists: no acknowledgment after the list (decision 023 §5.5, §6: the list "
+                         "never changes)")
+    if not all(isinstance(v, str) and v.strip() for v in (reason, decided_by)):
+        raise ValueError("an acknowledgment needs a reason and who decided (the person who looked at the run records)")
+    d = next((d for d in _slot_detail(layout, slots_doc, freeze_sha=freeze_sha) if d["slot"] == slot), None)
+    if d is None:
+        raise ValueError(f"{slot} is not a slot of the held-out slot list")
+    if d["state"] != "needs_person":
+        raise ValueError(f"{slot} is {d['state']}: only a slot that needs a person ({MAX_INVALID_ATTEMPTS} non-valid run "
+                         "groups no acknowledgment covers, and no usable incident) is acknowledged")
+    record = {"split": "heldout", "slot": slot, "flag": d["flag"], "variant": d["variant"],
+              "run_groups": [rg for rg in d["non_valid"] if rg not in d["acknowledged"]], "reason": reason,
+              "decided_by": decided_by, "acknowledged_at": now, "freeze_sha256": freeze_sha}
+    path = layout.ground_truth_root / ACKS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps(record) + "\n")
+    return record
 
 
 def fresh_seed(layout, rng=None) -> int:
@@ -638,13 +734,14 @@ def heldout_incidents(layout, slots_doc: dict, plan_doc: dict, *, freeze: dict, 
             "slots_sha256": freeze["slots"]["sha256"], "plan_sha256": freeze["plan"]["sha256"],
             "incidents": listed, "excluded": excluded, "closed_slots": closed,
             "removed_faults": [{k: r[k] for k in ("flag", "variant", "basis", "reason")} for r in plan_doc["removed"]],
-            "run_groups": [[rg, runs[rg].get("status")] for rg in sorted(runs)], "by_fault": by_fault}
+            "run_groups": [[rg, runs[rg].get("status")] for rg in sorted(runs)],
+            "acknowledgments": heldout_acknowledgments(layout), "by_fault": by_fault}
 
 
 def load_heldout_incidents(layout, *, freeze_sha: str) -> dict:
     """The verified list: PermissionError when it is missing, belongs to another freeze, a pinned file changed, the
-    held-out run groups on disk are not those it recorded, or one of them has a withdrawal record (decision 023 §5: no
-    method without the list; decision 026 #30)."""
+    held-out run groups or acknowledgments on disk are not those it recorded, or a run group has a withdrawal record
+    (decision 023 §5: no method without the list; decision 026 #11, #30)."""
     from env.lock import sha256_path
 
     path = layout.heldout_incidents_path
@@ -659,10 +756,14 @@ def load_heldout_incidents(layout, *, freeze_sha: str) -> dict:
                 if not p.exists() or sha256_path(p) != i["sha256"].get(name)]
     try:
         runs = sorted(heldout_runs(layout), key=lambda r: r["run_group_id"])  # a held-out withdrawal record raises
+        acks = heldout_acknowledgments(layout)
     except ValueError as e:
         raise PermissionError(str(e)) from e
     if [[r["run_group_id"], r.get("status")] for r in runs] != doc["run_groups"]:
         problems.append("the held-out run groups on disk are not those the list recorded (one was added or changed after it)")
+    if acks != doc.get("acknowledgments"):
+        problems.append("the held-out acknowledgments on disk are not those the list recorded (one was added or changed "
+                        "after it)")
     if problems:
         raise PermissionError("heldout_incidents.json no longer verifies: " + "; ".join(problems))
     return doc

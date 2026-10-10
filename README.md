@@ -138,6 +138,7 @@ uv run python -m collect heldout-freeze --pilot-revisions <revisions.json> # 寫
 uv run python -m collect next --set heldout                                # 下一個 slot（stderr 是 slot 與待人處理的 slot）
 ./tools/with-mac-lock uv run python -m collect run --set heldout --flag F --variant V   # 不接受 --seed
 uv run python -m collect process --incident <INC> --labeler agent:claude-code
+uv run python -m collect ack-failures --set heldout --slot <slot> --reason <…> --decided-by <person>   # 待人處理的 slot：人看過 run record 之後
 uv run python -m eval leakage --set heldout                                # 全部 slot 收完、process 之後
 uv run python -m collect review-sheet --incident <INC>                    # 使用者 review 的工作表，saw_method_outputs 必須是 false
 uv run python -m collect review --incident <INC> --file <filled.json> --reviewer human:<name>   # 寫 label.reviewed.json 與 label_review.json
@@ -150,6 +151,9 @@ uv run python -m collect status --set heldout
 ```
 
 - held-out 的 `collect review` 也要乾淨的 checkout（freeze 檢查）；`heldout-list` 要求每個 incident 都有 `label.reviewed.json` 與 `label_review.json`。
+- 一個 slot 累計 3 個沒有被確認的非 valid run group 就「待人處理」，`collect next` 跳過它（同時 3 個就全部停止）。人看過 run record 之後用
+  `collect ack-failures --set heldout --slot <slot>` 記錄確認（與 Pilot 的 `ack-failures` 相同，只附加、不刪任何紀錄），該 slot 重新計數再收；
+  `heldout-list` 寫出之後拒絕（使用者決定 2026-10-10，decision 026 解讀 11）。held-out run group 不能撤回（decision 026 解讀 30）。
 - review 判定 `fault_exercised = false` 的 slot 會回到 open：再 `collect next --set heldout` → `run` → `process` → `eval leakage --set heldout` → review 一次；
   再次未觸發就關閉並列出（decision 023 §5.3）。全部 slot 都是 filled 或 closed 之後才寫 `heldout-list`。
 - `eval run` / `score` 對每個方法都要做（統計 baseline 與 Agent）；`compare` 對每個統計 baseline 各做一次；`gate` 做一次，讀全部統計 baseline 的 compare（缺任何一個就拒絕、不寫檔）。

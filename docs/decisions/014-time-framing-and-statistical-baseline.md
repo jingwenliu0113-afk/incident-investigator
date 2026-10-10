@@ -2,6 +2,7 @@
 
 - 狀態：Accepted（2026-10-08）；在任何 baseline 或 Agent 對任何 incident 執行之前寫定（decision 011「延後」的第一項）。
   統計 baseline 的參數可以在 **Pilot Set** 上檢查並最多修訂一次（寫 decision log）；held-out 收集之前凍結，看到 held-out 結果後永遠不改。
+  **2026-10-10 使用者決定放棄這一次修訂：stat-anomaly 維持 v2**（見文末「補註（2026-10-10）」）。
 - 影響範圍：所有方法（4 組 baseline 與 Agent）拿到的任務描述；SPEC Core §7 第 3 組 baseline（per-service anomaly score）
 
 ## 背景
@@ -96,3 +97,15 @@ v2 在這兩個校準 snapshot 上（依定義）不預測任何 fault type、us
 **補註（時鐘稽核，2026-10-09，Pilot 之前）**：`warn_logs` 原本只有在該服務出現 span 或 WARN log 的分鐘才有值，沒有 span 的服務（kafka、astronomy-db、valkey-cart）
 因此永遠不計分；改為時間窗內每一分鐘都有值（沒有 WARN log 就是 0），與 §2「每分鐘的 WARN 以上 log 數」一致。
 在兩個無 fault 校準 snapshot 上重算，warn_logs 的最大 z 仍是 0，所以 `NULL_THRESHOLDS["warn_logs"] = 3` 不變。
+
+## 補註（2026-10-10，使用者決定）：放棄 Pilot 上的那一次修訂，v2 定案
+
+- **決定**：統計 baseline 在 Pilot 上「最多修訂一次」的額度**明確放棄**（023 §6：各 decision 的「Pilot 上修訂一次」在凍結前要嘛用掉、要嘛明確放棄）。
+  **stat-anomaly 維持 v2**（修訂 1 與時鐘稽核補註之後的版本），v2 就是 held-out freeze 時凍結的版本；held-out freeze 紀錄的 Pilot 修訂宣告寫
+  `"014": {"status": "waived"}`（026 解讀 10）。
+- **Pilot 的證據**（reviewed label，第一張 baseline 表；n = 10，每個 fault 只有 1 個 incident）：
+  - 8 個失敗 = `rule_limit` 4 + `mechanism` 4（decision 022），都是 v2 規則本身的限制或只答錯機制；
+  - **沒有發現設計缺陷**：沒有找到程式與 §2 / 修訂 1 的書面定義不一致、或像修訂 1 的 CPU 那樣量錯的特徵。
+- **為什麼放棄**：Pilot 上的統計 baseline 數字只用於難度檢查（本文「對實驗的影響」）；沒有發現設計缺陷時依 Pilot 分數調整規則或門檻，
+  等於在 n = 10（每個 fault 一個 incident）上過擬合，也會讓「Agent 必須明顯勝過的下限」依方法結果移動。
+- **之後**：v2 不再修訂；held-out 結果出現之後永遠不改（本文狀態行）。v2 的已知限制（例如 fault_type 只對應 4 種、記憶體門檻 34）照修訂 1 與 016 的說明報告，不另外調整。

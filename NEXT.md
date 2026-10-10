@@ -2,13 +2,23 @@
 
 ## 目前位置（2026-10-10，label review 完成後）
 
-**Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 付費 LLM、A3–A5 held-out freeze 前事項）。**
+**Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 付費 LLM；A0、A3–A5 是 held-out freeze 前仍未決定的事項）。**
+- **使用者決定（2026-10-10）與實作**（023「使用者決定」的「追加（2026-10-10）」）：
+  1. 統計 baseline 在 Pilot 上的那一次修訂**放棄**：stat-anomaly 維持 v2（decision 014「補註（2026-10-10）」；freeze 的 Pilot 修訂宣告 014 = waived）。
+  2. held-out **待人處理的 slot** 選 b，與 Pilot 相同：人看過 run record 後
+     `uv run python -m collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`，該 slot 重新計數再收，再 3 次無效又待人處理
+     （ground-truth 側 `failure_acks.jsonl` 只附加；沒有通過的 freeze 檢查、未知 slot、不是待人處理的 slot、`heldout_incidents.json` 已存在時拒絕、什麼都不寫；
+     被確認的 run group 留在所有紀錄與清單的 run group 清單；清單另記錄確認、載入時比對；「3 個 slot 就停止」數確認之後仍待人處理的 slot；
+     未觸發 / 關閉的處理與 Pilot 不變）。decision 026 修訂 2（解讀 11、12）。
+  3. freeze 之後的修正路徑：使用者**先跳過、沒有表示偏好** → 不實作，維持現況（見 A4，freeze 之前仍可決定）。
+  4. held-out 撤回：**不允許**（維持預設，026 解讀 30）。
+  - 測試：938 passed（`-m "not network and not docker_daemon"`）；新增的測試只用 synthetic fixture，沒有執行任何收集、Docker 或付費 API。
 - **label review 結果**：10 個都是 `fault_exercised = true`、`saw_method_outputs = false`；affected 與 user symptom 全部維持 a priori；
   7 個補了 notes（實際觀察，例如 emailMemoryLeak 沒有 OOM、recommendationCacheFailure 4 次 OOM、adHighCpu 時多數服務 p95 小幅上升）。
   coverage：traces origin 10；metrics origin 9、symptom_only 1；logs none 5、origin 3、symptom_only 2（逐案見 `label_review.json`）。
 - **第一張 baseline 表（stat-anomaly v2，Pilot，n = 10，用 reviewed label）**：fault_type 0.30、origin_top1 0.60（top3 0.90）、affected_f1 0.77、symptom_exact 0.50；
   失敗 8 個 = mechanism 4 + rule_limit 4；easy / hard 的 origin_top1 都是 0.60。evidence existence 1.0、弱標籤 temporal / service 1.0、origin 0.625。
-  （`data/external/results/pilot/stat-anomaly/table.md`）。**不依 Pilot 分數調整統計 baseline**（decision 014 只允許為修正設計缺陷修訂一次；目前沒有發現缺陷）。
+  （`data/external/results/pilot/stat-anomaly/table.md`）。**統計 baseline 維持 v2**：沒有發現設計缺陷，使用者 2026-10-10 決定放棄 decision 014 在 Pilot 上的那一次修訂。
 - **evidence gold（decision 017）完成**：28 筆（8 個 incident；INC-003、INC-008 沒有引用）、方法盲標，25 筆 relevant。stat-anomaly 的 gold precision 0.906（coverage 1.0），弱標籤 temporal + service 1.0：差在 INC-006 三筆落在 fault 時間窗、affected 服務但看起來正常的訂單（弱標籤算 relevant、人判 not relevant），正是 SPEC §9 要分開報的原因。LLM 方法加入後，它們的引用要另外補標（gold-todo 只會列出新的）。
 - **Pilot incident**（每個 fault 一個；RG-002 / INC-001 撤回）：
 
@@ -101,12 +111,13 @@
     `collect heldout-plan` → `heldout-freeze` → 每個 slot `next` → `run --set heldout`（不接受 `--seed`）→ `process` → `eval leakage --set heldout`
     → review（`collect review-sheet` / `collect review`）→ 未觸發的 slot 重收 → `collect heldout-list` → `eval run|score --set heldout`
     → `eval compare` → `eval gate`。沒有 freeze 紀錄時所有 held-out 收集與方法執行一律拒絕；
-    **plan、freeze 與收集都被 A1 擋住**（要求 LLM 方法已批准並在 Pilot 上跑過）。freeze 之前必須 commit：API adapter、013 正式版、
-    A4 裡使用者決定要有的機制；freeze 之後只能改 NEXT.md 與新增 decision 檔（README 也不能改）。
-    待人處理的 slot 只記 slot id 與非 valid 的 run group id。電力條件對 held-out 一樣成立（026 解讀 29）。
+    **plan、freeze 與收集都被 A1 擋住**（要求 LLM 方法已批准並在 Pilot 上跑過）。freeze 之前必須 commit：API adapter、013 正式版
+    （026「待使用者決定」1 的機制已實作；A4 若在 freeze 前改為要修正路徑，那個程式也要在 freeze 前 commit）；freeze 之後只能改 NEXT.md 與新增 decision 檔（README 也不能改）。
+    待人處理的 slot 只記 slot id 與非 valid 的 run group id；人看過 run record 後 `collect ack-failures --set heldout --slot <slot>` 確認、重新計數再收（2026-10-10）。
+    電力條件對 held-out 一樣成立（026 解讀 29）。
     **026 修訂 1（程式審查後）**：held-out run group 一律不能撤回（撤回只用於 Pilot；手寫的撤回紀錄讓所有 held-out 步驟停止）；
     方法的 `run.lock` 存在時拒絕評分；transcript 先寫、prediction 最後寫；`up_at` 在 run 任何可能失敗的步驟之前記錄。
-    **freeze 之前要使用者決定的三件事**見 A4。
+    **026「待使用者決定」1–3** 已由使用者在 2026-10-10 處理：1 選 b（已實作）、2 沒有偏好（維持現況，見 A4）、3 不允許。
   - **Gate 計算（023「實作說明：Gate 計算」）**：
     `python -m eval gate --method agent --against stat-anomaly --set <set>` 只讀已寫好的 scores.json 與 `eval compare` 輸出（不跑方法），寫 `gate.json` / `gate.md`：
     條件 1 讀 compare 的 origin_top1 paired 下界（對每個統計 baseline，compare 記錄 scores 的 sha，過期就拒絕）；條件 2（held-out 的 K 用 slot 數，缺格不降低 ⌈K/2⌉）；
@@ -120,7 +131,7 @@
     真實 snapshot 永不進 git：hygiene 測試只接受 `data/samples/synthetic/` 一個目錄（測試逐 byte 重產比對的那個），每個檔案以相同 sha256 列在
     `synthetic: true`、產生器 `collect.sample` 的 `sample.json`，內容只能出現 `INC-000` / `RG-000`（`collect calibrate` 的 soak snapshot 也叫
     `INC-000`，id 本身不代表合成）。`incidents_in` 遇到 `RG-000` / `INC-000` 直接拒絕。
-    **Pilot 修訂 011（policy）或 014（統計 baseline）時**，`tests/test_sample.py` 會失敗到範例重產為止：重新凍結並釘選 policy 之後
+    **Pilot 修訂 011（policy）時**（014 的修訂已在 2026-10-10 放棄），`tests/test_sample.py` 會失敗到範例重產為止：重新凍結並釘選 policy 之後
     `collect sample --out data/samples/synthetic --replace`，與修訂放在同一個 commit（027「對實驗的影響」）。
   - **合併審查（2026-10-10，三個部分合在一起之後）**：`eval` CLI 把 `CallError`（API / transport 錯誤）印成 `error: …`、exit 2（原本是 traceback；
     Pilot 沒有嘗試紀錄，見 A1）；held-out 的 `compare-*.json` 不再帶 incident id 與 valid run group id（原樣複製了 scores.json 的
@@ -260,27 +271,32 @@
 ## Blocked / 需要使用者（回來時一次處理）
 
 ### A. 需要使用者決定或批准
-0. （已處理）intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）：使用者已 ack（`collect ack-failures`）；
-   flag 寫入改為同一個 inode、沒生效就重寫（decision 009 修訂 5，已在 main）。
-   仍待決定：grafana 的 plugin 下載逾時。**Pilot 期間不改 env lock**；held-out freeze 前再決定是否關掉 grafana 的 plugin 下載（改 lock、新 soak）。
-1. **付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
-   scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
-   - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）
-     中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
-     估算 Pilot 成本時要把這種重跑算進去。
-2. （已完成 2026-10-10）Pilot 的 label review 與 evidence gold 標註（human:jingwen）。LLM 方法在 Pilot 上執行後，它們的引用要再補標。
-   **freeze 前另一件事**：統計 baseline 在 Pilot 上的「最多修訂一次」（decision 014）要用掉或明確放棄（023 §6）。建議**放棄**（維持 v2）：Pilot 的 8 個失敗都是 rule_limit / mechanism，沒有發現設計缺陷；每個 fault 只有 1 個 incident，依結果調規則等於在 n = 10 上過擬合。
-3. **decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
-4. **held-out freeze 之前必須決定（026「待使用者決定」1–3）**：023 與使用者決定都沒有涵蓋，程式目前都是拒絕的一側；freeze 釘住所有程式，
-   **freeze 之後就無法加入任何機制**。不影響 Pilot 收集。
-   1. 待人處理的 slot 如何解除：a. 人把該 slot 關閉為缺格；b. 人診斷 stack 之後允許再收（次數與條件寫進 decision；Pilot 的前例是 `collect ack-failures`）；
-      c. 維持現況：一個 slot 累計 3 個非 valid 的 run group 就永遠待人處理，held-out 清單永遠寫不出來（估計約 55% 會發生）。**c 與 Pilot 的規則不同**
-      （Pilot 人看過後會重新計數，026 解讀 11 的更正）。
-   2. freeze 之後的修正路徑：a. 實作一條窄的修訂路徑（新 decision + 接續的 freeze 紀錄，只用於 023 §6 允許的修正）；b. 接受現況（freeze 後任何 bug 都讓 held-out 評測停止）。
-   3. 是否要 held-out 撤回（預設沒有；026 修訂 1 改為一律拒絕）。
-5. **請確認 Gate 的 Pilot 診斷讀法**（023「實作說明：Gate 計算」解讀 4，2026-10-10 review 修正）：Pilot 上 K < 2 的 fault 不評估條件 2
-   （單一 incident 無法顯示可重現性；標為 not evaluated、不算成立）。只讓 Pilot 診斷更難成立；held-out 照 §7 原文（K = 設計的 slot 數），程式行為不變。
-   程式在 freeze 時一起凍結，所以要在 freeze 之前確認。
+只列仍未處理的事項；編號沿用（其他地方引用 A1 等），已處理的移到下方「已處理」。
+
+- **A0 grafana 的 plugin 下載逾時**：**Pilot 期間不改 env lock**；held-out freeze 前再決定是否關掉 grafana 的 plugin 下載（改 lock、新 soak）。
+  每次逾時都是一次無效的 run（held-out 時算該 slot 的一次無效嘗試）。
+- **A1 付費 LLM API 方法（dump-all / retrieval / agent）：使用者決定先延後（2026-10-09）**。在批准模型、預算與成本之前一律拒絕執行；
+  scripted fake model 只做 harness 驗證，不產生方法結果。不阻塞 Pilot 收集。
+  - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤）
+    中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫（再付費），`run_config.json` 與所有 prediction 都重寫。
+    估算 Pilot 成本時要把這種重跑算進去。
+  - LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
+- **A3 decision 023 的 gold 標註量**：使用者決定其餘項目照保守預設 → 目前依 017 現行規定（不修訂）。若要改為抽樣（每個 fault 2 個 incident），須在 held-out freeze 之前決定。
+- **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 **先跳過、沒有表示偏好** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
+  freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
+  只用於 023 §6 允許的修正）；freeze 釘住所有程式，之後就無法加入。不影響其他工作。
+- **A5 請確認 Gate 的 Pilot 診斷讀法**（023「實作說明：Gate 計算」解讀 4，2026-10-10 review 修正）：Pilot 上 K < 2 的 fault 不評估條件 2
+  （單一 incident 無法顯示可重現性；標為 not evaluated、不算成立）。只讓 Pilot 診斷更難成立；held-out 照 §7 原文（K = 設計的 slot 數），程式行為不變。
+  程式在 freeze 時一起凍結，所以要在 freeze 之前確認。
+
+已處理（2026-10-10 使用者決定；023「使用者決定」的「追加（2026-10-10）」）：
+- 原 A2 的 freeze 前事項：統計 baseline 在 Pilot 上的「最多修訂一次」（decision 014）**放棄**，stat-anomaly 維持 v2（014「補註（2026-10-10）」；
+  Pilot 的 8 個失敗 = rule_limit 4、mechanism 4，沒有發現設計缺陷；n = 10、每個 fault 1 個 incident）。
+- 原 A4.1 待人處理的 slot：**b，與 Pilot 相同**，`collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`（已實作，026 修訂 2、解讀 11、12）。
+- 原 A4.3 held-out 撤回：**不允許**（維持預設，026 解讀 30）。
+- 原 A2：Pilot 的 label review 與 evidence gold 標註（human:jingwen，2026-10-10）。
+- 原 A0 前半：intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）：使用者已 ack（`collect ack-failures`）；
+  flag 寫入改為同一個 inode、沒生效就重寫（decision 009 修訂 5，已在 main）。
 
 已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定高效能模式 + AC 供電（decision 025 修訂 3；原本的自動模式由使用者改掉，RG-002 撤回重收）；
 真實 snapshot sample 不進 git（需要時用 synthetic fixture）；`/usr/bin/git` 已由使用者修好；電力模式限制解除。
