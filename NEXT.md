@@ -4,7 +4,8 @@
 
 **Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。剩下的 Core 工作都在等使用者的決定（A1 付費 LLM；A0、A3–A5 是 held-out freeze 前仍未決定的事項）。**
 - **使用者決定（2026-10-10）與實作**（023「使用者決定」的「追加（2026-10-10）」）：
-  1. 統計 baseline 在 Pilot 上的那一次修訂**放棄**：stat-anomaly 維持 v2（decision 014「補註（2026-10-10）」；freeze 的 Pilot 修訂宣告 014 = waived）。
+  1. 統計 baseline 在 Pilot 上的那一次修訂**放棄**：stat-anomaly 維持 v2（decision 014「補註（2026-10-10）」；freeze 的 Pilot 修訂宣告 014 = waived，
+     freeze 檢查強制這一項）。
   2. held-out **待人處理的 slot** 選 b，與 Pilot 相同：人看過 run record 後
      `uv run python -m collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`，該 slot 重新計數再收，再 3 次無效又待人處理
      （ground-truth 側 `failure_acks.jsonl` 只附加；沒有通過的 freeze 檢查、未知 slot、不是待人處理的 slot、`heldout_incidents.json` 已存在時拒絕、什麼都不寫；
@@ -12,7 +13,11 @@
      未觸發 / 關閉的處理與 Pilot 不變）。decision 026 修訂 2（解讀 11、12）。
   3. freeze 之後的修正路徑：使用者**先跳過、沒有表示偏好** → 不實作，維持現況（見 A4，freeze 之前仍可決定）。
   4. held-out 撤回：**不允許**（維持預設，026 解讀 30）。
-  - 測試：938 passed（`-m "not network and not docker_daemon"`）；新增的測試只用 synthetic fixture，沒有執行任何收集、Docker 或付費 API。
+  - **審查（2026-10-10，026 修訂 2 審查；只拒絕更多）**：讀取端原本接受寫入端永遠不會寫的 held-out 確認（手寫一行就能讓 open 的 slot 提前重新計數），
+    改為每一筆都必須等於 `ack-failures` 當時會寫的內容（該 slot 全部未確認的失敗、至少 3 個），否則所有 held-out 步驟停止（026 解讀 11）；
+    freeze 檢查強制 014 = waived（026 解讀 10）；補上確認已關閉的 slot、兩行重複確認、格式錯誤的行、CLI 參數防護、清單寫出後損壞的確認檔的測試；
+    023 狀態行改為「決定三項、一項沒有偏好」，014 補註只留使用者的決定與證據（理由標明是原 A2 建議的理由）。
+  - 測試：947 passed（`-m "not network and not docker_daemon"`）；新增的測試只用 synthetic fixture，沒有執行任何收集、Docker 或付費 API。
 - **label review 結果**：10 個都是 `fault_exercised = true`、`saw_method_outputs = false`；affected 與 user symptom 全部維持 a priori；
   7 個補了 notes（實際觀察，例如 emailMemoryLeak 沒有 OOM、recommendationCacheFailure 4 次 OOM、adHighCpu 時多數服務 p95 小幅上升）。
   coverage：traces origin 10；metrics origin 9、symptom_only 1；logs none 5、origin 3、symptom_only 2（逐案見 `label_review.json`）。
@@ -136,7 +141,7 @@
   - **合併審查（2026-10-10，三個部分合在一起之後）**：`eval` CLI 把 `CallError`（API / transport 錯誤）印成 `error: …`、exit 2（原本是 traceback；
     Pilot 沒有嘗試紀錄，見 A1）；held-out 的 `compare-*.json` 不再帶 incident id 與 valid run group id（原樣複製了 scores.json 的
     `excluded` / `closed_slots`；與 gate 一致，023「Gate 計算 / 輸出」更正）；026 解讀 11 更正（held-out 的 slot 無效上限沒有 Pilot 的
-    `ack-failures` 重新計數）並在「待使用者決定」1 註明 Pilot 前例；027 補上 Pilot 修訂時重產範例的順序；README 的 held-out 段補上
+    `ack-failures` 重新計數；**已由 026 修訂 2 取代**，2026-10-10 使用者決定之後 held-out 也有 `ack-failures --set heldout --slot`）並在「待使用者決定」1 註明 Pilot 前例；027 補上 Pilot 修訂時重產範例的順序；README 的 held-out 段補上
     `collect review`、未觸發 slot 的重收、`eval compare` 與 `eval gate`，「評分」段說明 gate.json / gate.md。
 - **回來時請先看下面的「Blocked / 需要使用者」**。
 

@@ -141,6 +141,12 @@ def test_pilot_revision_declarations():
     assert any("017" in p for p in pilot_revision_problems({k: v for k, v in REVISIONS.items() if k != "017"}, paths, 1))
     assert any("024" in p for p in pilot_revision_problems(REVISIONS | {"024": {"status": "waived"}}, paths, 1))
     assert any("015" in p for p in pilot_revision_problems(REVISIONS | {"015": {"status": "maybe"}}, paths, 1))
+    # user decision 2026-10-10 (decision 014 addendum): the statistical baseline's one Pilot revision is waived, v2 is final
+    d014 = "docs/decisions/014-time-framing-and-statistical-baseline.md"
+    used_014 = REVISIONS | {"014": {"status": "used", "decision": d014}}
+    assert [p for p in pilot_revision_problems(used_014, paths | {d014}, 1) if "014" in p] == [
+        "014 must be declared waived: the user waived the statistical baseline's one Pilot revision on 2026-10-10 "
+        "(decision 014 addendum; stat-anomaly v2 is final)"]
 
 
 class Fail:

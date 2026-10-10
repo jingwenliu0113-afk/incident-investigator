@@ -314,7 +314,7 @@ def test_acknowledged_run_groups_stay_listed_and_nothing_is_acknowledged_after_t
 
 
 def test_a_list_without_acknowledgments_records_none_and_pilot_acknowledgments_never_enter_it(tmp_path):
-    from collect.pilot import acknowledge_failures
+    from collect.pilot import ACKS, acknowledge_failures
 
     layout = full(tmp_path)
     for n in (3, 4, 5):
@@ -324,3 +324,7 @@ def test_a_list_without_acknowledgments_records_none_and_pilot_acknowledgments_n
     assert doc["acknowledgments"] == []
     write_once(layout.heldout_incidents_path, doc)
     assert load_heldout_incidents(layout, freeze_sha=FREEZE_SHA) == doc
+    with (layout.ground_truth_root / ACKS).open("a") as f:  # a corrupt line after the list: every method stops
+        f.write("not json\n")
+    with pytest.raises(PermissionError, match="acknowledgment record"):
+        load_heldout_incidents(layout, freeze_sha=FREEZE_SHA)

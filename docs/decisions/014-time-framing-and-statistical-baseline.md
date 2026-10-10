@@ -103,9 +103,11 @@ v2 在這兩個校準 snapshot 上（依定義）不預測任何 fault type、us
 - **決定**：統計 baseline 在 Pilot 上「最多修訂一次」的額度**明確放棄**（023 §6：各 decision 的「Pilot 上修訂一次」在凍結前要嘛用掉、要嘛明確放棄）。
   **stat-anomaly 維持 v2**（修訂 1 與時鐘稽核補註之後的版本），v2 就是 held-out freeze 時凍結的版本；held-out freeze 紀錄的 Pilot 修訂宣告寫
   `"014": {"status": "waived"}`（026 解讀 10）。
-- **Pilot 的證據**（reviewed label，第一張 baseline 表；n = 10，每個 fault 只有 1 個 incident）：
-  - 8 個失敗 = `rule_limit` 4 + `mechanism` 4（decision 022），都是 v2 規則本身的限制或只答錯機制；
-  - **沒有發現設計缺陷**：沒有找到程式與 §2 / 修訂 1 的書面定義不一致、或像修訂 1 的 CPU 那樣量錯的特徵。
-- **為什麼放棄**：Pilot 上的統計 baseline 數字只用於難度檢查（本文「對實驗的影響」）；沒有發現設計缺陷時依 Pilot 分數調整規則或門檻，
-  等於在 n = 10（每個 fault 一個 incident）上過擬合，也會讓「Agent 必須明顯勝過的下限」依方法結果移動。
-- **之後**：v2 不再修訂；held-out 結果出現之後永遠不改（本文狀態行）。v2 的已知限制（例如 fault_type 只對應 4 種、記憶體門檻 34）照修訂 1 與 016 的說明報告，不另外調整。
+- **Pilot 的證據**（使用者決定時依據的內容；reviewed label 的第一張 baseline 表）：
+  - 8 個失敗 = `rule_limit` 4 + `mechanism` 4（decision 022 的失敗分類）；
+  - 沒有發現設計缺陷；
+  - n = 10，每個 fault 只有 1 個 incident。
+- **理由**（原 NEXT A2 建議放棄時寫的理由，使用者的決定與該建議相同；這裡不另外追加理由）：每個 fault 只有 1 個 incident，依結果調規則等於在 n = 10 上過擬合。
+- **之後**：v2 不再修訂（Pilot 上的修訂額度已放棄）；held-out 結果出現之後永遠不改（本文狀態行，原有規則）。
+- **實作者註**（不是使用者決定的內容）：freeze 檢查（`collect.freeze.pilot_revision_problems`）拒絕 014 不是 `waived` 的宣告，
+  讓 freeze 紀錄不能記下與這個決定矛盾的宣告（026 解讀 10，2026-10-10 審查補上）。

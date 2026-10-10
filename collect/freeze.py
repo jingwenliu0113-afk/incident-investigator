@@ -141,7 +141,8 @@ def _change_problems(changes: list) -> list[str]:
 
 def pilot_revision_problems(revisions, decision_paths, policy_version) -> list[str]:
     """023 §6: each decision's one Pilot revision is used (naming a decision file of the frozen commit: the person's
-    attestation) or waived; 013's is used by 023 §7; 011's is used exactly when the policy is v2."""
+    attestation) or waived; 013's is used by 023 §7; 011's is used exactly when the policy is v2; 014's is waived (user
+    decision 2026-10-10, decision 014 addendum)."""
     if not isinstance(revisions, dict):
         return ["pilot_revisions must map each of " + ", ".join(PILOT_REVISABLE) + " to used or waived"]
     problems = [f"pilot_revisions has no declaration for {n}" for n in PILOT_REVISABLE if n not in revisions]
@@ -159,6 +160,9 @@ def pilot_revision_problems(revisions, decision_paths, policy_version) -> list[s
             problems.append(f"{n}: a waived revision names no decision")
     if (revisions.get("013") or {}).get("status") != "used":
         problems.append("013 must be declared used: 023 §7 is 013's one revision")
+    if (revisions.get("014") or {}).get("status") != "waived":
+        problems.append("014 must be declared waived: the user waived the statistical baseline's one Pilot revision on "
+                        "2026-10-10 (decision 014 addendum; stat-anomaly v2 is final)")
     status_011 = (revisions.get("011") or {}).get("status")
     if policy_version not in (1, 2) or status_011 != {1: "waived", 2: "used"}.get(policy_version):
         problems.append(f"011 is {status_011!r} with policy version {policy_version!r}: policy v1 means 011 waived, "

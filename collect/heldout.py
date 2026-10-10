@@ -432,8 +432,11 @@ def heldout_acknowledgments(layout) -> list[dict]:
 
 def _apply_acknowledgments(layout, slots: dict, detail: dict, *, freeze_sha: str) -> None:
     """Adds each slot's acknowledged run groups. Every acknowledgment that names a held-out run group must be a held-out
-    one of this freeze and of its slot's fault, naming that slot's non-valid run groups, each once; anything else raises
-    ValueError."""
+    one of this freeze and of its slot's fault, and must be what acknowledge_slot_failures wrote: every non-valid run group
+    of that slot that no earlier line covers, up to its last one, and at least MAX_INVALID_ATTEMPTS of them (the slot
+    needed a person; decision 026 #11: never early, never in part). Anything else raises ValueError."""
+    from collect.pilot import MAX_INVALID_ATTEMPTS
+
     heldout_rgs = {rg for d in detail.values() for rg in d["non_valid"] + d["valid"]}
     for record in _ack_records(layout):
         rgs = record["run_groups"]
@@ -452,9 +455,16 @@ def _apply_acknowledgments(layout, slots: dict, detail: dict, *, freeze_sha: str
             raise ValueError(f"a held-out acknowledgment of {slot} was recorded under freeze record "
                              f"{record.get('freeze_sha256')}, not the one in force ({freeze_sha})")
         d = detail[slot]
-        if not rgs or len(set(rgs)) != len(rgs) or not set(rgs) <= set(d["non_valid"]) or set(rgs) & set(d["acknowledged"]):
+        pending = [rg for rg in d["non_valid"] if rg not in d["acknowledged"]]
+        if not rgs or len(set(rgs)) != len(rgs) or not set(rgs) <= set(pending):
             raise ValueError(f"a held-out acknowledgment of {slot} names {rgs}: only that slot's non-valid run groups, "
                              "each acknowledged once")
+        last = max(_number(rg) for rg in rgs)
+        then = {rg for rg in pending if _number(rg) <= last}  # what that slot's acknowledgment then had to name
+        if set(rgs) != then or len(rgs) < MAX_INVALID_ATTEMPTS:
+            raise ValueError(f"a held-out acknowledgment of {slot} names {rgs}, not {sorted(then)}: an acknowledgment "
+                             f"covers every unacknowledged failure of a slot that needs a person ({MAX_INVALID_ATTEMPTS} or "
+                             "more), never fewer, never early (decision 026 #11)")
         d["acknowledged"] += rgs
 
 

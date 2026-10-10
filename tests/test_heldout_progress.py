@@ -288,6 +288,13 @@ def test_an_acknowledgment_is_refused_for_an_unknown_slot_nothing_to_acknowledge
     for kw in ({"reason": " "}, {"decided_by": ""}):
         with pytest.raises(ValueError, match="reason and who decided"):
             ack(layout, "H03", **kw)
+    held(layout, ids, slots[3], exercised=False)
+    held(layout, ids, slots[3], exercised=False)
+    for _ in range(2):
+        held(layout, ids, slots[3], "invalid")
+    assert row(layout, "H04")["state"] == "closed"
+    with pytest.raises(ValueError, match="needs a person"):  # closed: its failures need no person (026 #11)
+        ack(layout, "H04")
     layout.heldout_incidents_path.write_text("{}")  # 023 §5.5 / §6: the list never changes
     with pytest.raises(ValueError, match="heldout_incidents.json"):
         ack(layout, "H03")
@@ -352,17 +359,45 @@ def heldout_ack(slot, run_groups, **kw):
     lambda s, bad, good, other: heldout_ack(s, [bad[0], bad[0]]),
     lambda s, bad, good, other: {"split": "pilot", "flag": s["flag"], "variant": s["variant"], "run_groups": bad,
                                  "reason": "r", "decided_by": "user", "acknowledged_at": ACKED_AT},
+    lambda s, bad, good, other: {"split": "pilot", "flag": s["flag"], "variant": s["variant"], "run_groups": [good],
+                                 "reason": "r", "decided_by": "user", "acknowledged_at": ACKED_AT},
+    lambda s, bad, good, other: (heldout_ack(s, bad), heldout_ack(s, bad)),  # two lines, the same run groups
     lambda s, bad, good, other: "not json",
+    lambda s, bad, good, other: "[]",
     lambda s, bad, good, other: {"split": "heldout", "slot": "H01", "run_groups": "RG-001"},
+    lambda s, bad, good, other: {"split": "pilot", "flag": s["flag"], "variant": s["variant"], "run_groups": [1]},
 ], ids=["unknown-slot", "other-freeze", "other-fault", "valid-run-group", "other-slot", "empty", "twice", "pilot-names-heldout",
-        "malformed", "run-groups-not-a-list"])
+        "pilot-names-heldout-valid", "acknowledged-twice", "malformed", "json-array", "run-groups-not-a-list",
+        "run-group-not-a-string"])
 def test_a_corrupt_or_foreign_acknowledgment_stops_every_heldout_step(tmp_path, make):
     # fail closed like every held-out record (026 #12): never filtered, never ignored
     layout, ids, slots = DataLayout(tmp_path), Counter(), SLOTS["slots"]
     bad = [held(layout, ids, slots[0], "invalid") for _ in range(3)]
     other = held(layout, ids, slots[1], "invalid")
     good = held(layout, ids, slots[2])
-    write_ack_line(layout, make(slots[0], bad, good, other))
+    lines = make(slots[0], bad, good, other)
+    for line in lines if isinstance(lines, tuple) else (lines,):
+        write_ack_line(layout, line)
+    for check in (lambda: slot_status(layout, SLOTS, freeze_sha=FREEZE_SHA),
+                  lambda: next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA), lambda: ack(layout)):
+        with pytest.raises(ValueError, match="acknowledg"):
+            check()
+
+
+@pytest.mark.parametrize("before, named", [
+    (2, lambda bad: bad[:1]),  # an open slot, acknowledged early
+    (2, lambda bad: bad),
+    (3, lambda bad: bad[:1]),  # a slot that needs a person, acknowledged in part
+    (3, lambda bad: bad[:2]),
+    (4, lambda bad: [bad[0], bad[2], bad[3]]),  # three of four, one skipped
+], ids=["open-one", "open-two", "needs-person-one", "needs-person-two", "skips-one"])
+def test_an_acknowledgment_the_writer_never_writes_stops_every_heldout_step(tmp_path, before, named):
+    # 026 #11: only a slot that needs a person is acknowledged, all its unacknowledged failures at once, so a hand-written
+    # record never acknowledges early or in part and recounts the slot sooner: fail closed, not accepted
+    layout, ids, slot = DataLayout(tmp_path), Counter(), SLOTS["slots"][0]
+    bad = [held(layout, ids, slot, "invalid") for _ in range(before)]
+    write_ack_line(layout, heldout_ack(slot, named(bad)))
+    held(layout, ids, slot, "invalid")
     for check in (lambda: slot_status(layout, SLOTS, freeze_sha=FREEZE_SHA),
                   lambda: next_slot(layout, SLOTS, freeze_sha=FREEZE_SHA), lambda: ack(layout)):
         with pytest.raises(ValueError, match="acknowledg"):

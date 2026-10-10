@@ -3,8 +3,9 @@
 ## 狀態 / 影響範圍
 
 - **狀態**：Accepted（2026-10-09，使用者決定：K = 5，其餘依保守預設；見文末「使用者決定」）。本協定寫在任何 held-out 資料與任何方法結果出現之前。
-  2026-10-10 使用者追加決定四項（014 放棄 Pilot 修訂、待人處理的 slot 由人確認後重新計數、freeze 之後的修正路徑維持現況、不允許 held-out 撤回），
-  同樣在任何 held-out 資料與 freeze 之前；見文末「使用者決定」的「追加（2026-10-10）」。
+  2026-10-10 使用者追加決定三項（014 放棄 Pilot 修訂、待人處理的 slot 由人確認後重新計數、不允許 held-out 撤回）；
+  freeze 之後的修正路徑使用者先跳過、沒有偏好（不實作、維持現況，freeze 之前仍可決定）。同樣在任何 held-out 資料與 freeze 之前；
+  見文末「使用者決定」的「追加（2026-10-10）」。
   - 標「Pilot 後定稿」的項目，要等 Pilot 的收集、review、leakage audit 與 LLM 方法試跑都完成，並在第一個 held-out run group 之前定稿一次。
   - 定稿之後，每次修改都另寫 decision log。
   - 看到 held-out 方法結果之後，永不修改。
@@ -265,7 +266,7 @@
 
 ### 追加（2026-10-10，Pilot 的 label review 與 evidence gold 完成之後；任何 held-out 資料與 freeze 之前）
 
-使用者在對話中決定；只記錄這四項，不延伸到其他規則、門檻、指標、切分或預算。
+使用者在對話中處理了四項：1、2、4 是決定，3 使用者先跳過、沒有表示偏好。只記錄這四項，不延伸到其他規則、門檻、指標、切分或預算。
 
 1. **統計 baseline 的「Pilot 上修訂一次」（decision 014）放棄**：stat-anomaly 維持 v2，v2 就是 freeze 時凍結的版本；freeze 紀錄的 Pilot 修訂宣告寫
    `"014": {"status": "waived"}`（§6「用掉或明確放棄」）。Pilot 的證據：8 個失敗 = rule_limit 4、mechanism 4，沒有發現設計缺陷；
@@ -338,11 +339,13 @@
 7. freeze 預設拒絕：只允許 `M NEXT.md`、新增 slots / freeze、新增 decision 檔；freeze 後既有 decision 不再修改。
 8. env lock、policy、llm 的 sha 寫入紀錄並由 diff 釘住；資料端仍逐筆比對。
 9. freeze 要求 llm 已 approved 且 model、model_version、temperature 非 null。
-10. 「Pilot 上修訂一次」：011、013–015、017、019–022 各宣告 used / waived；013 必須 used；011 隨 policy 版本。
+10. 「Pilot 上修訂一次」：011、013–015、017、019–022 各宣告 used / waived；013 必須 used；011 隨 policy 版本；
+    014 必須 waived（使用者 2026-10-10 決定；026 修訂 2 審查起由 freeze 檢查強制）。
 11. slot 的無效上限累計沒有被確認的非 valid run group（invalid 與所有 aborted_*）。2026-10-10 使用者決定（026「待使用者決定」1 選 b，與 Pilot 相同）：
     待人處理的 slot 由人看過 run record 後以 `collect ack-failures --set heldout --slot <slot>` 確認（`failure_acks.jsonl`，只附加），重新計數、再收；
     再 3 個無效又待人處理。只確認待人處理的 slot；freeze 檢查不通過、未知的 slot、`heldout_incidents.json` 已存在時拒絕；被確認的 run group 留在所有紀錄與清單的
-    run group 清單裡；清單另記錄確認，之後多出來的確認會被發現（見 026 解讀 11）。
+    run group 清單裡；清單另記錄確認，之後多出來的確認會被發現（見 026 解讀 11）。手寫的確認必須等於指令當時會寫的內容
+    （該 slot 全部未確認的失敗、至少 3 個），提前或部分的確認讓所有 held-out 步驟停止（026 修訂 2 審查）。
     （同日稍早的更正說 held-out 沒有這種確認、永不重新計數；使用者決定後已不成立。）
 12. 狀態優先：filled > needs_person > closed > open；損壞或不符的紀錄（包括確認紀錄）exit 2，需要人 exit 3；「3 個 slot 待人處理就停止」數確認之後仍待人處理的 slot。
 13. 未觸發重收一次，再未觸發就關閉；詞彙命中排除、不重收。

@@ -467,8 +467,9 @@ def test_heldout_ack_failures_records_a_persons_look_at_a_slot_and_it_is_collect
     assert status["slots"][1]["counts"]["non_valid"] == 3
     assert main(ack_args("heldout", "--slot", "H02")) == 2 and "needs a person" in capsys.readouterr().err
     assert main(ack_args("heldout", "--slot", "H99")) == 2 and "H99" in capsys.readouterr().err
-    for extra in ([], ["--slot", "H02", "--flag", slots[1]["flag"], "--variant", slots[1]["variant"]]):
-        assert main(ack_args("heldout", *extra)) == 2 and "--slot" in capsys.readouterr().err
+    for extra in ([], ["--slot", "H02", "--flag", slots[1]["flag"], "--variant", slots[1]["variant"]],
+                  ["--slot", "H02", "--flag", slots[1]["flag"]], ["--slot", "H02", "--variant", slots[1]["variant"]]):
+        assert main(ack_args("heldout", *extra)) == 2 and "--slot" in capsys.readouterr().err, extra
     assert len((layout.ground_truth_root / "failure_acks.jsonl").read_text().splitlines()) == 1
 
 
@@ -496,6 +497,7 @@ def test_pilot_ack_failures_is_unchanged(tmp_path, monkeypatch, capsys):
     assert main(ack_args("pilot", "--slot", "H01", "--flag", "paymentFailure", "--variant", "100%")) == 2
     assert "--slot" in capsys.readouterr().err
     assert main(ack_args("pilot", "--flag", "paymentFailure")) == 2 and "--variant" in capsys.readouterr().err
+    assert main(ack_args("pilot", "--variant", "100%")) == 2 and "--flag" in capsys.readouterr().err
     assert main(ack_args("pilot", "--flag", "paymentFailure", "--variant", "100%")) == 0
     record = json.loads(capsys.readouterr().out)
     assert set(record) == {"split", "flag", "variant", "run_groups", "reason", "decided_by", "acknowledged_at"}
