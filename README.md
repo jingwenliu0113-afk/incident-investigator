@@ -21,6 +21,7 @@ label 全部經人工 review（decision 018，review 時未看任何方法輸出
 
 - 依難度（leakage audit）：easy 5 個、hard 5 個；origin_top1 兩者都是 0.60。
 - 失敗（origin 或 fault type 錯）8 個：`mechanism`（origin 對、機制錯）4、`rule_limit`（統計規則本身的限制）4。
+- Evidence：引用全部存在（existence 1.0）；弱標籤（時間窗內的 affected 服務）1.0，但人工盲標的 gold precision 是 0.91（28 筆中 25 筆 relevant）——弱標籤會把故障時間窗內看起來正常的紀錄也算進去，所以兩者分開報（decision 017）。
 - LLM 方法（dump-all、retrieval、Agent）延後，尚無結果；held-out（每個 fault 5 個）在 freeze 之後收集，Gate 只在 held-out 上判定。
 
 ## Pipeline
