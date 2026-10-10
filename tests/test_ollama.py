@@ -75,7 +75,40 @@ def test_a_reply_becomes_content_blocks_with_deterministic_tool_ids_and_usage():
     broken = model(FakeOllama(reply(call("submit_diagnosis", "{not json")))).complete("sys", history, [TOOL])["content"]
     assert broken == [{"type": "tool_use", "id": "toolu_001_0", "name": "submit_diagnosis", "input": {},
                        "unparsed_arguments": "{not json"}]
+    for args, raw in (("[1, 2]", "[1, 2]"), ([1, 2], "[1, 2]"), ("", ""), (7, "7")):  # anything but an object is kept raw
+        block = model(FakeOllama(reply(call("submit_diagnosis", args)))).complete("sys", history, [TOOL])["content"][0]
+        assert block["input"] == {} and block["unparsed_arguments"] == raw, args
+    for args in (None, {}):  # no arguments (Ollama nulls an empty map): an empty object, nothing unparsed
+        block = model(FakeOllama(reply(call("list_services", args)))).complete("sys", history, [TOOL])["content"][0]
+        assert block == {"type": "tool_use", "id": "toolu_001_0", "name": "list_services", "input": {}}
     assert model(FakeOllama(reply(content=""))).complete("sys", history, [])["content"] == []
+
+
+def test_arguments_that_are_not_an_object_are_rejected_never_read_as_an_empty_answer(tmp_path):
+    # decision 029 / 020 §3: unparsed arguments go back as a malformed answer or argument, never as an abstention
+    from agent.harness import investigate, submit_round
+
+    def agent(*replies):
+        return investigate(Snap(), "INC-001", model(FakeOllama(*replies)), cache_root=tmp_path / "cache",
+                           method={"name": "agent", "version": "1"})
+
+    pred, transcript = agent(reply(call("submit_diagnosis", "{not json")), reply(call("submit_diagnosis", ANSWER)))
+    assert transcript["stop_reason"] == "submitted" and transcript["corrections"] == 1
+    first = transcript["messages"][2]["content"][0]
+    assert first["is_error"] is True and "malformed" in first["content"] and pred["origin_candidates"] == ["payment", "checkout"]
+    pred, transcript = agent(*[reply(call("submit_diagnosis", bad)) for bad in ("{not json", "[1]", "")])
+    assert transcript["stop_reason"] == "invalid_submission" and pred["origin_candidates"] == []
+    pred, transcript = agent(reply(call("search_spans", "[1, 2]")), reply(call("list_services", None)),
+                             reply(call("submit_diagnosis", ANSWER)))
+    assert transcript["messages"][2]["content"][0]["content"] == "error: arguments must be an object"
+    assert not transcript["messages"][4]["content"][0]["content"].startswith("error")  # no arguments: the tool runs
+    assert pred["usage"]["tool_calls"] == 2 and transcript["stop_reason"] == "submitted"
+    messages = [{"role": "user", "content": [{"type": "text", "text": "the data"}]}]
+    tokens = {"input": 0, "output": 0}
+    local = model(FakeOllama(reply(call("submit_diagnosis", "{not json")), reply(call("submit_diagnosis", ANSWER))))
+    pred, stop = submit_round(local, "sys", messages, Snap(), "INC-001", {"name": "dump-all", "version": "1"}, tokens)
+    assert stop == "submitted" and pred["origin_candidates"] == ["payment", "checkout"]
+    assert messages[2]["content"][0]["is_error"] is True and "malformed" in messages[2]["content"][0]["content"]
 
 
 def test_the_request_fixes_the_context_temperature_seed_and_never_lets_ollama_truncate():
@@ -101,24 +134,59 @@ def overflowing(prompt_eval_count, eval_count, done_reason="stop"):
     return chat
 
 
-@pytest.mark.parametrize("fake, reason, says", [
-    (FakeOllama(ratio=1000), "context_overflow", "exceeds the context length"),  # Ollama refuses (truncate: false)
-    (FakeOllama(chat=overflowing(32_000, 768)), "context_overflow", "reached num_ctx"),
-    (FakeOllama(chat=overflowing(1000, 50, "length")), "context_overflow", "before num_predict"),
-    (FakeOllama(chat=overflowing(None, 50)), "context_unverified", "prompt_eval_count"),
-    (FakeOllama(loaded_ctx=4096), "context_unverified", "loaded with a context of 4096"),
-    (FakeOllama(digest="cd" * 32), "pin_mismatch", "digest"),  # another model under the same tag
+@pytest.mark.parametrize("fake, size, reason, guard, says", [
+    (FakeOllama(ratio=1000), 400, "context_overflow", "server", "exceeds the context length"),  # truncate: false
+    (FakeOllama(chat=overflowing(32_000, 768)), 400, "context_overflow", "count_at_num_ctx", "reached num_ctx"),
+    (FakeOllama(chat=overflowing(1000, 50, "length")), 400, "context_overflow", "length_stop", "before num_predict"),
+    (FakeOllama(chat=overflowing(None, 50)), 400, "context_unverified", "count_missing", "prompt_eval_count"),
+    (FakeOllama(chat=overflowing(0, 50)), 400, "context_unverified", "count_missing", "prompt_eval_count"),
+    # a server that drops or cuts what it was sent: caught without trusting truncate: false
+    (FakeOllama(truncating=True), 200_000, "context_unverified", "sent_proxy", "above num_ctx"),
+    (FakeOllama(chat=overflowing(40, 5)), 4_000, "context_unverified", "count_floor", "below half"),
+    (FakeOllama(loaded_ctx=4096), 400, "context_unverified", "loaded_context", "loaded with a context of 4096"),
+    (FakeOllama(digest="cd" * 32), 400, "pin_mismatch", None, "digest"),  # another model under the same tag
 ])
-def test_a_context_overflow_is_a_call_error_never_a_silently_truncated_reply(fake, reason, says):
+def test_a_context_overflow_is_a_call_error_never_a_silently_truncated_reply(fake, size, reason, guard, says):
     with pytest.raises(CallError) as e:
-        model(fake).complete("sys", [{"role": "user", "content": "x" * 400}], [TOOL])
+        model(fake).complete("sys", [{"role": "user", "content": "x" * size}], [TOOL])
     assert e.value.reason == reason and says in e.value.detail
+    assert getattr(e.value, "guard", None) == guard  # which check caught it (the probe's self-test needs "server")
     assert reason not in RETRYABLE  # deterministic: retrying the same request overflows again (decision 029)
+
+
+def test_the_sent_proxy_tokens_count_what_reaches_the_prompt_but_not_earlier_thinking():
+    from agent.ollama import sent_proxy_tokens, to_ollama_messages, to_ollama_tools
+    from collect.snapshot import proxy_tokens
+
+    messages = [{"role": "user", "content": "a" * 400},
+                {"role": "assistant", "content": [{"type": "thinking", "thinking": "t" * 4000},
+                                                  {"type": "tool_use", "id": "toolu_000_0", "name": "search_spans",
+                                                   "input": {"text": "b" * 400}}]},
+                {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_000_0", "content": "c" * 400}]}]
+    sent = sent_proxy_tokens(to_ollama_messages("s" * 400, messages), to_ollama_tools([TOOL]))
+    assert 400 <= sent < 1000  # system, user text, tool call and result, tool schema; a template may drop old thinking
+    assert sent >= proxy_tokens("a" * 400 + "b" * 400 + "c" * 400 + "s" * 400)
 
 
 def test_an_output_capped_by_num_predict_is_returned_like_a_max_tokens_stop():
     out = model(FakeOllama(chat=overflowing(1000, 1024, "length"))).complete("sys", [{"role": "user", "content": "x"}], [])
     assert out["stop_reason"] == "max_tokens" and out["content"] == [{"type": "text", "text": "x"}]
+
+
+def test_the_model_is_unloaded_and_its_absence_confirmed():
+    from agent.ollama import unload
+
+    fake = FakeOllama(reply(content="ok"))
+    model(fake).complete("sys", [{"role": "user", "content": "hi"}], [])
+    assert fake.loaded == 32_768
+    assert unload(fake, MODEL, sleep=lambda s: None) is None and fake.loaded is None
+    assert fake.unloads() == [{"model": MODEL, "messages": [], "keep_alive": 0, "stream": False}]
+    sticky = FakeOllama(reply(content="ok"), sticky=True)
+    model(sticky).complete("sys", [{"role": "user", "content": "hi"}], [])
+    assert "still loaded" in unload(sticky, MODEL, sleep=lambda s: None)
+    down = FakeOllama()
+    down.down = True
+    assert "cannot reach" in unload(down, MODEL, sleep=lambda s: None)  # reported, never raised (it runs in a finally)
 
 
 def test_api_and_transport_errors_keep_their_retryable_reasons():

@@ -4,12 +4,16 @@
 - Loopback only: the transport refuses any host but 127.0.0.1, localhost (resolving to loopback only) and ::1, uses
   http.client directly (no proxy settings) and the pin check refuses Ollama's cloud (remote) models, so this adapter can
   never reach a remote or paid service.
-- Never a silently truncated call: the request sets truncate and shift to false (Ollama then errors instead of dropping
-  old messages or shifting the context), and every reply is checked (prompt_eval_count present, prompt + output below
-  num_ctx, a "length" stop only at num_predict, /api/ps shows the model loaded with exactly num_ctx and the pinned digest).
-  A failed check is a CallError whose reason is not retryable (decision 023 §5 / 026 #17 retry only API and transport errors).
+- Never a silently truncated call: the request sets truncate and shift to false (Ollama is expected to error instead of
+  dropping old messages or shifting the context; the probe's self-test confirms it on this Ollama), and every reply is
+  checked without trusting that: a prompt_eval_count is present, the proxy tokens sent are not above num_ctx, the count is
+  not below half of them, prompt + output stay below num_ctx, a "length" stop comes only at num_predict, and /api/ps shows
+  the model loaded with exactly num_ctx and the pinned digest. A failed check is a CallError whose reason is not retryable
+  (decision 023 §5 / 026 #17 retry only API and transport errors); its `guard` names the check (the probe needs "server").
 - Pinning: the model digest (/api/tags, the manifest digest that names the weights, template and parameters by sha256)
-  and the Ollama version are checked against eval/llm_methods.json before a run and before every incident.
+  and the Ollama version are checked against eval/llm_methods.json at the start of a run and before every incident's
+  attempt (eval.runner), never inside an attempt.
+- unload(): the model leaves memory (keep_alive 0, confirmed by /api/ps) before a run or probe ends, inside its heavy lock.
 """
 
 from __future__ import annotations
@@ -19,10 +23,12 @@ import ipaddress
 import json
 import re
 import socket
+import time
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from agent.harness import CallError
+from collect.snapshot import proxy_tokens
 
 DEFAULT_URL = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT_S = 3600.0
@@ -32,6 +38,8 @@ CONTEXT_UNVERIFIED = "context_unverified"  # the reply cannot be shown to be unt
 PIN_MISMATCH = "pin_mismatch"  # another model is loaded under the tag
 REMOTE_MODEL = "remote_model"  # Ollama forwarded the call to a remote (cloud) model
 CONTEXT_ERROR = re.compile(r"context (length|window|size)|exceeds? .*context", re.IGNORECASE)
+COUNT_FLOOR = 0.5  # a full prompt is never evaluated as fewer real tokens than half its proxy tokens (decision 029 §2)
+UNLOAD_WAIT_S = 10.0
 TIMINGS = ("done_reason", "total_duration", "load_duration", "prompt_eval_count", "prompt_eval_duration", "eval_count",
            "eval_duration")
 
@@ -149,9 +157,26 @@ def to_ollama_tools(tools: list[dict]) -> list[dict]:
                                               "parameters": t["input_schema"]}} for t in tools]
 
 
+def _arguments(value) -> tuple[dict, str | None]:
+    """A tool call's arguments as an object, and the raw text when they are not one. None (no arguments: Ollama writes
+    an empty map as null) is an empty object; a string is parsed; anything that is not an object is kept raw."""
+    if value is None:
+        return {}, None
+    parsed = value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return {}, value
+    if isinstance(parsed, dict):
+        return parsed, None
+    return {}, value if isinstance(value, str) else json.dumps(value)
+
+
 def to_content(message: dict, turn: int) -> list[dict]:
     """An Ollama reply as content blocks. Tool-call ids are ours and deterministic (toolu_<turn>_<i>, unique in a
-    conversation); string arguments are parsed, unparsable ones kept beside an empty input for the method to reject."""
+    conversation). Arguments that are not a JSON object keep an empty `input` (the Anthropic shape) and their raw text in
+    `unparsed_arguments`, which the harness rejects as a malformed answer or argument (decision 020 §3, 029 §1)."""
     blocks: list[dict] = []
     if thinking := message.get("thinking"):
         blocks.append({"type": "thinking", "thinking": thinking})
@@ -159,18 +184,29 @@ def to_content(message: dict, turn: int) -> list[dict]:
         blocks.append({"type": "text", "text": text})
     for i, tool_call in enumerate(message.get("tool_calls") or []):
         fn = tool_call.get("function") or {}
-        args, raw = fn.get("arguments"), None
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except ValueError:
-                args, raw = None, fn.get("arguments")
-        block = {"type": "tool_use", "id": f"toolu_{turn:03d}_{i}", "name": fn.get("name") or "",
-                 "input": args if isinstance(args, dict) else {}}
-        if raw is not None or not isinstance(args, dict):
-            block["unparsed_arguments"] = raw if raw is not None else json.dumps(args)
+        args, raw = _arguments(fn.get("arguments"))
+        block = {"type": "tool_use", "id": f"toolu_{turn:03d}_{i}", "name": fn.get("name") or "", "input": args}
+        if raw is not None:
+            block["unparsed_arguments"] = raw
         blocks.append(block)
     return blocks
+
+
+def sent_proxy_tokens(messages: list[dict], tools: list[dict]) -> int:
+    """Proxy tokens of what an Ollama chat request puts in the prompt: message text, tool calls and results, tool schemas.
+    Earlier thinking is left out (a chat template may drop it), so this is a floor of what the prompt holds."""
+    texts = [json.dumps(tools)] if tools else []
+    for m in messages:
+        texts.append(m.get("content") or "")
+        texts += [json.dumps((c.get("function") or {}).get("arguments")) for c in m.get("tool_calls") or []]
+    return proxy_tokens("\n".join(texts))
+
+
+def _guarded(reason: str, guard: str, detail: str) -> CallError:
+    """A CallError of the truncation guard; `guard` names the check that caught it ("server": Ollama refused itself)."""
+    error = CallError(reason, detail)
+    error.guard = guard
+    return error
 
 
 def _count(x) -> bool:
@@ -212,21 +248,32 @@ class OllamaModel:
 
     def complete(self, system: str, messages: list[dict], tools: list[dict]) -> dict:
         turn = sum(1 for m in messages if m.get("role") == "assistant")
-        status, data = self._call("POST", "/api/chat", self.request(system, messages, tools))
+        body = self.request(system, messages, tools)
+        sent = sent_proxy_tokens(body["messages"], body.get("tools") or [])
+        status, data = self._call("POST", "/api/chat", body)
         if status != 200 or data.get("error"):
             message = str(data.get("error") or "")
-            reason = CONTEXT_OVERFLOW if CONTEXT_ERROR.search(message) else "api_error"
-            raise CallError(reason, f"HTTP {status}: {message}"[:300])
+            if CONTEXT_ERROR.search(message):
+                raise _guarded(CONTEXT_OVERFLOW, "server", f"HTTP {status}: {message}"[:300])
+            raise CallError("api_error", f"HTTP {status}: {message}"[:300])
         if data.get("remote_model") or data.get("remote_host"):
             raise CallError(REMOTE_MODEL, f"Ollama answered from a remote model {data.get('remote_model')!r}: local only")
-        prompt, out = data.get("prompt_eval_count"), data.get("eval_count", 0)
+        prompt, out = data.get("prompt_eval_count"), data.get("eval_count", 0)  # Ollama omits a count of 0
         if not _count(prompt) or prompt == 0 or not _count(out):
-            raise CallError(CONTEXT_UNVERIFIED, f"the reply has no usable prompt_eval_count / eval_count ({prompt!r}, {out!r})")
+            raise _guarded(CONTEXT_UNVERIFIED, "count_missing",
+                           f"the reply has no usable prompt_eval_count / eval_count ({prompt!r}, {out!r})")
+        if sent > self.num_ctx:  # proxy tokens undercount telemetry: a reply to this was cut, or cannot be shown not to be
+            raise _guarded(CONTEXT_UNVERIFIED, "sent_proxy", f"{sent} proxy tokens were sent, above num_ctx {self.num_ctx}, "
+                                                             f"yet a reply came back (prompt_eval_count {prompt})")
+        if prompt < COUNT_FLOOR * sent:
+            raise _guarded(CONTEXT_UNVERIFIED, "count_floor", f"prompt_eval_count {prompt} is below half of the {sent} proxy "
+                                                              "tokens sent: part of the prompt was dropped or not counted")
         if prompt + out >= self.num_ctx:
-            raise CallError(CONTEXT_OVERFLOW, f"prompt {prompt} + output {out} tokens reached num_ctx {self.num_ctx}")
+            raise _guarded(CONTEXT_OVERFLOW, "count_at_num_ctx",
+                           f"prompt {prompt} + output {out} tokens reached num_ctx {self.num_ctx}")
         if data.get("done_reason") == "length" and out < self.num_predict:
-            raise CallError(CONTEXT_OVERFLOW, f"generation stopped by length after {out} tokens, before num_predict "
-                                              f"{self.num_predict}: the context ran out")
+            raise _guarded(CONTEXT_OVERFLOW, "length_stop", f"generation stopped by length after {out} tokens, before "
+                                                            f"num_predict {self.num_predict}: the context ran out")
         self._check_loaded()
         content = to_content(data.get("message") or {}, turn)
         stop = ("max_tokens" if data.get("done_reason") == "length"
@@ -239,12 +286,32 @@ class OllamaModel:
         status, data = self._call("GET", "/api/ps")
         entry = next((m for m in (data.get("models") or []) if self.model in (m.get("name"), m.get("model"))), None)
         if status != 200 or entry is None:
-            raise CallError(CONTEXT_UNVERIFIED, f"/api/ps does not list {self.model} as loaded (HTTP {status})")
+            raise _guarded(CONTEXT_UNVERIFIED, "loaded_context", f"/api/ps does not list {self.model} as loaded (HTTP {status})")
         if entry.get("context_length") != self.num_ctx:
-            raise CallError(CONTEXT_UNVERIFIED, f"{self.model} is loaded with a context of {entry.get('context_length')}, "
-                                                f"not num_ctx {self.num_ctx}")
+            raise _guarded(CONTEXT_UNVERIFIED, "loaded_context", f"{self.model} is loaded with a context of "
+                                                                 f"{entry.get('context_length')}, not num_ctx {self.num_ctx}")
         if self.digest is not None and _digest(entry.get("digest")) != self.digest:
             raise CallError(PIN_MISMATCH, f"the loaded {self.model} has digest {entry.get('digest')}, not {self.digest}")
+
+
+def unload(transport: Transport, model: str, *, wait_s: float | None = None, sleep=time.sleep) -> str | None:
+    """Unload `model` (an empty chat with keep_alive 0) and confirm with /api/ps that it left memory, so nothing of a run
+    or probe outlives its heavy lock (decision 029). Returns None when confirmed, otherwise why not; it never raises
+    (it runs in a finally, after the result or the error that matters)."""
+    wait_s = UNLOAD_WAIT_S if wait_s is None else wait_s
+    tries = int(wait_s / 0.5) + 1
+    try:
+        transport("POST", "/api/chat", {"model": model, "messages": [], "keep_alive": 0, "stream": False})
+        for attempt in range(tries):
+            _, data = transport("GET", "/api/ps")
+            if not any(model in (m.get("name"), m.get("model")) for m in data.get("models") or []):
+                return None
+            if attempt + 1 < tries:
+                sleep(0.5)
+        return (f"{model} is still loaded after an unload request ({wait_s:g} s): stop the server "
+                "(tools/with-local-ollama does) before the heavy lock is released")
+    except (OSError, http.client.HTTPException) as e:
+        return f"cannot reach the local Ollama server to unload {model}: {type(e).__name__}: {e}"
 
 
 # ---------------------------------------------------------------- pinning (decision 029)

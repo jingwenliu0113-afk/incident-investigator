@@ -87,7 +87,8 @@ def fit_problems(config: dict) -> list[str]:
 def start_llm(config: dict | None, project_dir: Path | None) -> dict | None:
     """The start of an LLM run on the local model (decision 029), before any snapshot is opened or anything written: the
     Mac heavy lock (a local model run is a heavy workload, MACHINE_POLICY), the pin check against the running Ollama and
-    a loud report of worst cases above num_ctx. Returns the runtime for run_config.json; None for no local config."""
+    a loud report of worst cases above num_ctx. Returns the runtime for run_config.json; None for no local config.
+    The run keeps this `config` to the end: a config file changed during the run changes nothing in it."""
     if not config or config.get("provider") != "ollama":
         return None
     import sys
@@ -126,12 +127,40 @@ def run_llm(kind: str, snapshot, incident_id: str, model, config: dict, *, cache
     raise ValueError(f"not an LLM method: {kind}")
 
 
-def _llm(kind: str):
-    def run(snapshot, incident_id):
-        from agent.ollama import model_from_config
+def pinned_model(config: dict) -> dict:
+    """decision 029: the pin check before an incident's attempt, against the configuration read at the start of the run.
+    It runs before the attempt starts, never inside it: an unreachable server or another model stops the run (ValueError)
+    without using a held-out attempt (026 #17), and the run can go on once the server or the pinned model is back.
+    Returns the keyword arguments of an LLM method in METHODS."""
+    from agent.ollama import model_from_config
 
-        config = load_llm_config()
-        model, _ = model_from_config(config)  # the pin is checked again before every incident
+    try:
+        model, _ = model_from_config(config)
+    except ValueError as e:
+        raise ValueError(f"{e}; the run stops before the incident's next attempt starts, so no attempt is used "
+                         "(decision 029)") from e
+    return {"model": model, "config": config}
+
+
+def finish_llm(config: dict | None) -> None:
+    """decision 029: the local model leaves memory before the run (and with it the heavy lock) ends; reported, never raised."""
+    if not config or config.get("provider") != "ollama":
+        return
+    import sys
+
+    import agent.ollama as ollama
+
+    o = config["ollama"]
+    if problem := ollama.unload(ollama.default_transport(o["url"], o.get("timeout_s", ollama.DEFAULT_TIMEOUT_S)),
+                                config["model"]):
+        print(f"WARNING (decision 029): {problem}", file=sys.stderr)
+
+
+def _llm(kind: str):
+    def run(snapshot, incident_id, *, model=None, config=None):
+        if model is None or config is None:
+            raise ValueError(f"{kind} runs only through run_method, which takes the heavy lock and checks the pinned model "
+                             "at the start of the run and before every incident's attempt (decision 029)")
         cache = Path(snapshot.path).parents[2] / "cache"  # <data root>/cache, beside the Agent tools' index (decision 019)
         return run_llm(kind, snapshot, incident_id, model, config, cache_root=cache)
     return run
@@ -296,6 +325,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
             snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
             attempt = len({e["attempt"] for e in events if e["event"] == "start"})
             while attempt < HELDOUT_MAX_ATTEMPTS:
+                kw = pinned_model(config) if llm else {}  # decision 029: before the attempt starts (raises: no attempt used)
                 attempt += 1
                 _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "start", "at": _now()})
 
@@ -304,7 +334,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
                                       "detail": detail[:300], "usage": usage, "at": _now()})
 
                 try:
-                    out = METHODS[method](snapshot, inc)
+                    out = METHODS[method](snapshot, inc, **kw)
                 except CallError as e:
                     if e.reason in RETRYABLE:
                         end(e.reason, e.detail, e.usage)
@@ -330,6 +360,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
         return [i["incident_id"] for i in listing["doc"]["incidents"]
                 if not (out_dir / f"{i['incident_id']}.json").exists()]
     finally:
+        finish_llm(config if llm else None)
         try:
             if json.loads(lock.read_text()).get("token") == token:  # only this process's own lock
                 lock.unlink()
@@ -364,17 +395,21 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
                   "budgets": method_budgets(method, config), "scope": SCOPES.get(method), **({"llm": llm} if llm else {})}
     (out_dir / "run_config.json").write_text(json.dumps(run_config, indent=2) + "\n")
     written = []
-    for inc, _ in incidents_in(layout, split):
-        snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
-        out = METHODS[method](snapshot, inc)
-        pred, transcript = out if isinstance(out, tuple) else (out, None)
-        if problems := check_prediction(pred):
-            raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
-        path = out_dir / f"{inc}.json"
-        path.write_text(json.dumps(pred, indent=2) + "\n")
-        if transcript is not None:  # LLM methods: messages, exposure, stop reason (decisions 020, 022)
-            (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
-        written.append(path)
+    try:
+        for inc, _ in incidents_in(layout, split):
+            kw = pinned_model(config) if llm else {}  # decision 029: the pin check before every incident
+            snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
+            out = METHODS[method](snapshot, inc, **kw)
+            pred, transcript = out if isinstance(out, tuple) else (out, None)
+            if problems := check_prediction(pred):
+                raise ValueError(f"{method} wrote an invalid prediction for {inc}: {problems[:5]}")
+            path = out_dir / f"{inc}.json"
+            path.write_text(json.dumps(pred, indent=2) + "\n")
+            if transcript is not None:  # LLM methods: messages, exposure, stop reason (decisions 020, 022)
+                (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
+            written.append(path)
+    finally:
+        finish_llm(config if llm else None)
     return written
 
 

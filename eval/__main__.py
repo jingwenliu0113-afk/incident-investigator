@@ -7,8 +7,8 @@
     python -m eval compare --method agent --against stat-anomaly --set pilot   # paired differences (decision 023 §7)
     python -m eval gate --method agent --against stat-anomaly --set heldout    # SPEC Gate from written scores (023 §7)
     python -m eval demo                           # 2 minutes: the statistical baseline on the SYNTHETIC sample (decision 027)
-    ./tools/with-mac-lock uv run python -m eval local-probe --model <ollama tag> [--num-ctx N] [--think]
-        [--context-sizes 8000,32000,100000] [--out PATH]   # one local model on the SYNTHETIC sample (decision 029)
+    ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model <ollama tag> [--num-ctx N]
+        [--think] [--context-sizes 8000,32000,100000] [--out PATH]   # one local model on the SYNTHETIC sample (decision 029)
 
 `gate` reads only scores.json and the compare outputs (it never runs a method) and writes gate.json / gate.md next to
 the Agent's scores: the Gate decision on the held-out set, a diagnostic only (NOT a Gate decision) on the Pilot.
@@ -17,7 +17,8 @@ Predictions and scores go to data/external/results/<set>/<method>/ (gitignored);
 Worksheets and gold judgments stay on the ground-truth side next to the label. The demo only reads data/samples/synthetic/
 and writes nothing; its numbers are not results. The local probe also runs only on that sample (dump-all, retrieval
 and the Agent with one local Ollama model, a context-guard self-test and prefill / decode speed on generated filler),
-needs the Mac heavy lock, writes its JSON to stdout or --out (never under data/) and is not a result either.
+needs the Mac heavy lock, writes its JSON to stdout or --out (never under data/) and is not a result either; it exits 3
+when the local Ollama did not refuse a prompt above num_ctx itself (GUARD FAILED; the report is still written).
 """
 
 from __future__ import annotations
@@ -109,7 +110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             result = score_method(layout, ns.method, ns.split, out, project_dir=PROJECT_DIR)
             print(json.dumps({"aggregate": result["aggregate"], "evidence": result["evidence"]}, indent=2))
-    except (ValueError, OSError, LookupError, RuntimeError, CallError) as e:  # CallError: an API / transport error (023 §5)
+    except (ValueError, OSError, LookupError, RuntimeError, CallError) as e:  # CallError: a failed model call (023 §5, 029 §2)
         print(f"error: {e}", file=sys.stderr)
         return 2
     return 0
@@ -142,6 +143,10 @@ def _local_probe(ns) -> int:
         ns.out.parent.mkdir(parents=True, exist_ok=True)
         ns.out.write_text(text)
     print(FOOTER, file=sys.stderr)
+    if not report["guard_selftest"]["passed"]:  # the report is written; a person decides (decision 029 §2)
+        print("GUARD FAILED: the local Ollama did not refuse a prompt above num_ctx; do not run the LLM methods on it "
+              "(see guard_selftest and warnings)", file=sys.stderr)
+        return 3
     return 0
 
 

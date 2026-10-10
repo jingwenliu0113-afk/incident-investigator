@@ -162,3 +162,111 @@ def test_a_held_out_run_records_the_same_runtime_and_resumes_only_with_it(tmp_pa
     monkeypatch.setattr(runner, "LLM_CONFIG", write(tmp_path, approved_config(num_predict=4096), "other.json"))
     with pytest.raises(ValueError, match="run_config"):  # another runtime is another run (decision 023 §5, 024)
         run_method(layout, "dump-all", "heldout", out, project_dir=project)
+
+
+def test_an_llm_method_runs_only_through_run_method():
+    from eval.runner import METHODS
+
+    for method in LLM_METHODS:  # the heavy lock and the pin check come with the run, never with a bare call
+        with pytest.raises(ValueError, match="run_method"):
+            METHODS[method](None, "INC-001")
+
+
+def test_a_run_uses_the_configuration_it_read_at_its_start(tmp_path, monkeypatch):
+    # a config file changed during a run (e.g. a merge in the checkout) changes nothing in that run (decision 024 / 029)
+    layout = stored(tmp_path / "data")
+    fake = FakeOllama(chat=answering)
+    local(monkeypatch, tmp_path, fake)
+    real, calls = runner.llm_fit, []
+
+    def rewriting(*args):
+        calls.append(args)
+        if len(calls) == 2:  # the worst-case report at the end of start_llm: the start is done, no incident has run
+            runner.LLM_CONFIG.write_text(json.dumps(approved_config(think=True, num_ctx=139_264)))
+        return real(*args)
+
+    monkeypatch.setattr(runner, "llm_fit", rewriting)
+    run_method(layout, "agent", "pilot", tmp_path / "results")
+    run_config = json.loads((tmp_path / "results" / "pilot" / "agent" / "run_config.json").read_text())
+    assert run_config["llm"] == RECORD and len(calls) == 2 and fake.chats()
+    assert all(c["options"]["num_ctx"] == 196_608 and c["think"] is False for c in fake.chats())
+
+
+def test_a_server_down_before_a_held_out_attempt_stops_the_run_without_using_the_attempt(tmp_path, monkeypatch):
+    # decision 029 / 026 #17: the pin check runs before the attempt starts; an unreachable server or another model stops
+    # the run with no start event, so no held-out slot is closed by an infrastructure fault
+    from test_eval_heldout import heldout_set, ledger
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    fake = FakeOllama(chat=answering, down_after=3)  # up for the check at the start of the run, down before INC-050
+    local(monkeypatch, tmp_path, fake)
+    with pytest.raises(ValueError, match="cannot reach the local Ollama server.*no attempt"):
+        run_method(layout, "dump-all", "heldout", out, project_dir=project)
+    assert ledger(out, "dump-all") == [] and not (out / "heldout" / "dump-all" / "run.lock").exists()
+    fake.down_after = None  # the server is back
+    assert run_method(layout, "dump-all", "heldout", out, project_dir=project) == []
+    assert [(e["incident_id"], e["attempt"], e["event"], e.get("outcome")) for e in ledger(out, "dump-all")] == [
+        ("INC-050", 1, "start", None), ("INC-050", 1, "end", "ok"), ("INC-051", 1, "start", None), ("INC-051", 1, "end", "ok")]
+
+
+def test_a_server_that_dies_during_a_held_out_call_leaves_the_retry_for_when_it_is_back(tmp_path, monkeypatch):
+    from test_eval_heldout import heldout_set, ledger
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    fake = FakeOllama(chat=answering, down_after=6)  # start check (3) and INC-050's check (3) answer; its call fails
+    local(monkeypatch, tmp_path, fake)
+    with pytest.raises(ValueError, match="cannot reach"):
+        run_method(layout, "dump-all", "heldout", out, project_dir=project)
+    events = [(e["incident_id"], e["attempt"], e["event"], e.get("outcome")) for e in ledger(out, "dump-all")]
+    assert events == [("INC-050", 1, "start", None), ("INC-050", 1, "end", "transport_error")]  # attempt 2 not started
+    fake.down_after = None
+    assert run_method(layout, "dump-all", "heldout", out, project_dir=project) == []
+    assert [(e["attempt"], e.get("outcome")) for e in ledger(out, "dump-all") if e["incident_id"] == "INC-050"] == [
+        (1, None), (1, "transport_error"), (2, None), (2, "ok")]
+
+
+def test_a_model_swapped_between_held_out_incidents_stops_the_run_and_closes_no_incident(tmp_path, monkeypatch):
+    from test_eval_heldout import heldout_set, ledger
+
+    project, layout, out = heldout_set(tmp_path, monkeypatch)
+    fake = FakeOllama(chat=answering)
+    local(monkeypatch, tmp_path, fake)
+    real, seen = ollama.server_facts, []
+
+    def swapped(transport, model):
+        seen.append(model)
+        facts = real(transport, model)
+        return {**facts, "digest": "sha256:" + "cd" * 32} if len(seen) == 3 else facts  # before INC-051
+
+    monkeypatch.setattr(ollama, "server_facts", swapped)
+    with pytest.raises(ValueError, match="digest"):
+        run_method(layout, "dump-all", "heldout", out, project_dir=project)
+    assert [e["incident_id"] for e in ledger(out, "dump-all")] == ["INC-050", "INC-050"]  # INC-051: no attempt used
+    monkeypatch.setattr(ollama, "server_facts", real)
+    assert run_method(layout, "dump-all", "heldout", out, project_dir=project) == []
+
+
+def test_the_local_model_is_unloaded_when_a_run_ends(tmp_path, monkeypatch, capsys):
+    # the model and its num_ctx KV cache leave memory before the run (and with it the heavy lock) ends (decision 029)
+    from test_eval_heldout import heldout_set
+
+    layout = stored(tmp_path / "data")
+    fake = FakeOllama(chat=answering)
+    local(monkeypatch, tmp_path, fake)
+    run_method(layout, "dump-all", "pilot", tmp_path / "results")
+    assert len(fake.unloads()) == 1 and fake.loaded is None
+    failing = FakeOllama(chat=lambda body, prompt: (400, {"error": "the input length exceeds the context length"}))
+    local(monkeypatch, tmp_path, failing)
+    with pytest.raises(ollama.CallError):
+        run_method(layout, "agent", "pilot", tmp_path / "results")
+    assert len(failing.unloads()) == 1  # also when the run stops
+    sticky = FakeOllama(chat=answering, sticky=True)
+    local(monkeypatch, tmp_path, sticky)
+    monkeypatch.setattr(ollama, "UNLOAD_WAIT_S", 0)
+    run_method(layout, "retrieval", "pilot", tmp_path / "results")
+    assert "still loaded" in capsys.readouterr().err  # reported loudly, the run's results stand
+    project, layout, out = heldout_set(tmp_path / "h", monkeypatch)
+    fake = FakeOllama(chat=answering)
+    local(monkeypatch, tmp_path, fake)
+    assert run_method(layout, "dump-all", "heldout", out, project_dir=project) == []
+    assert len(fake.unloads()) == 1 and fake.loaded is None

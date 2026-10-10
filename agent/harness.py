@@ -18,10 +18,13 @@ MAX_CORRECTIONS = 2
 
 
 class CallError(Exception):
-    """A model.complete call that failed (decision 023 §5). The adapter raises it for API and transport errors only, with
-    `reason` taken from the stop reason it saw (HTTP status or error type, never the output content); the method entry
-    points set `usage` to what was used before the failure (tokens_in, tokens_out, cost_usd, latency_s) and re-raise.
-    It can only come before a prediction is accepted: every method stops calling once one is."""
+    """A model.complete call that failed (decision 023 §5), with `reason` taken from the stop reason the adapter saw (HTTP
+    status, error type or the reply's counts, never the output content). Only "api_error" and "transport_error" are
+    retried on the held-out set (eval.runner.RETRYABLE). The local adapter (decision 029) also raises "context_overflow"
+    and "context_unverified" (a call cut, or not shown to be uncut, by the context), "pin_mismatch" (another model under
+    the pinned tag) and "remote_model"; none is retried. The method entry points set `usage` to what was used before the
+    failure (tokens_in, tokens_out, cost_usd, latency_s) and re-raise. It can only come before a prediction is accepted:
+    every method stops calling once one is."""
 
     def __init__(self, reason: str, detail: str = "", usage: dict | None = None):
         super().__init__(f"{reason}: {detail}" if detail else reason)
@@ -68,8 +71,17 @@ def _abstain(incident_id: str, method: dict) -> dict:
             "user_symptom": {"kinds": []}, "evidence": []}
 
 
+def _arguments(block: dict):
+    """A tool_use block's arguments. An adapter that could not read the model's arguments as a JSON object keeps the raw
+    text in `unparsed_arguments` (decision 029 §1); it is passed on as it is, so it is rejected like any malformed answer
+    or argument (decision 020 §3), never read as an empty one."""
+    return block["unparsed_arguments"] if "unparsed_arguments" in block else (block.get("input") or {})
+
+
 def _prediction(answer: dict, incident_id: str, method: dict, start_ns: int, services) -> tuple[dict | None, list[str]]:
     """The submitted answer as a decision-013 prediction (evidence times converted to the data clock), and its problems."""
+    if not isinstance(answer, dict):
+        return None, ["the answer is malformed: its arguments are not a JSON object"]
     try:
         evidence = []
         for e in answer.get("evidence") or []:
@@ -116,7 +128,7 @@ def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: 
             if block.get("type") != "tool_use":
                 continue
             if block["name"] == "submit_diagnosis":
-                candidate, problems = _prediction(block.get("input") or {}, incident_id, method,
+                candidate, problems = _prediction(_arguments(block), incident_id, method,
                                                   snapshot.window["start_ns"], snapshot.services)
                 if candidate is not None and pred is None:
                     pred = candidate
@@ -133,7 +145,7 @@ def investigate(snapshot, incident_id: str, model, *, cache_root: Path, method: 
                                 "content": "error: no more tool calls; call submit_diagnosis"})
             else:
                 results.append({"type": "tool_result", "tool_use_id": block["id"],
-                                "content": session.call(block["name"], block.get("input") or {})})
+                                "content": session.call(block["name"], _arguments(block))})
         if pred is not None:
             stop = "submitted_after_limit" if final_chance else "submitted"
         elif corrections > MAX_CORRECTIONS:
@@ -181,7 +193,7 @@ def submit_round(model, system: str, messages: list[dict], snapshot, incident_id
             elif pred is not None:
                 content, error = "ignored: a diagnosis was already accepted", False
             else:
-                candidate, issues = _prediction(b.get("input") or {}, incident_id, method, snapshot.window["start_ns"],
+                candidate, issues = _prediction(_arguments(b), incident_id, method, snapshot.window["start_ns"],
                                                 snapshot.services)
                 pred, problems = candidate, problems + issues
                 content = "accepted" if candidate else ("error: the diagnosis has problems, fix them and submit again: "

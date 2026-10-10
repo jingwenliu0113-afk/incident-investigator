@@ -42,19 +42,39 @@ def answering(body, prompt):
 
 
 class FakeOllama:
-    """The transport (method, path, body) -> (status, json) of a local Ollama with one installed model."""
+    """The transport (method, path, body) -> (status, json) of a local Ollama with one installed model.
+
+    truncating: ignores truncate: false like a server that silently drops old messages (and cuts a single prompt) to fit
+    num_ctx. sticky: an unload request (empty messages, keep_alive 0) leaves the model loaded. down_after: every request
+    after that many fails like a server that is not running (ConnectionRefusedError); `down` does so at once."""
 
     def __init__(self, *replies, model=MODEL, digest=DIGEST_HEX, version=VERSION, context_length=262_144,
-                 capabilities=("completion", "tools", "thinking"), ratio=1.25, loaded_ctx=None, chat=None, extra=None):
+                 capabilities=("completion", "tools", "thinking"), ratio=1.25, loaded_ctx=None, chat=None, extra=None,
+                 truncating=False, sticky=False, down_after=None):
         self.replies, self.requests, self.loaded = list(replies), [], None
         self.model, self.digest, self.version, self.context_length = model, digest, version, context_length
         self.capabilities, self.ratio, self.loaded_ctx, self.chat, self.extra = capabilities, ratio, loaded_ctx, chat, extra
+        self.truncating, self.sticky, self.down_after, self.down = truncating, sticky, down_after, False
 
     def prompt_tokens(self, body) -> int:
         return math.ceil(proxy_tokens(json.dumps(body["messages"]) + json.dumps(body.get("tools") or [])) * self.ratio)
 
+    def _truncated(self, body) -> int:
+        """What a truncating server evaluates: old non-system messages dropped, then the last one cut, to fit num_ctx."""
+        num_ctx, messages = body["options"]["num_ctx"], list(body["messages"])
+        while self.prompt_tokens({**body, "messages": messages}) > num_ctx and sum(m["role"] != "system" for m in messages) > 1:
+            messages.pop(next(i for i, m in enumerate(messages) if m["role"] != "system"))
+        return min(self.prompt_tokens({**body, "messages": messages}), num_ctx - 1)
+
     def __call__(self, method, path, body=None):
         self.requests.append((method, path, body))
+        if self.down or (self.down_after is not None and len(self.requests) > self.down_after):
+            raise ConnectionRefusedError(61, "Connection refused")
+        if path == "/api/chat" and body.get("keep_alive") == 0 and not body.get("messages"):  # Ollama's unload request
+            if not self.sticky:
+                self.loaded = None
+            return 200, {"model": body["model"], "message": {"role": "assistant", "content": ""}, "done": True,
+                         "done_reason": "unload"}
         if path == "/api/version":
             return 200, {"version": self.version}
         if path == "/api/tags":
@@ -73,8 +93,10 @@ class FakeOllama:
             return 200, {"models": models}
         if path == "/api/chat":
             prompt = self.prompt_tokens(body)
-            if prompt > body["options"]["num_ctx"] and body.get("truncate") is False:
-                return 400, {"error": "the input length exceeds the context length"}
+            if prompt > body["options"]["num_ctx"]:
+                if body.get("truncate") is False and not self.truncating:
+                    return 400, {"error": "the input length exceeds the context length"}
+                prompt = self._truncated(body)
             self.loaded = body["options"]["num_ctx"]
             if self.chat is not None:
                 message = self.chat(body, prompt)
@@ -88,7 +110,10 @@ class FakeOllama:
         return 404, {"error": f"unknown path {path}"}
 
     def chats(self):
-        return [b for m, p, b in self.requests if p == "/api/chat"]
+        return [b for m, p, b in self.requests if p == "/api/chat" and b.get("messages")]
+
+    def unloads(self):
+        return [b for m, p, b in self.requests if p == "/api/chat" and not b.get("messages")]
 
 
 def approved_config(**ollama):
