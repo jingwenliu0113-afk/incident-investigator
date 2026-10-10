@@ -2,6 +2,23 @@
 
 ## 目前位置（2026-10-10，LLM 設定批准後）
 
+**2026-10-11 Pilot 上的 LLM 方法執行（qwen3.5 9B，本機；診斷用，不是 Gate 判定）**：
+- retrieval 與 agent 完成並評分（高效能 + AC，10 個 incident 的 latency 都在正式電力下量到）：
+
+  | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 失敗（022） | 平均 latency |
+  |---|---:|---:|---:|---:|---:|---|---:|
+  | stat-anomaly v2 | 0.30 | 0.60 | 0.90 | 0.77 | 0.50 | mechanism 4、rule_limit 4 | — |
+  | retrieval | 0.50 | 0.40 | 0.40 | 0.58 | 0.50 | seen_misread 4、no_answer 2、mechanism 2 | 280 s |
+  | agent | 0.60 | 0.60 | 0.60 | 0.71 | 0.40 | seen_misread 3、no_answer 1 | 422 s |
+
+- **dump-all 停在 INC-004 之後**（2026-10-11 02:27 台北，電力模式變成 0 = 自動；不是本 session 改的，程式依 029 停止）。Pilot 中途停止的執行不評分，
+  背景排程等高效能 + AC 與 heavy lock 後**從頭重跑**（約 4.5 小時：每個 incident 約 27 分鐘），之後 score、compare、gate（診斷）。
+- **Pilot 上看到、還沒處理的方法問題**（看過 Pilot 結果才發現：要改就是 020 / 021「在 Pilot 上修訂一次」的那一次，**由使用者決定**，目前不改）：
+  1. retrieval INC-005、INC-011：模型把概覽的每分鐘列當成證據（`m-cart-10:00` 這種自編的 id），概覽列沒有可引用的 id，更正兩次後放棄作答。
+  2. agent INC-006：重複呼叫同一個查無資料的工具，到回合上限後只回文字、沒有提交（turn_limit → 放棄作答）。
+  3. agent 幾乎只給一個 origin 候選（top3 = top1 = 0.60），stat-anomaly 的 top3 是 0.90。
+- **需要使用者（人工）**：三個 LLM 方法的新引用要補 evidence gold（decision 017；dump-all 完成後 `uv run python -m eval gold-todo --set pilot`，只列新的）。
+
 **Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。
 A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B，decision 029「使用者決定（2026-10-10）：照建議」），`eval/llm_methods.json` 是 `approved`；
 下一步是三個 LLM 方法在 Pilot 上執行（下一步 8.2，主 session、每個方法一次 heavy lock，不需要使用者）。A0 已處理（grafana 的 plugin 下載關掉（decision 028）、
