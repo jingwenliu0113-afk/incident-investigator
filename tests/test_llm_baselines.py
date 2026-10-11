@@ -87,8 +87,8 @@ def test_dump_all_exposure_claims_only_the_overview_rows_that_were_packed():
     _, full = dump_all(Snap(), "INC-001", model, method=METHOD, budget=100_000)
     assert full["exposure"][0] == "stats:*"
     model = Scripted([tool("submit_diagnosis", ANSWER)])
-    _, cut = dump_all(Snap(), "INC-001", model, method=METHOD, budget=60)
-    assert "stats:*" not in cut["exposure"]
+    _, cut = dump_all(Snap(), "INC-001", model, method=METHOD, budget=200)  # 60 before 021's Pilot revision (longer head)
+    assert "stats:*" not in cut["exposure"] and cut["exposure"] == ["stats:checkout:11-11", "stats:payment:0-1"]
     assert all(e.startswith("stats:") and e.count(":") == 2 for e in cut["exposure"])
 
 
@@ -153,3 +153,112 @@ def test_no_text_any_llm_method_sends_names_the_incident_id(tmp_path):
     for model in (dumped, asked, agent):
         text = _model_facing_text(model.calls)
         assert "INC-042" not in text
+
+
+# ---------------------------------------------------------------- decision 021, Pilot revision (user decision 2026-10-11)
+
+MiB = 2**20
+AGENT_INPUTS_SHA256 = "2e45e45a17fd586ac90e5e1632461db59612f98d39ac8543337dcb2e479a4a82"  # before the revision, on Snap()
+
+
+def _overview_before_the_revision(snapshot) -> str:
+    """baselines/overview.py as it was for the original Pilot run (commit a268211), verbatim: the rows must not change."""
+    from collect.derive import container_minute_stats, service_minute_stats
+
+    def _num(x, fmt=".3f"):
+        return "-" if x is None else format(x, fmt)
+
+    spans, containers = service_minute_stats(snapshot)["services"], container_minute_stats(snapshot)["services"]
+    lines = ["## Per service and minute (spans, error spans, p95 of server spans in ms, logs at WARN or above, "
+             "CPU cores used, memory MiB)"]
+    for svc in snapshot.services:
+        s, c = spans.get(svc, {}), containers.get(svc, {})
+        for minute in sorted(set(s) | set(c)):
+            a, b = s.get(minute, {}), c.get(minute, {})
+            mem = b.get("memory")
+            lines.append(f"{svc} +{minute:03d}:00 spans={a.get('spans', 0)} errors={a.get('error_spans', 0)} "
+                         f"p95_ms={_num(a.get('p95_server_ms'))} warn_logs={a.get('warn_logs', 0)} "
+                         f"cpu_cores={_num(b.get('cpu'))} memory_mib={_num(None if mem is None else mem / MiB, '.1f')}")
+    return "\n".join(lines)
+
+
+def _synthetic_snapshot():
+    from pathlib import Path
+
+    from collect.layout import DataLayout
+    from collect.snapshot import open_snapshot
+
+    layout = DataLayout(Path(__file__).resolve().parent.parent / "data/samples/synthetic")
+    return open_snapshot(layout.incident_dir("INC-000") / "normalized", layout)
+
+
+def test_the_overview_says_its_rows_are_not_records_and_keeps_every_row_as_it_was():
+    from baselines.overview import NOTE, overview
+
+    for snap in (Snap(), _synthetic_snapshot()):
+        old, new = _overview_before_the_revision(snap).splitlines(), overview(snap).splitlines()
+        assert new == [old[0], NOTE, *old[1:]]  # the header and the rows, content and order, unchanged
+    for words in ("aggregates", "not records", "no id", "cannot be cited", "s-...", "l-...", "trace_id", "m-...", "p-..."):
+        assert words in NOTE
+    assert "\n" not in NOTE and not re.search(r"fault|error|latency|slow|cpu|memory", NOTE, re.IGNORECASE)  # says nothing about any fault
+    assert not re.search(r"[slmpt]-[0-9a-f]{16}", NOTE)  # names no id
+
+
+def test_dump_all_and_retrieval_both_send_the_statement_before_the_rows(tmp_path):
+    from baselines.overview import NOTE
+
+    dumped = Scripted([tool("submit_diagnosis", ANSWER)])
+    dump_all(Snap(), "INC-001", dumped, method=METHOD, budget=100_000)
+    asked = Scripted([tool("propose_queries", {"queries": [{"text": "failed"}]})], [tool("submit_diagnosis", ANSWER, "t2")])
+    retrieval(Snap(), "INC-001", asked, method=METHOD, cache_root=tmp_path / "cache", q=8, k=5)
+    for model in (dumped, asked):
+        text = model.calls[0]["messages"][0]["content"][0]["text"]
+        assert text.index("## Per service and minute") < text.index(NOTE) < text.index("checkout +011:00")
+        assert text.count(NOTE) == 1
+
+
+def test_a_cut_dump_keeps_the_statement_with_the_header_and_claims_only_rows():
+    from baselines.overview import NOTE
+
+    full, _ = pack(Snap(), "INC-001", budget=100_000)
+    for budget in range(1, proxy_tokens(full) + 50, 7):
+        text, stats = pack(Snap(), "INC-001", budget=budget)
+        assert stats["proxy_tokens"] <= budget
+        assert ("## Per service and minute" in text) == (NOTE in text)  # the header never goes in without the statement
+        assert NOTE not in stats["overview_rows"] and all(r.split(" ", 1)[0] in Snap().services for r in stats["overview_rows"])
+    text, stats = pack(Snap(), "INC-001", budget=proxy_tokens(full))
+    assert stats["overview_complete"] and len(stats["overview_rows"]) == 4  # the four rows; the statement is not a row
+    small, cut = pack(Snap(), "INC-001", budget=150)
+    assert NOTE in small and 0 < len(cut["overview_rows"]) < 4 and not cut["overview_complete"]
+
+
+def test_the_agent_prompt_and_tools_are_unchanged_by_the_revision(tmp_path):
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from agent.harness import api_tools, investigate
+    from agent.prompt import SYSTEM, task_prompt
+    from baselines.overview import NOTE
+
+    agent_inputs = SYSTEM + "\n" + task_prompt(Snap()) + "\n" + json.dumps(api_tools(), sort_keys=True)
+    assert hashlib.sha256(agent_inputs.encode()).hexdigest() == AGENT_INPUTS_SHA256
+    for path in sorted((Path(__file__).resolve().parent.parent / "agent").glob("*.py")):
+        assert "overview" not in path.read_text(), path  # the Agent never sees the overview block (decision 021 §1)
+    agent = Scripted([tool("service_minute_stats", {})], [tool("submit_diagnosis", ANSWER, "t2")])
+    investigate(Snap(), "INC-001", agent, cache_root=tmp_path / "cache", method=METHOD)
+    assert NOTE not in _model_facing_text(agent.calls)
+
+
+def test_the_revised_methods_say_their_version_and_the_agent_keeps_its_own(tmp_path):
+    from eval.runner import run_llm
+
+    config = {"budgets": {"dump_all_proxy_tokens": 100_000, "retrieval_queries": 8, "retrieval_k": 5,
+                          "agent_max_turns": 30, "agent_max_tool_calls": 40, "agent_max_proxy_tokens": 100_000}}
+    scripts = {"dump-all": [[tool("submit_diagnosis", ANSWER)]],
+               "retrieval": [[tool("propose_queries", {"queries": [{"text": "failed"}]})], [tool("submit_diagnosis", ANSWER, "t2")]],
+               "agent": [[tool("submit_diagnosis", ANSWER)]]}
+    versions = {kind: run_llm(kind, Snap(), "INC-001", Scripted(*turns), config, cache_root=tmp_path / "cache")[0]["method"]
+                for kind, turns in scripts.items()}
+    assert versions == {"dump-all": {"name": "dump-all", "version": "2"}, "retrieval": {"name": "retrieval", "version": "2"},
+                        "agent": {"name": "agent", "version": "1"}}

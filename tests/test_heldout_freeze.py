@@ -149,6 +149,22 @@ def test_pilot_revision_declarations():
         "(decision 014 addendum; stat-anomaly v2 is final)"]
 
 
+def test_021_used_by_the_overview_revision_is_a_valid_declaration():
+    """User decision 2026-10-11 (option a): decision 021's one Pilot revision is used by its own file's section
+    「Pilot 上的修訂（2026-10-11，使用者決定）」; the freeze accepts it as is (its rules are unchanged)."""
+    from pathlib import Path
+
+    d021 = "docs/decisions/021-dump-all-and-retrieval-baselines.md"
+    text = (Path(__file__).resolve().parent.parent / d021).read_text()
+    assert "## Pilot 上的修訂（2026-10-11，使用者決定）" in text and "選方案 (a)。" in text
+    used_021 = REVISIONS | {"021": {"status": "used", "decision": d021}}
+    assert pilot_revision_problems(used_021, {D011, D013, d021}, 1) == []
+    assert pilot_revision_problems(REVISIONS | {"021": {"status": "used"}}, {D011, D013, d021}, 1) == [
+        "021: used, but None is not a decision file in the frozen commit"]  # used names the file
+    assert any("021" in p for p in pilot_revision_problems(REVISIONS | {"021": {"status": "waived", "decision": d021}},
+                                                           {D011, D013, d021}, 1))
+
+
 class Fail:
     def __init__(self, code):
         self.code, self.calls = code, []

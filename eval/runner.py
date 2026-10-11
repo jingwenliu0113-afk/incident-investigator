@@ -25,7 +25,9 @@ def _stat(snapshot, incident_id):
 
 
 LLM_CONFIG = Path(__file__).resolve().parent / "llm_methods.json"
-LLM_METHOD_VERSION = "1"  # harness v1 (decision 020), dump-all / retrieval structure v1 (decision 021)
+# harness v1 (decision 020); dump-all / retrieval v2 = decision 021 with its Pilot revision (user decision 2026-10-11:
+# the overview says its rows cannot be cited), v1 = the original Pilot run; the Agent's inputs did not change
+LLM_METHOD_VERSIONS = {"dump-all": "2", "retrieval": "2", "agent": "1"}
 TASK_ALLOWANCE = 2_000  # proxy tokens for the task text (the synthetic sample's, 18 services: 425)
 CORRECTION_ALLOWANCE = 500  # proxy tokens for one correction or limit message
 
@@ -117,7 +119,7 @@ def run_llm(kind: str, snapshot, incident_id: str, model, config: dict, *, cache
     from baselines.dump_all import dump_all
     from baselines.retrieval import retrieval
 
-    method, b, price = {"name": kind, "version": LLM_METHOD_VERSION}, config["budgets"], config.get("price_per_mtok")
+    method, b, price = {"name": kind, "version": LLM_METHOD_VERSIONS.get(kind)}, config["budgets"], config.get("price_per_mtok")
     if kind == "dump-all":
         return dump_all(snapshot, incident_id, model, method=method, budget=b["dump_all_proxy_tokens"], price_per_mtok=price)
     if kind == "retrieval":

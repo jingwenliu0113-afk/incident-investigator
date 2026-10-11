@@ -50,3 +50,13 @@ Gate 的判斷用 `coverage` 與 `not_seen + seen_misread` 的比例；`seen_mis
 
 - 「看過 origin 在 fault 期間的任何 record」比「看過能證明故障的 record」寬鬆：`seen_misread` 可能包含「看到的只是 origin 正常的 span」。
   Pilot 上會抽查，必要時用那一次修訂收緊（例如只算 error 等級的 record 或 gold relevant 的 record）。
+
+## 補註（2026-10-11，使用者決定）：Pilot 上的 (b)、(c) 保留為失敗分析的發現，不修改
+
+- 使用者原話（節錄；全文見 decision 021「Pilot 上的修訂（2026-10-11，使用者決定）」）：「選方案 (a)。」……「方案 (b)、(c) 暫時不修改，保留在 failure analysis。」
+- **(b)** 三個 LLM 方法都只給一個 origin 候選（top3 = top1；stat-anomaly 的 origin_top3 是 0.90）。
+- **(c)** Agent 到回合上限：RTX 5070 Ti 的執行 INC-009、INC-010 以 `submitted_after_limit` 結束（在 accounting 的長 span 上打轉）；被取代的 Mac 執行
+  INC-006 重複呼叫查無資料的工具。
+- 兩者都**不改**：020 的任務說明與 harness、019 的工具、所有預算照舊（021 只為 (a) 加了一行說明）；它們是 Pilot 失敗分析的發現，報告中照實列出。
+  (a)（概覽列被當成證據引用）由 decision 021 在 Pilot 上的那一次修訂處理。
+- 本補註只是紀錄：本文件的分類規則不變，**022 在 Pilot 上的那一次修訂沒有使用**。

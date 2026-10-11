@@ -164,7 +164,8 @@ def test_a_pilot_run_on_the_local_model_pins_it_and_records_the_runtime(tmp_path
         run_config = json.loads((out / "pilot" / method / "run_config.json").read_text())
         assert run_config["model"] == MODEL and run_config["llm"] == RECORD
         pred = json.loads((out / "pilot" / method / "INC-001.json").read_text())
-        assert pred["method"] == {"name": method, "version": "1"} and pred["origin_candidates"] == ["payment", "checkout"]
+        version = {"dump-all": "2", "retrieval": "2", "agent": "1"}[method]  # 2: decision 021's Pilot revision (2026-10-11)
+        assert pred["method"] == {"name": method, "version": version} and pred["origin_candidates"] == ["payment", "checkout"]
         assert pred["usage"]["cost_usd"] == 0.0 and pred["usage"]["tokens_in"] > 0  # local: zero, not unknown
         transcript = json.loads((out / "pilot" / method / "INC-001.transcript.json").read_text())
         assert transcript["stop_reason"] == "submitted"

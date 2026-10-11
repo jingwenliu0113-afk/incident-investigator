@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from agent.harness import CallError, finish, submit_round, usage_so_far
 from agent.prompt import SYSTEM, task_prompt
-from baselines.overview import overview
+from baselines.overview import overview_lines
 from collect.snapshot import _rel, proxy_tokens, render
 from eval.leakage import WARN, template
 
@@ -58,7 +58,7 @@ def pack(snapshot, incident_id: str, *, budget: int) -> tuple[str, dict]:
             heapq.heappush(heap, (-rank, rec["id"], rec))
             if len(heap) > SAMPLE_CAP_PER_CELL:
                 heapq.heappop(heap)
-    sections = [overview(snapshot).splitlines()]
+    sections = [overview_lines(snapshot)]  # its first item is the header with the statement (021 Pilot revision)
     err = ["## Error-level records (grouped by message template: count, first and last time, then the first and last record)"]
     for (kind, svc, tmpl), g in sorted(groups.items(), key=lambda kv: (kv[1]["first"][0], kv[0])):
         err.append(f"{g['count']} x {svc} {kind} first={_rel(g['first'][0], start)} last={_rel(g['last'][0], start)}: {tmpl}")
