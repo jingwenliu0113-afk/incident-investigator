@@ -11,6 +11,8 @@
   | retrieval | 0.50 | 0.40 | 0.40 | 0.58 | 0.50 | seen_misread 4、no_answer 2、mechanism 2 | 280 s |
   | agent | 0.60 | 0.60 | 0.60 | 0.71 | 0.40 | seen_misread 3、no_answer 1 | 422 s |
 
+- **dump-all 重跑（2026-10-11 08:07 起）由使用者決定停止**（10:38，做完 5/10）：70W 充電器供不上高效能模式的耗電，接著 AC 電池仍每小時約掉 17–18%，跑完前會沒電。中途停止的 Pilot 執行不評分。
+  - **待使用者決定**：改在 RTX 5070 Ti 上推論（使用者提出；Windows 11 + WSL Ubuntu-22.04，16 GB VRAM，共用 GPU lock `/tmp/ai-portfolio-gpu.lock` 以 `flock -n`）。要換就是 029 的修訂（推論主機、電力條件），且 retrieval / agent 也要在同一台重跑；或留在 Mac，充飽後再跑（held-out 約 40 小時的重負載在 70W 下不可行）。
 - **dump-all 停在 INC-004 之後**（2026-10-11 02:27 台北，電力模式變成 0 = 自動；不是本 session 改的，程式依 029 停止）。Pilot 中途停止的執行不評分，
   背景排程等高效能 + AC 與 heavy lock 後**從頭重跑**（約 4.5 小時：每個 incident 約 27 分鐘），之後 score、compare、gate（診斷）。
 - **Pilot 上看到、還沒處理的方法問題**（看過 Pilot 結果才發現：要改就是 020 / 021「在 Pilot 上修訂一次」的那一次，**由使用者決定**，目前不改）：
