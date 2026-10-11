@@ -19,12 +19,21 @@
 #        `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 OLLAMA_MODELS=<models> <binary> serve` 啟動。
 #      GPU lock 被占用 → exit 75（與 with-mac-lock 相同的意思），什麼都不執行。ssh 本身失敗（離線、轉送失敗）→ exit 3：
 #      LLM 的步驟標記 blocked，繼續 Mac 上的工作（MACHINE_POLICY）。
-#   3. 經由 tunnel 等 /api/version 回應（最多 120 秒），再以 II_INFERENCE_HOST=gpu-server 與 II_INFERENCE_TUNNEL_PID（本機 ssh 的 pid）
-#      執行指令：Python 端（eval/inference_host.py）以這兩個值確認自己在這個 wrapper 之下。
-#   4. 不論指令成功、失敗或被中斷：只停止這次啟動的 server——只在這次的 session 印出啟動標記之後，遠端
-#      `pkill -x -f` 整個命令列完全等於「<binary> serve」的程序（樣式裡的空白寫成 `.`，避開 cmd / wsl / bash 的引號），
+#      本機的 ssh 忽略 SIGTERM / SIGHUP（SIGINT 本來就被背景程序忽略）：送給整個 process group 的信號不會在遠端還在啟動時切斷它，
+#      wrapper 才能等到啟動標記、停止這次啟動的 server；結束時由 wrapper 明確停止它。
+#   3. 先等這次 session 的啟動標記出現在 log（已取得 lock、遠端 port 空著），在那之前不經 tunnel 送任何請求：-L 轉送在認證後就開始運作，
+#      比 wsl.exe 與 login shell 走到 flock 早好幾秒，那時回應的只可能是別人的 server。然後經 tunnel 送 /api/version?ii_session=<這次的隨機值>
+#      （最多 120 秒），**這個請求必須出現在這次 session 的 serve log**（Ollama 的請求紀錄，含 query string）：證明 tunnel 接到的正是這次啟動的
+#      server。WSL2 預設的 NAT 網路下，轉送的終點是 Windows 的 127.0.0.1:11434，而 lock 內的 port 檢查看的是 WSL 的；Windows 這一側已有程式
+#      在聽（例如 Windows 版 Ollama）時，回應的是它 → exit 3（不再使用、不停止它；這次啟動的 server 照常停止）。
+#      確認之後以 II_INFERENCE_HOST=gpu-server 與 II_INFERENCE_TUNNEL_PID（本機 ssh 的 pid）執行指令：Python 端（eval/inference_host.py）
+#      以這兩個值確認自己在這個 wrapper 之下。
+#   4. 不論指令成功、失敗或被中斷：只停止這次啟動的 server——只在這次的 session 印出啟動標記之後（被中斷時遠端還在啟動：先等標記，最多 30 秒），
+#      遠端 `pkill -x -f` 整個命令列完全等於「<binary> serve」的程序（樣式裡的空白寫成 `.`，避開 cmd / wsl / bash 的引號），
 #      等它結束（GPU lock 隨它釋放；30 秒後才 KILL），再結束本機的 ssh，印出 serve 的 log（ssh session 的輸出）在哪裡。
 #      無法確認已停止時印出檢查的指令、exit 3（指令本身失敗時保留它的 exit code）；絕不刪 lock、不停止其他程序。
+#      「沒有啟動任何 server」只在沒有標記、而且 ssh 自己以 75（lock 被占用）或 3 加 port 被占用的標記結束時才這樣說；其他沒有標記的結束
+#      （ssh 失敗、被中斷時標記一直沒來）都印出「無法確認」與檢查的指令。
 # 遠端的命令只用 $HOME 這一個變數，不含 cmd.exe 會解讀的字元（" % ^ !）：不論 wsl.exe 是否先經過預設的 Linux shell，結果都相同。
 # Mac heavy lock 不需要：Mac 只跑輕量的 eval 迴圈（讀 snapshot、送請求、寫結果），重的推論在桌機上（decision 029 修訂 1）。
 #
@@ -42,6 +51,7 @@ GPU_LOCK=/tmp/ai-portfolio-gpu.lock
 REMOTE_PORT=11434
 STARTED=II-REMOTE-SERVE-STARTING
 PORT_BUSY=II-REMOTE-PORT-BUSY
+SESSION_TOKEN="$(od -An -N8 -tx1 /dev/urandom | tr -dc '0-9a-f')"  # identifies this session's requests in its serve log
 BIN="${II_REMOTE_OLLAMA_BIN:-$REMOTE_OLLAMA_BIN_DEFAULT}"
 MODELS="${II_REMOTE_OLLAMA_MODELS:-$REMOTE_OLLAMA_MODELS_DEFAULT}"
 PORT="${II_OLLAMA_PORT:-11434}"
@@ -52,6 +62,10 @@ if [ "$#" -eq 0 ]; then
 fi
 case "$PORT" in
   '' | *[!0-9]*) echo "ERROR: II_OLLAMA_PORT must be a port number, got '$PORT'" >&2; exit 64 ;;
+esac
+case "$SESSION_TOKEN" in
+  ????????????????) ;;
+  *) echo "ERROR: could not read a random session token from /dev/urandom" >&2; exit 64 ;;
 esac
 for path in "$BIN" "$MODELS"; do  # nothing that cmd.exe, wsl.exe or a shell would read differently
   rest="${path#\$HOME}"
@@ -76,17 +90,31 @@ serve_payload="exec flock -n -E 75 $GPU_LOCK bash -c '(exec 3<>/dev/tcp/127.0.0.
 pattern="$BIN.serve"  # pkill / pgrep -x -f: the whole command line is exactly "<binary> serve"
 stop_payload="{ command -v pkill && command -v pgrep; } >/dev/null || exit 2; pkill -TERM -x -f $pattern; for _ in {1..60}; do pgrep -x -f $pattern >/dev/null || exit 0; sleep 0.5; done; pkill -KILL -x -f $pattern; sleep 1; pgrep -x -f $pattern >/dev/null && exit 1; exit 0"
 ssh_pid=""
+ssh_status=""  # set once the ssh session has ended and been reaped
+ssh_killed=0   # 1: this wrapper ended the ssh session (its own end status says nothing about the remote)
 
 started() {
   grep -q "$STARTED" "$log" 2>/dev/null
 }
 
+reap_ssh() {
+  [ -n "$ssh_status" ] && return 0
+  wait "$ssh_pid" 2>/dev/null
+  ssh_status=$?
+}
+
+nothing_started() {  # only when the remote side itself said so: flock -n was refused, or the remote port was taken
+  [ "$ssh_killed" -eq 0 ] && { [ "$ssh_status" = 75 ] || { [ "$ssh_status" = 3 ] && grep -q "$PORT_BUSY" "$log"; }; }
+}
+
 stop_remote() {
   local status=$?
   trap '' INT TERM HUP  # the remote stop is not cut short by a second signal
-  local confirmed=1
-  if [ -n "$ssh_pid" ]; then
-    if ! started && kill -0 "$ssh_pid" 2>/dev/null; then  # interrupted right after the start: did this session start one?
+  local confirmed=1 nothing=0
+  if [ -z "$ssh_pid" ]; then
+    nothing=1  # ended before the ssh session was started
+  else
+    if ! started && kill -0 "$ssh_pid" 2>/dev/null; then  # interrupted while the remote side starts: did this session start one?
       for _ in $(seq 60); do
         started && break
         kill -0 "$ssh_pid" 2>/dev/null || break
@@ -94,21 +122,35 @@ stop_remote() {
       done
     fi
     if started; then
-      ssh -n -o BatchMode=yes -o ConnectTimeout=30 -o ControlPath=none "$REMOTE" \
-        "wsl.exe -d $DISTRO -- bash -lc \"$stop_payload\"" >>"$log" 2>&1 || confirmed=0
+      if ssh -n -o BatchMode=yes -o ConnectTimeout=30 -o ControlPath=none "$REMOTE" \
+          "wsl.exe -d $DISTRO -- bash -lc \"$stop_payload\"" >>"$log" 2>&1; then
+        for _ in $(seq 20); do  # its remote command (flock and the server) has ended: the session ends by itself
+          kill -0 "$ssh_pid" 2>/dev/null || break
+          sleep 0.5
+        done
+      else
+        confirmed=0
+      fi
     fi
     if kill -0 "$ssh_pid" 2>/dev/null; then
-      kill -TERM "$ssh_pid" 2>/dev/null
-      for _ in $(seq 20); do
-        kill -0 "$ssh_pid" 2>/dev/null || break
-        sleep 0.5
-      done
-      kill -0 "$ssh_pid" 2>/dev/null && kill -KILL "$ssh_pid" 2>/dev/null
+      ssh_killed=1
+      kill -KILL "$ssh_pid" 2>/dev/null  # it ignores SIGTERM (see the start)
     fi
-    wait "$ssh_pid" 2>/dev/null
+    reap_ssh
+    if ! started && nothing_started; then
+      nothing=1
+    fi
   fi
-  if ! started; then
+  if [ "$nothing" -eq 1 ]; then
     echo "no remote ollama serve was started by this session; the ssh session's output: $log" >&2
+  elif ! started; then
+    echo "WARNING: could not confirm that no remote ollama serve was started on $REMOTE: no start marker arrived, and the" \
+         "ssh session ended with status $ssh_status$([ "$ssh_killed" -eq 1 ] && echo ' (ended by this wrapper)') before" \
+         "proving that nothing was started there. If its log shows that ssh never connected ('connect to host'," \
+         "'Could not resolve hostname'), nothing was started. Otherwise a server started by it holds the shared GPU lock:" \
+         "check on $REMOTE: ssh $REMOTE 'wsl.exe -d $DISTRO -- pgrep -af ollama'; do not delete the lock" \
+         "(MACHINE_POLICY.md); report it to the user. Log: $log" >&2
+    [ "$status" -eq 0 ] && status=3
   elif [ "$confirmed" -eq 1 ]; then
     echo "remote ollama serve stopped on $REMOTE (the GPU lock is released with it); its log (the ssh session's output): $log" >&2
   else
@@ -124,27 +166,53 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-ssh -n -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
-  -o ConnectTimeout=30 -o ControlPath=none -L "127.0.0.1:$PORT:127.0.0.1:$REMOTE_PORT" "$REMOTE" \
-  "wsl.exe -d $DISTRO -- bash -lc \"$serve_payload\"" >"$log" 2>&1 &
+# SIGTERM / SIGHUP ignored in the ssh only (an ignored signal stays ignored in ssh): a signal to the whole process group
+# while the remote side is still starting leaves the session up, so stop_remote can wait for the marker
+( trap '' TERM HUP; exec ssh -n -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=4 -o ConnectTimeout=30 -o ControlPath=none -L "127.0.0.1:$PORT:127.0.0.1:$REMOTE_PORT" "$REMOTE" \
+  "wsl.exe -d $DISTRO -- bash -lc \"$serve_payload\"" ) >"$log" 2>&1 &
 ssh_pid=$!
 
 ready=0
+answered=0
 for _ in $(seq 240); do
   kill -0 "$ssh_pid" 2>/dev/null || break
-  if curl --noproxy '*' -sf -m 2 "http://127.0.0.1:$PORT/api/version" >/dev/null 2>&1; then
-    ready=1
+  # nothing goes through the tunnel before this session's start marker: until then only someone else's server can answer
+  if started && curl --noproxy '*' -sf -m 2 "http://127.0.0.1:$PORT/api/version?ii_session=$SESSION_TOKEN" \
+      >/dev/null 2>&1; then
+    answered=1
+    for _ in $(seq 20); do  # the request shows in this session's serve log: the tunnel reaches this session's server
+      if grep -q "ii_session=$SESSION_TOKEN" "$log"; then
+        ready=1
+        break
+      fi
+      sleep 0.5
+    done
     break
   fi
   sleep 0.5
 done
+if [ "$answered" -eq 1 ] && [ "$ready" -ne 1 ]; then
+  echo "ERROR: a server answers through the tunnel, but not the one this session started on $REMOTE (its request never" \
+       "showed in this session's serve log): something else listens on $REMOTE's Windows-side 127.0.0.1:$REMOTE_PORT" \
+       "(e.g. Ollama for Windows), which the check inside WSL cannot see; it is neither used further nor stopped; nothing" \
+       "was run; ask the user (log: $log; if the log has request lines ([GIN] ... GET \"/api/version...\") but none with" \
+       "ii_session=, this Ollama does not log the query string: report that instead)" >&2
+  exit 3
+fi
+if [ "$ready" -eq 1 ] && ! kill -0 "$ssh_pid" 2>/dev/null; then
+  echo "ERROR: the ssh session to $REMOTE ended right after the server answered (log: $log); nothing was run" >&2
+  exit 3
+fi
 if [ "$ready" -ne 1 ]; then
   if kill -0 "$ssh_pid" 2>/dev/null; then
     echo "ERROR: the remote ollama serve did not answer through the tunnel within 120 s (log: $log); nothing was run" >&2
+    started && echo "(the start marker is in the log: WSL's localhost forwarding may not expose WSL's 127.0.0.1:$REMOTE_PORT" \
+                    "on $REMOTE's Windows loopback; ask the user, do not change the desktop's settings)" >&2
     exit 3
   fi
-  wait "$ssh_pid"
-  code=$?
+  reap_ssh
+  code=$ssh_status
   case "$code" in
     75)
       echo "ERROR: the shared GPU lock $GPU_LOCK on $REMOTE is held by another workload; nothing was run; do not preempt" \

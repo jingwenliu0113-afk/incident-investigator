@@ -82,6 +82,9 @@ Core 原則上不需要 RTX。
 - **GPU lock**：桌機的 GPU 與使用者其他 project 共用，一律在 WSL Ubuntu-22.04 裡以 `flock -n /tmp/ai-portfolio-gpu.lock` 取得
   （經 `ssh gpu-server`；`with-remote-ollama` 會做，lock 被占用時 exit 75）。被占用 → 等之後再跑；**不得搶占、不得刪除 lock、不得停止別人的程序**。
   server 只在 lock 內存在，結束時只停止自己啟動的那一個。
+- **只用自己啟動的 server**：桌機 `127.0.0.1:11434` 上任何不是這次 wrapper 啟動的 server（其他 project 的 Ollama、Windows 版 Ollama 等）
+  都不使用也不停止；wrapper 在取得 lock、啟動之前不經 tunnel 送請求，並確認 tunnel 接到的是自己的 server（請求出現在自己的 log），否則拒絕（exit 3）、
+  回報使用者。WSL2 的 NAT 網路下 Windows 那一側的 listener 在 WSL 裡看不到，要靠這個確認（decision 029 修訂 1 的審查）。
 - 這種遠端推論**不需要 Mac heavy lock**：Mac 只跑輕量的 eval 迴圈；重的推論在桌機上，由 GPU lock 保護。
 - 只使用 Ollama 0.35.0（`~/opt/ollama-0.35.0`）與只給本 project 用的 models 目錄（`~/ii-ollama-models`），都在 WSL 使用者的 home、不需要 sudo；
   不更動桌機的其他設定或其他 project 的檔案。

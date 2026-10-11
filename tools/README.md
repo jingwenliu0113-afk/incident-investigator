@@ -43,6 +43,10 @@
 ./tools/with-remote-ollama <command> [args...]
 ```
 
-- exit 75：GPU lock 被其他工作占用（不等、不搶、不刪 lock，之後再跑）；exit 3：本機或桌機的 11434 已經有程式在聽（不使用也不停止它）、
-  `ssh gpu-server` 失敗（離線 → LLM 步驟標記 blocked）、server 沒有回應，或結束時無法確認遠端 server 已停止（印出檢查指令）；其他：指令自己的 exit code。
+- 只用這次啟動的 server：取得 GPU lock、印出啟動標記之前不經 tunnel 送任何請求；就緒請求（`/api/version?ii_session=<隨機值>`）必須出現在
+  這次 session 的 serve log，tunnel 接到別的 server（例如 Windows 那一側的 Ollama）就拒絕。本機的 ssh 不被送給整個 process group 的 SIGTERM / SIGHUP
+  切斷：遠端還在啟動時被中斷，也會等到標記再停止 server。
+- exit 75：GPU lock 被其他工作占用（不等、不搶、不刪 lock，之後再跑）；exit 3：本機或桌機（WSL 裡）的 11434 已經有程式在聽、tunnel 接到的不是這次啟動的
+  server（都不使用也不停止它）、`ssh gpu-server` 失敗（離線 → LLM 步驟標記 blocked）、server 沒有回應，或結束時無法確認遠端 server 已停止或沒有啟動
+  （印出檢查指令）；其他：指令自己的 exit code。
 - `ollama.host` 是 `local` 時仍用 `./tools/with-mac-lock ./tools/with-local-ollama <command>`。

@@ -11,8 +11,13 @@
   改為每個 incident 前後記錄 GPU 狀態（nvidia-smi；讀不到記 null，GPU 不是 RTX 5070 Ti 或連續兩次讀不到才停止）。`host` 進 `run_config.json` 的 `llm`，
   所以 freeze 要求 Pilot 在同一台主機上跑。
 - **影響**：三個 LLM 方法都要在 Pilot 上用 GPU 重跑（Metal 與 CUDA 在 temperature 0 下也可能不同）；下面 Mac 上的 retrieval / agent 分數**被取代**，只留作紀錄。
-- 測試：1098 passed（`-m "not network and not docker_daemon"`；ssh、nvidia-smi、pmset、Ollama 一律以假的執行檔或 monkeypatch 代替，沒有連到 gpu-server）。
-- **下一步（主 session）**：合併 `remote-gpu` → 遠端的安裝與檢查（下一步 8.2 的「開始前」）→ 探測 → 三個方法的 Pilot 執行 → 評分、compare、gate（診斷）。
+- **審查（2026-10-11，合併前；029 修訂 1「審查」）**：wrapper 先等這次 session 的啟動標記才經 tunnel 送請求，且就緒請求（帶這次 session 的隨機值）
+  必須出現在這次 session 的 serve log——tunnel 接到別人的 server（GPU lock 被占用或遠端 port 被占用時、或 Windows 那一側已有 listener）一律不用
+  （75 / 3）；遠端還在啟動時整個 process group 收到 SIGTERM / SIGHUP 也會等到標記再停止 server；「沒有啟動」只在確定時才說。
+  Mac 上被取代的輸出在 GPU 重跑之前封存（8.2「開始前」）。只拒絕更多或只增加紀錄。
+- 測試：1105 passed（`-m "not network and not docker_daemon"`；ssh、nvidia-smi、pmset、Ollama 一律以假的執行檔或 monkeypatch 代替，沒有連到 gpu-server）。
+- **下一步（主 session）**：合併 `remote-gpu` → 封存 Mac 的 Pilot LLM 輸出、遠端的安裝與檢查（下一步 8.2 的「開始前」）→ 探測 → 三個方法的 Pilot 執行
+  → 評分、compare、gate（診斷）。
 
 **2026-10-11 Pilot 上的 LLM 方法執行（qwen3.5 9B，在 Mac 上；診斷用，不是 Gate 判定；已被 029 修訂 1 取代，只留作紀錄）**：
 - retrieval 與 agent 完成並評分（高效能 + AC，10 個 incident 的 latency 都在正式電力下量到）：
@@ -27,7 +32,8 @@
   - **已決定（2026-10-11，使用者「同意」）**：改在 RTX 5070 Ti 上推論（decision 029 修訂 1，見上）；retrieval / agent 也在同一台重跑。
 - **dump-all 停在 INC-004 之後**（2026-10-11 02:27 台北，電力模式變成 0 = 自動；不是本 session 改的，程式依 029 停止）。Pilot 中途停止的執行不評分。
   （原本排定在 Mac 上從頭重跑；已由 029 修訂 1 取代：三個方法都改在 GPU 上重跑。）
-- **Pilot 上看到、還沒處理的方法問題**（看過 Pilot 結果才發現：要改就是 020 / 021「在 Pilot 上修訂一次」的那一次，**由使用者決定**，目前不改）：
+- **Pilot 上看到、還沒處理的方法問題**（看過 Pilot 結果才發現：要改就是 020 / 021「在 Pilot 上修訂一次」的那一次，**由使用者決定**，目前不改；
+  根據是 Mac 上的 transcript，GPU 重跑之前封存在 `data/external/archive/pilot-llm-mac-2026-10-11/`，重跑後的 transcript 是否重現要再看）：
   1. retrieval INC-005、INC-011：模型把概覽的每分鐘列當成證據（`m-cart-10:00` 這種自編的 id），概覽列沒有可引用的 id，更正兩次後放棄作答。
   2. agent INC-006：重複呼叫同一個查無資料的工具，到回合上限後只回文字、沒有提交（turn_limit → 放棄作答）。
   3. agent 幾乎只給一個 origin 候選（top3 = top1 = 0.60），stat-anomaly 的 top3 是 0.90。
@@ -35,7 +41,8 @@
 
 **Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。
 A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B，decision 029「使用者決定（2026-10-10）：照建議」），`eval/llm_methods.json` 是 `approved`；
-下一步是三個 LLM 方法在 Pilot 上執行（下一步 8.2，主 session、每個方法一次 heavy lock，不需要使用者）。A0 已處理（grafana 的 plugin 下載關掉（decision 028）、
+下一步是三個 LLM 方法在 Pilot 上執行（下一步 8.2，主 session、不需要使用者；2026-10-11 起依 029 修訂 1 是每個方法一次 `./tools/with-remote-ollama`、
+不需要 heavy lock）。A0 已處理（grafana 的 plugin 下載關掉（decision 028）、
 新 lock 的 soak #6 PASSED、背景安裝器維持現狀）；A3、A5 已於 2026-10-10 確認。**
 - **使用者決定（2026-10-10）「照建議」與實作**（分支 `llm-approve`；decision 029 文末、026 修訂 3、023「追加（2026-10-10，第三次）」、028「結果」）：
   1. 模型 qwen3.5 9B（`qwen3.5:9b-q4_K_M`，digest `sha256:6488c96f…3ea7`），Ollama 0.35.0；2. `num_ctx` 262,144（模型上限；預算不變，dump-all 仍是 120,000 proxy）；
@@ -327,8 +334,15 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
       （探測的指令與看法保留在 029 §5；之後不再需要。）
    2. **下一步（主 session，不需要使用者）：三個 LLM 方法在 Pilot 上用 RTX 5070 Ti 執行**（decision 029 修訂 1）。先合併 `remote-gpu` 進 main（測試通過後 push）。
       Mac 上 2026-10-10/11 的 retrieval / agent 結果被取代：三個方法都從頭重跑到 exit 0，`run_config.json`、prediction 與 `power.jsonl` 的新行會寫在同一個目錄
-      （舊的 Mac 行留著，評分與 freeze 只看每個 incident 的最後一行與目前的 `run_config.json`）。
-      **開始前（主 session 在 gpu-server 上確認一次；只讀，不改任何設定）**：
+      （舊的 Mac 行留著，評分與 freeze 只看每個 incident 的最後一行與目前的 `run_config.json`）。重跑會**覆寫** Mac 的 prediction、transcript、
+      `run_config.json`（評分時也覆寫 `scores.json`、`table.md`），所以先封存（029 修訂 1「審查」第 6 點）。
+      **開始前 1：封存 Mac 的輸出（主 session，只複製；封存目錄必須還不存在，在 `results/` 之外，不被評分、`gold-todo` 或 freeze 讀到）**：
+      ```bash
+      test ! -e data/external/archive/pilot-llm-mac-2026-10-11 && mkdir -p data/external/archive/pilot-llm-mac-2026-10-11 \
+        && cp -Rp data/external/results/pilot/retrieval data/external/results/pilot/agent data/external/results/pilot/dump-all \
+           data/external/archive/pilot-llm-mac-2026-10-11/
+      ```
+      **開始前 2：主 session 在 gpu-server 上確認一次（只讀，不改任何設定）**：
       ```bash
       # Ollama 0.35.0 在 WSL 的 home（印出 client version is 0.35.0；沒有 server 時的警告是正常的）
       ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "$HOME/opt/ollama-0.35.0/bin/ollama --version"'
@@ -338,8 +352,13 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
       ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "command -v flock pkill pgrep nvidia-smi"'
       # runner 每個 incident 前後用的同一個 GPU 查詢：一行，名稱含 RTX 5070 Ti
       ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- nvidia-smi --query-gpu=name,driver_version,power.limit,power.draw,clocks.sm,temperature.gpu,memory.used --format=csv,noheader'
+      # Windows 那一側沒有程式在聽 11434（例如 Windows 版 Ollama）：沒有「本機位址 …:11434、外部位址 0.0.0.0:0 或 [::]:0（LISTENING）」的行才繼續
+      # （有 → 回報使用者，不停止它；TIME_WAIT 之類的行不算）
+      ssh gpu-server 'netstat -ano | findstr :11434'
       ```
       Mac 上不能有程式在聽 `127.0.0.1:11434`（例如 Ollama app；wrapper 會 exit 3）。執行中不改 main checkout。
+      wrapper 只用這次啟動的 server：就緒請求（`/api/version?ii_session=…`）必須出現在這次的 serve log；tunnel 接到別的 server 時 exit 3
+      （訊息說明是 Windows 那一側有程式在聽，或 log 裡的請求紀錄沒有 query string——兩者都回報使用者）。
       **探測（合成範例，不是結果）**：確認整條路徑（tunnel、GPU lock、WSL2 的 localhost 轉送、server 自己拒絕過長的 prompt）與 GPU 上的速度；
       `num_ctx` 262,144 在 16 GB VRAM 上是否完全放在 GPU 也看這裡的速度與 `/api/ps`：
       ```bash
@@ -347,6 +366,7 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
           --context-sizes 8000,32000,100000,200000 --out <session 的 scratchpad>/probe-gpu.json
       ```
       exit 0 才繼續；exit 3 = GUARD FAILED 或 wrapper 拒絕（訊息說明）、exit 75 = GPU lock 被占用（之後再跑，不搶不刪）、ssh 失敗 = blocked → 回報使用者。
+      wrapper 結束時印出「WARNING: could not confirm …」→ 照訊息在 gpu-server 上檢查（`pgrep -af ollama`），回報使用者，不刪 lock。
       報告的 `host` 應是 `gpu-server`、`gpu` 是 RTX 5070 Ti、`ollama.digest` 是釘選的 digest。
       **三個方法**（順序：retrieval 當金絲雀、agent、dump-all；每個方法一次 wrapper，方法之間 GPU lock 釋放，讓其他 project 有空檔）：
       ```bash

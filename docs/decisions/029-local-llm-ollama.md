@@ -21,6 +21,10 @@
   **修訂 1（2026-10-11，使用者決定「同意」；Pilot 上 retrieval / agent 已在 Mac 跑過、任何 held-out 資料與 freeze 之前）**：推論改在使用者的
   RTX 5070 Ti 桌機（`ollama.host` = `gpu-server`，`tools/with-remote-ollama`；eval、snapshot 與 ground truth 留在 Mac），這種執行不需要 Mac heavy lock、
   不檢查 Mac 的電力模式，改為記錄 GPU 的狀態；三個 LLM 方法要在 Pilot 上用 GPU 重跑。模型與其他設定、預算、指標都不變。見文末「修訂 1」。
+  **修訂 1 的審查（2026-10-11，合併前、任何遠端執行之前）**：wrapper 先等這次 session 的啟動標記才經 tunnel 送請求，並要求請求出現在這次 session 的
+  serve log（tunnel 接到的必須是這次啟動的 server；Windows 那一側的 listener 在 WSL 裡看不到）；本機的 ssh 不被送給整個 process group 的 SIGTERM / SIGHUP
+  切斷，「沒有啟動任何 server」只在遠端自己這樣說時才寫；Mac 上被取代的輸出在 GPU 重跑之前先封存；§1.2、§5 補註。只拒絕更多或只增加紀錄。
+  見文末「修訂 1」的「審查（2026-10-11）」。
 - 影響範圍：新增 `agent/ollama.py`（adapter）、`eval/probe.py`（`python -m eval local-probe`）、`tools/with-local-ollama`；
   `eval/runner.py`（`load_llm_config`、`llm_fit`、`start_llm`、`pinned_model`、`finish_llm`、`run_llm`、`_llm`、`run_config.json` 的 `llm`、評分表多一行）；
   `agent/harness.py`（`_arguments`：adapter 標記為解析不了的參數照 020 §3 拒收；`CallError` 的說明）；`eval/__main__.py`；
@@ -79,6 +83,8 @@
 2. **只連本機**：URL 必須是 `http://` 加 `127.0.0.1`、`localhost`（解析結果必須全部是 loopback）或 `::1`；直接用 `http.client`（不經過任何 proxy 設定）；
    tag 以 `cloud` 結尾、或 `/api/tags`、`/api/show`、任何一次回覆帶 `remote_model` / `remote_host` 的模型（Ollama 的 cloud 模型）一律拒絕。
    這個 adapter 因此不可能連到遠端或付費服務。
+   **補註（2026-10-11，修訂 1）**：在 host `gpu-server`（`tools/with-remote-ollama`）之下，這個 loopback 端點是一條通到使用者自己 GPU 桌機的
+   SSH tunnel，不是這台 Mac 上的 server（文末修訂 1 第 2 點）；adapter 與它的檢查不變，仍不可能連到付費或第三方服務。
 
 ### 2. 截斷防護：一次呼叫絕不靜默截斷
 
@@ -161,6 +167,9 @@
 ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model <tag> [--num-ctx N] [--think] \
     [--context-sizes 8000,32000,100000] [--out PATH]
 ```
+
+**補註（2026-10-11，修訂 1）**：`--host` 預設是 `llm_methods.json` 的 `ollama.host`（現在是 `gpu-server`），上面這行在 Mac 上的探測要加 `--host local`；
+gpu-server 的探測改用 `./tools/with-remote-ollama uv run python -m eval local-probe --model <tag> ...`（NEXT 下一步 8.2）。
 
 - **只在合成範例上執行**：沿用 `eval/demo.py` 的 `check_sample`（`synthetic: true`、每個檔案的 sha256 相符、沒有未列出的檔案），incident 必須是範例的 id；
   其他一律拒絕。不讀 label、不評分。
@@ -391,6 +400,8 @@
    think 關、temperature 0、price 0、`timeout_s` 3600、預算），`note` 補一句本修訂。
 2. **只有模型呼叫在桌機上**：eval 迴圈仍在 Mac 執行；snapshot、ground truth、評分與結果都不離開 Mac（ground truth 的隔離不變）。模型呼叫經 SSH 的本機轉送：
    Mac `127.0.0.1:11434` → gpu-server `127.0.0.1:11434`（WSL2 的 localhost 轉送把 WSL 的 `127.0.0.1:11434` 開在 Windows 的 localhost）。
+   前提：Windows 那一側的 `127.0.0.1:11434` 沒有別的程式在聽（例如 Windows 版 Ollama）；不成立時 tunnel 接到的是那個程式，wrapper 會發現並拒絕
+   （第 4 點「只用這次啟動的 server」），要由使用者處理。
    adapter 的「只連 loopback」規則與它的檢查都不變（仍連 `127.0.0.1`）。**照實說明**：在這個 wrapper 之下，那個 loopback 端點是一條通到使用者自己
    GPU 桌機的 tunnel，不是這台 Mac 上的 server；它不是付費或第三方服務（MACHINE_POLICY「外部費用」：既有的本地硬體），拒絕 cloud 模型的檢查也照舊。
 3. **桌機上的安裝**（主 session 做，WSL 使用者的 home、不需要 sudo）：Ollama 0.35.0 在 `~/opt/ollama-0.35.0`（執行檔 `~/opt/ollama-0.35.0/bin/ollama`），
@@ -400,17 +411,32 @@
    - 本機 `127.0.0.1:11434` 已有程式在聽 → exit 3，不聯絡 gpu-server。
    - 一個背景的 ssh session（`-L 127.0.0.1:11434:127.0.0.1:11434`、`ExitOnForwardFailure=yes`、`BatchMode=yes`、`ServerAliveInterval=30`、
      `ControlPath=none`）同時在遠端執行
-     `wsl.exe -d Ubuntu-22.04 -- bash -lc "exec flock -n -E 75 /tmp/ai-portfolio-gpu.lock bash -c '…'"`，lock 內：遠端 `127.0.0.1:11434` 已有程式在聽
-     → exit 3（不是這次啟動的，不使用也不停止它）；否則印出啟動標記，再
+     `wsl.exe -d Ubuntu-22.04 -- bash -lc "exec flock -n -E 75 /tmp/ai-portfolio-gpu.lock bash -c '…'"`，lock 內：遠端（WSL 裡的）`127.0.0.1:11434`
+     已有程式在聽 → exit 3（不是這次啟動的，不使用也不停止它；Windows 那一側見下面「只用這次啟動的 server」）；否則印出啟動標記，再
      `exec env OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 OLLAMA_MODELS=$HOME/ii-ollama-models $HOME/opt/ollama-0.35.0/bin/ollama serve`。
    - GPU lock 被占用 → **exit 75**（與 with-mac-lock 同義），什麼都不執行、不等、不搶、不刪 lock。`-E 75` 是為了區分：flock 預設的 1 會和 server 自己的失敗混在一起。
      ssh 本身失敗（255：離線、無法連線、本機轉送失敗）→ exit 3，LLM 的步驟標記 blocked。server 在 120 秒內沒有經 tunnel 回應 `/api/version` → exit 3。
-   - 回應之後以 `II_INFERENCE_HOST=gpu-server` 與 `II_INFERENCE_TUNNEL_PID`（本機 ssh 的 pid）執行指令。
+   - **只用這次啟動的 server**（審查 2026-10-11）：先等這次 session 的啟動標記出現在 log，在那之前不經 tunnel 送任何請求——`-L` 轉送在 ssh 認證後
+     就開始運作，比 wsl.exe 與 login shell 走到 `flock` 早好幾秒，那段時間在桌機 `127.0.0.1:11434` 回應的只可能是別人的 server（例如持有 GPU lock 的
+     其他 project 的 Ollama）。之後經 tunnel 送 `/api/version?ii_session=<這次 session 的隨機值>`，**這個請求必須出現在這次 session 的 serve log**
+     （Ollama 的請求紀錄 `[GIN] … GET "/api/version?…"`），出現才算就緒（回應後最多等 10 秒）。Mac 上 0.35.0 的 serve log 有
+     `[GIN] … GET "/api/version"` 這種行，但先前的請求都沒有 query string；gin 的請求紀錄會附上 query string，這一點要到第一次在桌機上探測才真正確認。
+     理由：WSL2 預設的 NAT 網路下，`-L` 的終點是 **Windows** 的 `127.0.0.1:11434`，lock 內的 port 檢查看的是 **WSL** 的；Windows 這一側已有程式在聽
+     （例如 Windows 版 Ollama，預設就是 `127.0.0.1:11434`）時，WSL 裡的 server 照樣啟動，tunnel 卻接到 Windows 的那個。有回應、但請求不在
+     這次的 log → exit 3（那個 server 只收到這一個辨識用的請求，不再使用、不停止；這次啟動的 server 照常停止），訊息請主 session 回報使用者。
+     這個檢查不依賴桌機的網路模式（NAT 或 mirrored）。如果 0.35.0 在桌機上不記錄 query string，每次都會在這裡 exit 3（不會誤用別的 server），
+     訊息說明怎麼從 log 分辨。
+   - 確認之後以 `II_INFERENCE_HOST=gpu-server` 與 `II_INFERENCE_TUNNEL_PID`（本機 ssh 的 pid）執行指令。
    - **結束（任何 exit 或 signal）**：只停止這次啟動的 server——只在這次 session 印出啟動標記（已取得 lock、遠端 port 空著、即將啟動）之後，
      遠端 `pkill -TERM -x -f $HOME/opt/ollama-0.35.0/bin/ollama.serve`（`-x -f`：整個命令列完全等於「`<binary> serve`」；樣式裡的空白寫成 `.`），
      等它結束（最多 30 秒，之後 KILL），GPU lock 隨它釋放；然後結束本機的 ssh，印出 serve 的 log 在哪裡（ssh session 的輸出，存在 Mac 的暫存檔）。
      無法確認已停止（例如桌機在執行中離線）→ 印出在 gpu-server 上檢查的指令、exit 3（指令本身失敗時保留它的 exit code）；絕不刪 lock。
-     signal 送到整個 process group（本機 ssh 也被停止）時也照樣停止遠端 server。
+     signal 送到整個 process group 時也照樣停止遠端 server：本機的 ssh 以忽略 SIGTERM / SIGHUP 的狀態啟動（OpenSSH 保留繼承來的忽略；SIGINT 本來就被
+     背景程序忽略），所以遠端還在啟動時收到信號，wrapper 仍能等到啟動標記（最多 30 秒）再停止它；結束時由 wrapper 以 SIGKILL 結束本機的 ssh
+     （停止遠端之後它通常已自己結束）。整個 process group 收到 SIGKILL 時 ssh 一樣會結束（沒有另開 process group）。
+   - **「沒有啟動任何 server」只在確定時才說**（審查 2026-10-11）：沒有啟動標記、而且 ssh 自己以 75（`flock -n` 被拒）或 3 加上 port 被占用的標記結束。
+     其他沒有標記的結束（ssh 失敗 255、被中斷後標記一直沒來而由 wrapper 結束 ssh）都印出「無法確認」與在 gpu-server 上檢查的指令（log 顯示 ssh 根本沒連上時，
+     例如 `connect to host`，什麼都沒有啟動）、exit 3（指令本身的 exit code 保留）；絕不刪 lock。
    - 「完整命令列 `<binary> serve` 就是這次的 server」的根據：這個路徑的執行檔只為本 project 安裝、只由這個 wrapper 啟動、只在 GPU lock 內（一次一個）；
      沒有印出啟動標記（例如 lock 被占用）時什麼都不停止，所以別人留下的 server（包括同一路徑、被殺掉的 wrapper 留下的）不會被碰。剩下的情況：
      這次的 server 在執行中自己結束、而另一個 wrapper 恰好在這之間於同一台 Mac 啟動並取得 lock——tunnel 還在時第二個 wrapper 會在本機 11434 被拒絕，
@@ -480,12 +506,32 @@
 - **三個 LLM 方法都要在 Pilot 上用 GPU 重跑**（retrieval、agent、dump-all，各自從頭跑到 exit 0 再評分）：Metal 與 CUDA 的 kernel 在 temperature 0 下
   也可能給出不同的輸出。retrieval 與 agent 在 Mac 上的執行（2026-10-10/11）與分數**被取代**，只留作紀錄（NEXT），不進任何比較；freeze 也會拒絕它們
   （它們的 `llm` 沒有 `host`）。中途停止的 dump-all 本來就不評分。
+  GPU 重跑寫在同一個目錄（`data/external/results/pilot/<method>/`），會覆寫 Mac 的 prediction、transcript、`run_config.json` 與評分時的 `scores.json`、
+  `table.md`（`power.jsonl` 只附加）。所以**重跑之前**主 session 把 `results/pilot/{retrieval,agent,dump-all}` 整個複製到
+  `data/external/archive/pilot-llm-mac-2026-10-11/`（gitignored、在 `results/` 之外，不被評分、`gold-todo` 或 freeze 讀到）（審查 2026-10-11）：
+  NEXT「待使用者決定」的 Pilot 方法問題（retrieval INC-005、INC-011，agent INC-006、只給一個 origin 候選）的根據是這些 Mac transcript，
+  封存讓使用者之後仍能查看；GPU 重跑是否重現這些問題要看新的 transcript，決定時兩者都可參考（仍只依 Pilot，不碰 held-out）。
 - latency 是桌機 GPU 的數字（經 SSH tunnel，含少量網路延遲），與 Mac 的數字不可比；報告標明推論主機與 GPU。`tokens_in` / `tokens_out` 仍是同一個模型的 tokenizer。
 - freeze 釘住 `host: "gpu-server"`（整個 `llm_methods.json` 的 sha 與每個 LLM 方法 Pilot 的 `llm`）；held-out 必須在同一台桌機上跑。換回 Mac 是另一個修訂，
   要在 freeze 之前、並在 Mac 上重跑 Pilot。
 - evidence gold：GPU 重跑之後再用 `gold-todo` 列出（它只看目前的 prediction、只列還沒判斷的）。
 - 桌機離線時 LLM 的步驟 blocked（MACHINE_POLICY）；GPU lock 被其他 project 占用時等之後再跑（exit 75）。
 - 不改任何預算、指標、切分、門檻、評分、模型、digest、Ollama 版本、`num_ctx`、`num_predict`、temperature、seed、think、`timeout_s`。
+
+### 審查（2026-10-11，合併前、任何遠端執行之前；只拒絕更多或只增加紀錄）
+
+1. **就緒檢查沒有要求啟動標記**（高）：原本只要經 tunnel 的 `/api/version` 有回應就執行指令；ssh 認證後 `-L` 就運作，遠端要再過好幾秒才走到
+   `flock` 與 port 檢查，所以 GPU lock 被占用（應 exit 75）或遠端 port 被占用（應 exit 3）時，指令會在別人的 server 上執行（以 repo 的 fake 加上
+   慢的 login shell 重現：exit code 是指令自己的）。修正：先等標記，標記之前不送任何請求（§4「只用這次啟動的 server」）。
+2. **lock 內的 port 檢查看不到 Windows 這一側**（中）：WSL2 的 NAT 模式下兩個 loopback 不同，Windows 上已有的 listener 會被 tunnel 接到。
+   修正：就緒請求帶這次 session 的隨機值，必須出現在這次 session 的 serve log（§4）；不採用在 lock 內呼叫 Windows 的 `netstat.exe`
+   （依賴 WSL interop 與輸出格式、仍是間接推斷），改為直接確認 tunnel 的終點。另在 NEXT 8.2「開始前」加一個唯讀檢查（Windows 的 `netstat`）。
+3. **啟動標記之前收到 SIGTERM / SIGHUP**（中）：本機 ssh 跟著被停止，wrapper 看不到標記、也不停止遠端，還寫「沒有啟動」；遠端的 server 之後照樣
+   啟動並持有 GPU lock。修正：ssh 忽略這兩個信號、wrapper 等標記再停止；「沒有啟動」只在確定時才說（§4）。等標記的迴圈原本沒有測試涵蓋，現在有。
+4. **NEXT 的舊敘述**（低）：「每個方法一次 heavy lock」改為每個方法一次 `./tools/with-remote-ollama`。
+5. **§1.2、§5 沒有指向修訂 1**（低）：加補註（loopback 在 gpu-server 下是 tunnel；Mac 上探測要加 `--host local`）。
+6. **重跑會覆寫被取代的 Mac 輸出**（低）：重跑之前封存（「對實驗的影響」）。
+- 模型、設定、預算、指標、切分、門檻、評分都不變；exit code 的意思不變（75 = GPU lock 被占用、3 = 拒絕或需要人）。
 
 ### 測試
 
@@ -495,6 +541,12 @@
   別的 ollama、bash 都還在）、GPU lock 隨之釋放；lock 被占用 → 75、什麼都不停止（包括同一路徑留下的 server）；本機或遠端的 port 被占用 → 3、不碰它；
   ssh 失敗 → 3 並說 blocked；server 起不來 → 3；整個 process group 收到 SIGTERM 仍停止遠端 server；停止無法確認 → 3、提示、不刪 lock
   （之後的執行因 lock 被占用得到 75）；遠端路徑只接受安全的字元、停止的樣式跟著啟動的執行檔。拿掉停止或拿掉 `-x` 時測試會失敗（已確認）。
+  審查（2026-10-11）新增：fake 的遠端可以是慢的 login shell（`FAKE_LOGIN_DELAY`），`-L` 的終點可以和 WSL 的 port 不同（`FAKE_WINDOWS_PORT`，NAT 模式），
+  stub 像 Ollama 一樣記錄請求（含 query string），fake ssh 像 OpenSSH 一樣保留繼承來的信號忽略。測：遠端還在啟動時 port 上已有會回應的 server——
+  lock 被占用 → 75、port 被占用 → 3，指令沒有執行、那個 server 沒有收到任何請求；Windows 這一側的 server 被 tunnel 接到 → 3、它只收到一個辨識用的請求、
+  這次的 server 被停止、lock 釋放；就緒請求在啟動標記之後、出現在 serve log；啟動標記之前整個 process group 收到 SIGTERM / SIGHUP / SIGINT →
+  等到標記、停止 server、沒有留下 flock 或 server、lock 釋放；lock 被占用時說「沒有啟動」，ssh 失敗時不說、改印「無法確認」。
+  拿掉其中任一項（先等標記、log 裡的辨識、ssh 忽略信號、等標記的迴圈、「沒有啟動」的條件）都至少有一個測試失敗（已確認）。
 - `tests/test_remote_inference.py`：`gpu_facts` 的命令與解析（CRLF、`[N/A]`）、讀不到是 null 不是猜測；wrapper 檢查（沒有變數、殘留變數的 pid 已結束）；
   committed 的 host 是 `gpu-server` 且在 `pinned_record` 裡；gpu-server 的執行在 wrapper 外 → 什麼都不寫、不讀 GPU、不連 server；在 wrapper 內不要求
   heavy lock、不讀 Mac 的電力，`power.jsonl` 有 `host` 與前後的 GPU，評分與表的文字（沒有 AC / 高效能 / this Mac）；一次讀不到 → 繼續並列出；連續兩次 →

@@ -1,13 +1,18 @@
 """tools/with-remote-ollama (decision 029 revision 1): the model calls of the LLM methods go to the user's RTX 5070 Ti
 desktop through one SSH session that forwards Mac 127.0.0.1:<port> to gpu-server 127.0.0.1:11434 and runs, inside WSL
 Ubuntu-22.04, `ollama serve` under the shared GPU lock (`flock -n /tmp/ai-portfolio-gpu.lock`). It refuses when the local
-port or the remote port is taken (exit 3) or the GPU lock is busy (exit 75), runs the command with
-II_INFERENCE_HOST=gpu-server and always stops its own server (and only it) before ending the session.
+port or the remote port is taken (exit 3) or the GPU lock is busy (exit 75), sends nothing through the tunnel before its
+own start marker and uses the server only once its request shows in this session's serve log (exit 3 otherwise: the
+tunnel reaches someone else's server), runs the command with II_INFERENCE_HOST=gpu-server and always stops its own
+server (and only it) before ending the session, also when a signal arrives while the remote side is still starting.
 
 Nothing here reaches gpu-server: a fake `ssh` on PATH plays the remote. It runs the remote command the way WSL does
 (the default Linux shell runs `bash -lc "..."`) in a scratch "remote home" whose PATH has fake `flock`, `pkill` and
-`pgrep` (a process table of registered command lines) and whose ~/opt/ollama-0.35.0/bin/ollama is a stub HTTP server;
-port 11434 of the remote is mapped to a free loopback port and the -L forward is a small relay."""
+`pgrep` (a process table of registered command lines) and whose ~/opt/ollama-0.35.0/bin/ollama is a stub HTTP server
+that logs each request like Ollama's request log; port 11434 of the remote is mapped to a free loopback port and the -L
+forward is a small relay. FAKE_LOGIN_DELAY makes the remote login shell slow (wsl.exe and `bash -l` take seconds on the
+real desktop); FAKE_WINDOWS_PORT sends the forward somewhere else than WSL's 127.0.0.1:11434 (WSL2's NAT mode: the
+forward ends on Windows' loopback, which a check inside WSL cannot see)."""
 
 import fcntl
 import json
@@ -40,6 +45,10 @@ FAKE_SSH = textwrap.dedent('''\
         dest, command = argv[i], " ".join(argv[i + 1:])
         log.write(json.dumps({"pid": os.getpid(), "opts": opts, "forwards": forwards, "dest": dest,
                               "command": command}) + "\\n")
+    # a signal that ssh inherits as ignored stays ignored (OpenSSH, clientloop.c); otherwise SIGTERM / SIGHUP end it
+    for sig in (signal.SIGTERM, signal.SIGHUP):
+        if signal.getsignal(sig) != signal.SIG_IGN:
+            signal.signal(sig, lambda *a: os._exit(255))
     if os.environ.get("FAKE_SSH") == "unreachable" or (not forwards and os.environ.get("FAKE_SSH_STOP") == "unreachable"):
         print("ssh: connect to host gpu-server port 22: Operation timed out", file=sys.stderr)
         sys.exit(255)
@@ -51,7 +60,8 @@ FAKE_SSH = textwrap.dedent('''\
             or any(c in payload for c in '"%^!'):
         print(f"fake ssh: unexpected remote command {command!r}", file=sys.stderr)
         sys.exit(98)
-    remote = os.environ["FAKE_REMOTE_PORT"]  # the remote's 127.0.0.1:11434, mapped to a free local port
+    remote = os.environ["FAKE_REMOTE_PORT"]  # the remote's 127.0.0.1:11434 (inside WSL), mapped to a free local port
+    windows = os.environ.get("FAKE_WINDOWS_PORT", remote)  # where the forward ends (WSL2 localhost forwarding: the same)
     rest = command[len(wsl):].replace("127.0.0.1:11434", "127.0.0.1:" + remote).replace(
         "/dev/tcp/127.0.0.1/11434", "/dev/tcp/127.0.0.1/" + remote)
 
@@ -74,7 +84,7 @@ FAKE_SSH = textwrap.dedent('''\
         while True:
             client, _ = listener.accept()
             try:
-                upstream = socket.create_connection(("127.0.0.1", int(remote)))
+                upstream = socket.create_connection(("127.0.0.1", int(windows)))
             except OSError:  # like "channel open failed: connect failed"
                 client.close()
                 continue
@@ -96,9 +106,12 @@ FAKE_SSH = textwrap.dedent('''\
         threading.Thread(target=accept, args=(listener,), daemon=True).start()
     env = {**os.environ, "HOME": os.environ["FAKE_REMOTE_HOME"],
            "PATH": os.environ["FAKE_REMOTE_BIN"] + ":" + os.environ["PATH"]}
+    def remote_signals():  # the remote's processes do not inherit this Mac's signal dispositions
+        for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+            signal.signal(sig, signal.SIG_DFL)
+
     # WSL runs the command line with the default Linux shell; the remote processes outlive a dropped session
-    child = subprocess.Popen(["bash", "-c", rest], env=env, start_new_session=True)
-    signal.signal(signal.SIGTERM, lambda *a: os._exit(255))
+    child = subprocess.Popen(["bash", "-c", rest], env=env, start_new_session=True, preexec_fn=remote_signals)
     code = child.wait()
     sys.exit(code if code >= 0 else 128 - code)
 ''')
@@ -138,7 +151,8 @@ FAKE_OLLAMA = PROCS + textwrap.dedent('''\
         sys.exit(1)
 
     class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
+        def do_GET(self):  # Ollama's request log (gin) on stdout: path and query string
+            print(f'[GIN] 2026/10/11 - 00:00:00 | 200 | 1ms | 127.0.0.1 | GET      "{self.path}"', flush=True)
             raw = json.dumps({"version": "0.35.0"}).encode()
             self.send_response(200)
             self.send_header("Content-Length", str(len(raw)))
@@ -261,7 +275,7 @@ def remote(tmp_path):
     script(remote_bin / "pgrep", FAKE_PGREP)
     script(home / "opt/ollama-0.35.0/bin/ollama", FAKE_OLLAMA)
     # a login shell resets PATH from /etc/profile; the remote user's profile puts its tools first (as ~/.profile does)
-    (home / ".bash_profile").write_text(f'export PATH="{remote_bin}:$PATH"\n')
+    (home / ".bash_profile").write_text(f'export PATH="{remote_bin}:$PATH"\nsleep "${{FAKE_LOGIN_DELAY:-0}}"\n')
     procs, locks = tmp_path / "procs", tmp_path / "locks"
     procs.mkdir()
     locks.mkdir()
@@ -273,7 +287,7 @@ def remote(tmp_path):
            "FAKE_REMOTE_PORT": str(remote_port), "FAKE_REMOTE_HOME": str(home), "FAKE_REMOTE_BIN": str(remote_bin),
            "FAKE_REMOTE_PROCS": str(procs), "FAKE_LOCK_DIR": str(locks), "FAKE_FLOCK_LOG": str(tmp_path / "flock.jsonl"),
            "FAKE_PKILL_LOG": str(tmp_path / "pkill.jsonl"), "FAKE_RECORD": str(tmp_path / "record.json")}
-    for key in ("II_INFERENCE_HOST", "II_INFERENCE_TUNNEL_PID"):
+    for key in ("II_INFERENCE_HOST", "II_INFERENCE_TUNNEL_PID", "FAKE_LOGIN_DELAY", "FAKE_WINDOWS_PORT"):
         env.pop(key, None)
     state = {"tmp": tmp_path, "project": project, "home": home, "procs": procs, "locks": locks, "port": port,
              "remote_port": remote_port, "env": env, "record": tmp_path / "record.json", "marker": tmp_path / "ran.json",
@@ -299,6 +313,40 @@ def decoy(remote, cmdline: str) -> subprocess.Popen:
     (remote["procs"] / str(proc.pid)).write_text(cmdline)
     remote["decoys"].append(proc)
     return proc
+
+
+FOREIGN = textwrap.dedent('''\
+    import json, sys
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            with open(sys.argv[2], "a") as f:
+                f.write(self.path + "\\n")
+            raw = json.dumps({"version": "0.35.0"}).encode()  # even the pinned version: still not this session's server
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def log_message(self, *args):
+            pass
+
+    HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+''')
+
+
+def foreign(remote, port: int) -> Path:
+    """An Ollama-like server this wrapper did not start (e.g. another project's, holding the GPU lock); returns the file
+    of the requests it received."""
+    requests = remote["tmp"] / f"foreign-{port}.txt"
+    proc = subprocess.Popen([sys.executable, "-c", FOREIGN, str(port), str(requests)])
+    remote["decoys"].append(proc)
+    for _ in range(100):
+        if listening(port):
+            return requests
+        time.sleep(0.1)
+    raise AssertionError("the foreign server did not start")
 
 
 def run(remote, *command, **env):
@@ -365,6 +413,7 @@ def test_a_busy_gpu_lock_exits_75_runs_nothing_and_stops_nothing(remote):
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
         done = run(remote, *probe(remote))
     assert done.returncode == 75 and "GPU lock" in done.stderr and "do not preempt" in done.stderr
+    assert "no remote ollama serve was started by this session" in done.stderr  # flock -n said so: nothing was started
     assert not remote["marker"].exists() and not remote["record"].exists()
     assert stale.poll() is None and lines(remote["tmp"] / "pkill.jsonl") == []  # nothing was stopped
     assert len(lines(remote["tmp"] / "ssh.jsonl")) == 1 and (remote["locks"] / "ai-portfolio-gpu.lock").exists()
@@ -387,10 +436,78 @@ def test_a_server_already_listening_on_either_end_is_neither_used_nor_stopped(re
     assert lines(remote["tmp"] / "pkill.jsonl") == []
 
 
+@pytest.mark.parametrize("held", [True, False], ids=["gpu-lock-busy", "remote-port-busy"])
+def test_a_server_already_answering_on_the_remote_port_is_never_used_while_the_remote_side_starts(remote, held):
+    # the -L forward works as soon as ssh is authenticated, seconds before wsl.exe and the login shell reach flock and the
+    # port check: a server of another workload that answers there meanwhile must not be taken for this session's
+    requests = foreign(remote, remote["remote_port"])
+    with open(remote["locks"] / "ai-portfolio-gpu.lock", "w") as lock:
+        if held:  # e.g. another project's Ollama, under the shared GPU lock
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        done = run(remote, *probe(remote), FAKE_LOGIN_DELAY="2")
+    assert done.returncode == (75 if held else 3), done.stderr
+    assert ("do not preempt" if held else "already listens on gpu-server's 127.0.0.1:11434") in done.stderr
+    assert not remote["marker"].exists() and not remote["record"].exists()  # nothing was run, nothing was started
+    assert not requests.exists()  # and nothing was sent to that server
+    assert lines(remote["tmp"] / "pkill.jsonl") == [] and listening(remote["remote_port"])
+
+
+def test_a_server_on_the_windows_side_that_the_tunnel_reaches_instead_is_refused(remote):
+    # WSL2's NAT mode: the forward ends on Windows' 127.0.0.1:11434, the port check inside WSL sees WSL's; something
+    # already listening on the Windows side (e.g. Ollama for Windows) would answer instead of this session's server
+    windows = free_port()
+    requests = foreign(remote, windows)
+    done = run(remote, *probe(remote), FAKE_WINDOWS_PORT=str(windows))
+    assert done.returncode == 3 and "not the one this session started" in done.stderr, done.stderr
+    assert "Windows" in done.stderr and "ask the user" in done.stderr
+    assert not remote["marker"].exists()  # nothing was run
+    sent = requests.read_text().splitlines()  # one request identified it; it is neither used further nor stopped
+    assert len(sent) == 1 and sent[0].startswith("/api/version?ii_session=")
+    assert listening(windows)
+    record = json.loads(remote["record"].read_text())  # this session's own server did start, under the lock: stopped
+    assert gone(record["pid"]) and "remote ollama serve stopped" in done.stderr
+    with open(remote["locks"] / "ai-portfolio-gpu.lock", "w") as f:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_the_server_identifies_itself_through_the_tunnel_before_the_command_runs(remote):
+    # the readiness request carries a token of this session that must show in this session's serve log
+    assert run(remote, *probe(remote, 0)).returncode == 0
+    served = (remote["tmp"] / "serve.log").read_text()
+    assert served.index(STARTED) < served.index('"/api/version?ii_session=')
+
+
+@pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGHUP, signal.SIGINT], ids=["TERM", "HUP", "INT"])
+def test_a_signal_while_the_remote_side_is_still_starting_still_stops_the_server_it_starts(remote, sig):
+    # a signal to the whole process group before the start marker arrived (closing the terminal, stopping a background
+    # command): the local ssh must survive it, so that the wrapper can wait for the marker and stop what was started
+    env = {**remote["env"], "FAKE_LOGIN_DELAY": "3"}
+    proc = subprocess.Popen(["bash", str(SCRIPT), *probe(remote, 0)], cwd=remote["project"], env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    for _ in range(300):
+        if lines(remote["tmp"] / "ssh.jsonl"):
+            break
+        time.sleep(0.1)
+    time.sleep(0.5)
+    assert STARTED not in (remote["tmp"] / "serve.log").read_text()  # the remote side is still starting
+    os.killpg(proc.pid, sig)
+    _, err = proc.communicate(timeout=90)
+    assert proc.returncode == 128 + sig and not remote["marker"].exists(), err
+    assert "remote ollama serve stopped" in err, err
+    assert gone(json.loads(remote["record"].read_text())["pid"])
+    assert [entry for entry in remote["procs"].iterdir()] == []  # neither flock nor the server is left
+    with open(remote["locks"] / "ai-portfolio-gpu.lock", "w") as f:  # the shared GPU lock is free
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    assert not listening(remote["port"]) and not listening(remote["remote_port"])
+
+
 def test_an_unreachable_gpu_server_or_a_server_that_does_not_come_up_runs_nothing(remote):
     done = run(remote, *probe(remote), FAKE_SSH="unreachable")
     assert done.returncode == 3 and "ssh gpu-server failed" in done.stderr and "blocked" in done.stderr
     assert not remote["marker"].exists()
+    # an ssh failure does not prove that nothing was started (the session may have dropped after the remote started)
+    assert "no remote ollama serve was started by this session" not in done.stderr
+    assert "could not confirm that no remote ollama serve" in done.stderr and "connect to host" in done.stderr
     done = run(remote, *probe(remote), FAKE_MODE="die")
     assert done.returncode == 3 and "ended" in done.stderr and not remote["marker"].exists()
     assert remote["record"].exists()  # it was started, then died: the session ended with it
