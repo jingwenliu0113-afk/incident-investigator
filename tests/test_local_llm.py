@@ -17,7 +17,7 @@ from test_eval_runner import stored
 COMMITTED_BUDGETS = {"dump_all_proxy_tokens": 120_000, "retrieval_queries": 8, "retrieval_k": 25,
                      "agent_max_tool_calls": 40, "agent_max_proxy_tokens": 120_000, "agent_max_turns": 30}
 RECORD = {"provider": "ollama", "model": MODEL, "model_version": DIGEST, "ollama_version": VERSION, "num_ctx": 196_608,
-          "num_predict": 8192, "temperature": 0, "seed": 42, "think": False}
+          "num_predict": 8192, "temperature": 0, "seed": 42, "think": False, "host": "local"}
 
 
 def write(tmp_path, config, name="llm.json"):
@@ -69,8 +69,11 @@ def test_the_committed_config_is_the_model_the_user_approved_with_unchanged_budg
     # the probe's estimate for a call near the full context is below it, review 2026-10-10)
     config = json.loads(LLM_CONFIG.read_text())
     assert config["status"] == "approved" and {k: config[k] for k in APPROVED} == APPROVED
-    assert config["ollama"] == {"url": "http://127.0.0.1:11434", "version": "0.35.0", "num_ctx": 262_144,
-                                "num_predict": 8192, "seed": 42, "think": False, "timeout_s": 3600}
+    # decision 029 revision 1 (user decision 2026-10-11): the model runs on the RTX 5070 Ti desktop (host gpu-server,
+    # tools/with-remote-ollama); nothing else of the approved settings changes
+    assert config["ollama"] == {"url": "http://127.0.0.1:11434", "host": "gpu-server", "version": "0.35.0",
+                                "num_ctx": 262_144, "num_predict": 8192, "seed": 42, "think": False, "timeout_s": 3600}
+    assert "029 revision 1" in config["note"] and "同意" in config["note"]
     assert config["budgets"] == COMMITTED_BUDGETS and "029" in config["note"] and "照建議" in config["note"]
     assert "7200" not in config["note"]  # the note records only what the user approved
     assert load_llm_config() == config  # every pinned field and the context fit pass; no server is asked
@@ -78,23 +81,32 @@ def test_the_committed_config_is_the_model_the_user_approved_with_unchanged_budg
     assert fit["dump-all"]["fits"] and fit["agent"]["fits"]
 
 
-def test_the_committed_config_runs_nothing_without_the_heavy_lock(tmp_path, monkeypatch):
-    # what `python -m eval run --method retrieval --set pilot` does outside with-mac-lock: past the approval, refused at
-    # the heavy lock, before the power state or the server is read and before anything is written
+def test_the_committed_config_runs_nothing_outside_its_wrapper(tmp_path, monkeypatch):
+    # what `python -m eval run --method retrieval --set pilot` does outside tools/with-remote-ollama (the committed
+    # inference host is gpu-server, decision 029 revision 1): past the approval, refused before the power or GPU state or
+    # the server is read and before anything is written; the Mac heavy lock is not what it asks for
+    import eval.inference_host as inference_host
+
     layout = stored(tmp_path / "data")
     out = tmp_path / "results"
 
     def no_server(url, timeout):
         raise AssertionError("the local server was reached")
 
+    def no_gpu(*args, **kwargs):
+        raise AssertionError("the GPU state was read")
+
     def busy(project_dir):
         raise soak.LockNotHeld("Mac heavy lock not held; run via ./tools/with-mac-lock (MACHINE_POLICY.md)")
 
     monkeypatch.setattr(ollama, "default_transport", no_server)
+    monkeypatch.setattr(inference_host, "gpu_facts", no_gpu)
     monkeypatch.setattr(soak, "require_heavy_lock", busy)
+    monkeypatch.delenv("II_INFERENCE_HOST", raising=False)
+    monkeypatch.delenv("II_INFERENCE_TUNNEL_PID", raising=False)
     reads = power(monkeypatch)
     for method in LLM_METHODS:
-        with pytest.raises(soak.LockNotHeld, match="heavy lock"):
+        with pytest.raises(inference_host.NotWrapped, match="with-remote-ollama"):
             run_method(layout, method, "pilot", out)
     assert not out.exists() and reads == []
 
@@ -111,6 +123,8 @@ def test_the_committed_config_runs_nothing_without_the_heavy_lock(tmp_path, monk
     ({"ollama": {**approved_config()["ollama"], "num_predict": 300_000}}, "num_predict"),
     ({"ollama": {**approved_config()["ollama"], "seed": 0}}, "seed"),
     ({"ollama": {**approved_config()["ollama"], "think": None}}, "think"),
+    ({"ollama": {k: v for k, v in approved_config()["ollama"].items() if k != "host"}}, "ollama.host"),
+    ({"ollama": {**approved_config()["ollama"], "host": "192.168.1.20"}}, "ollama.host"),
 ])
 def test_an_approved_local_config_must_pin_every_field(tmp_path, change, says):
     assert load_llm_config(write(tmp_path, approved_config()))["provider"] == "ollama"
@@ -168,11 +182,11 @@ def test_a_pilot_run_on_the_local_model_pins_it_and_records_the_runtime(tmp_path
     # decision 029, user decision 2026-10-10 (item 5): a power sample before and after each incident, in a sidecar only
     for method in LLM_METHODS:
         lines = power_lines(out, "pilot", method)
-        assert [(e["incident_id"], e["attempt"], e["formal"]) for e in lines] == [("INC-001", None, True)]
+        assert [(e["incident_id"], e["attempt"], e["formal"], e["host"]) for e in lines] == [("INC-001", None, True, "local")]
         assert lines[0]["before"]["power"] == lines[0]["after"]["power"] == FORMAL and lines[0]["problems"] == []
         assert "power" not in json.dumps(json.loads((out / "pilot" / method / "run_config.json").read_text()))
         assert "power" not in json.loads((out / "pilot" / method / "INC-001.json").read_text())  # decision 013 format
-    assert result["usage"]["latency_power"] == {"condition": "AC Power, powermode 2 (decision 025 revision 3)",
+    assert result["usage"]["latency_power"] == {"host": "local", "condition": "AC Power, powermode 2 (decision 025 revision 3)",
                                                "incidents_timed": 1, "not_formal": []}
     assert "latency of all 1 timed incidents was measured on AC power in the high power mode" in table
     assert pilot_llm_problems(out, approved_config(), LLM_METHODS)[0] == []  # what the freeze check reads (026 #32)

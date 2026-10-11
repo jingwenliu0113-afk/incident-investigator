@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# with-remote-ollama（decision 029 修訂 1，使用者決定 2026-10-11）
+#
+# 用法（從 project 根目錄執行；不需要 Mac heavy lock，見最後）：
+#   ./tools/with-remote-ollama <command> [args...]
+# 例如：
+#   ./tools/with-remote-ollama uv run python -m eval local-probe --model qwen3.5:9b-q4_K_M --num-ctx 262144 --out <path>
+#   ./tools/with-remote-ollama uv run python -m eval run --method retrieval --set pilot
+#
+# LLM 方法的模型呼叫在使用者的 RTX 5070 Ti 桌機上執行（只透過使用者既有的 alias `ssh gpu-server`；Windows 11 + OpenSSH，
+# 預設 shell 是 cmd；Ollama 在 WSL Ubuntu-22.04 裡）。eval 本身（snapshot、ground truth、評分）一律留在這台 Mac：
+# 只有模型呼叫經過 tunnel，adapter 仍然只連 127.0.0.1。
+#   1. 本機 127.0.0.1:<port> 已經有程式在聽 → 拒絕（exit 3），不聯絡 gpu-server。
+#   2. 一個背景的 ssh session 同時：
+#      - 轉送 Mac 127.0.0.1:<port> → gpu-server 127.0.0.1:11434（WSL2 的 localhost 轉送把 WSL 的 127.0.0.1:11434 開在 Windows 的
+#        localhost）；-o ExitOnForwardFailure=yes、-o BatchMode=yes、ServerAliveInterval；
+#      - 在 WSL 裡取得共用的 GPU lock（`flock -n -E 75 /tmp/ai-portfolio-gpu.lock`，使用者其他 project 的慣例；不等、不搶、不刪），
+#        lock 內先確認遠端 127.0.0.1:11434 沒有人在聽（有就 exit 3，不使用也不停止它），印出啟動標記，再以固定的環境
+#        `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 OLLAMA_MODELS=<models> <binary> serve` 啟動。
+#      GPU lock 被占用 → exit 75（與 with-mac-lock 相同的意思），什麼都不執行。ssh 本身失敗（離線、轉送失敗）→ exit 3：
+#      LLM 的步驟標記 blocked，繼續 Mac 上的工作（MACHINE_POLICY）。
+#   3. 經由 tunnel 等 /api/version 回應（最多 120 秒），再以 II_INFERENCE_HOST=gpu-server 與 II_INFERENCE_TUNNEL_PID（本機 ssh 的 pid）
+#      執行指令：Python 端（eval/inference_host.py）以這兩個值確認自己在這個 wrapper 之下。
+#   4. 不論指令成功、失敗或被中斷：只停止這次啟動的 server——只在這次的 session 印出啟動標記之後，遠端
+#      `pkill -x -f` 整個命令列完全等於「<binary> serve」的程序（樣式裡的空白寫成 `.`，避開 cmd / wsl / bash 的引號），
+#      等它結束（GPU lock 隨它釋放；30 秒後才 KILL），再結束本機的 ssh，印出 serve 的 log（ssh session 的輸出）在哪裡。
+#      無法確認已停止時印出檢查的指令、exit 3（指令本身失敗時保留它的 exit code）；絕不刪 lock、不停止其他程序。
+# 遠端的命令只用 $HOME 這一個變數，不含 cmd.exe 會解讀的字元（" % ^ !）：不論 wsl.exe 是否先經過預設的 Linux shell，結果都相同。
+# Mac heavy lock 不需要：Mac 只跑輕量的 eval 迴圈（讀 snapshot、送請求、寫結果），重的推論在桌機上（decision 029 修訂 1）。
+#
+# 遠端的兩個路徑（WSL 使用者的 home，由主 session 不用 sudo 安裝）只在這裡定義：
+REMOTE_OLLAMA_BIN_DEFAULT='$HOME/opt/ollama-0.35.0/bin/ollama'  # Ollama 0.35.0（釘選的版本，decision 029）
+REMOTE_OLLAMA_MODELS_DEFAULT='$HOME/ii-ollama-models'  # 只給本 project 用：qwen3.5:9b-q4_K_M 的 manifest 與 blob（從 Mac 複製）
+# 只供測試覆寫：II_REMOTE_OLLAMA_BIN、II_REMOTE_OLLAMA_MODELS、II_OLLAMA_PORT（本機的 port，預設 11434；遠端永遠是 127.0.0.1:11434）、
+# OLLAMA_SERVE_LOG（預設：一個暫存檔，結束時印出路徑）。
+
+set -u
+
+REMOTE=gpu-server
+DISTRO=Ubuntu-22.04
+GPU_LOCK=/tmp/ai-portfolio-gpu.lock
+REMOTE_PORT=11434
+STARTED=II-REMOTE-SERVE-STARTING
+PORT_BUSY=II-REMOTE-PORT-BUSY
+BIN="${II_REMOTE_OLLAMA_BIN:-$REMOTE_OLLAMA_BIN_DEFAULT}"
+MODELS="${II_REMOTE_OLLAMA_MODELS:-$REMOTE_OLLAMA_MODELS_DEFAULT}"
+PORT="${II_OLLAMA_PORT:-11434}"
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: $0 <command> [args...]" >&2
+  exit 64
+fi
+case "$PORT" in
+  '' | *[!0-9]*) echo "ERROR: II_OLLAMA_PORT must be a port number, got '$PORT'" >&2; exit 64 ;;
+esac
+for path in "$BIN" "$MODELS"; do  # nothing that cmd.exe, wsl.exe or a shell would read differently
+  rest="${path#\$HOME}"
+  case "$rest" in
+    /*) ;;
+    *) echo "ERROR: a remote path must be absolute or start with \$HOME/, got '$path'" >&2; exit 64 ;;
+  esac
+  case "$rest" in
+    *[!A-Za-z0-9_./-]*) echo "ERROR: a remote path may only use A-Z a-z 0-9 _ . / -, got '$path'" >&2; exit 64 ;;
+  esac
+done
+
+if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+  echo "ERROR: something already listens on 127.0.0.1:$PORT on this Mac: a server or tunnel not started here is neither" \
+       "used nor stopped; stop it yourself (or ask the user) and run again" >&2
+  exit 3
+fi
+
+log="${OLLAMA_SERVE_LOG:-$(mktemp -t ii-remote-ollama.XXXXXX)}"
+: >"$log"
+serve_payload="exec flock -n -E 75 $GPU_LOCK bash -c '(exec 3<>/dev/tcp/127.0.0.1/$REMOTE_PORT) 2>/dev/null && { echo $PORT_BUSY: something already listens on 127.0.0.1:$REMOTE_PORT >&2; exit 3; }; echo $STARTED >&2; exec env OLLAMA_HOST=127.0.0.1:$REMOTE_PORT OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 OLLAMA_MODELS=$MODELS $BIN serve'"
+pattern="$BIN.serve"  # pkill / pgrep -x -f: the whole command line is exactly "<binary> serve"
+stop_payload="{ command -v pkill && command -v pgrep; } >/dev/null || exit 2; pkill -TERM -x -f $pattern; for _ in {1..60}; do pgrep -x -f $pattern >/dev/null || exit 0; sleep 0.5; done; pkill -KILL -x -f $pattern; sleep 1; pgrep -x -f $pattern >/dev/null && exit 1; exit 0"
+ssh_pid=""
+
+started() {
+  grep -q "$STARTED" "$log" 2>/dev/null
+}
+
+stop_remote() {
+  local status=$?
+  trap '' INT TERM HUP  # the remote stop is not cut short by a second signal
+  local confirmed=1
+  if [ -n "$ssh_pid" ]; then
+    if ! started && kill -0 "$ssh_pid" 2>/dev/null; then  # interrupted right after the start: did this session start one?
+      for _ in $(seq 60); do
+        started && break
+        kill -0 "$ssh_pid" 2>/dev/null || break
+        sleep 0.5
+      done
+    fi
+    if started; then
+      ssh -n -o BatchMode=yes -o ConnectTimeout=30 -o ControlPath=none "$REMOTE" \
+        "wsl.exe -d $DISTRO -- bash -lc \"$stop_payload\"" >>"$log" 2>&1 || confirmed=0
+    fi
+    if kill -0 "$ssh_pid" 2>/dev/null; then
+      kill -TERM "$ssh_pid" 2>/dev/null
+      for _ in $(seq 20); do
+        kill -0 "$ssh_pid" 2>/dev/null || break
+        sleep 0.5
+      done
+      kill -0 "$ssh_pid" 2>/dev/null && kill -KILL "$ssh_pid" 2>/dev/null
+    fi
+    wait "$ssh_pid" 2>/dev/null
+  fi
+  if ! started; then
+    echo "no remote ollama serve was started by this session; the ssh session's output: $log" >&2
+  elif [ "$confirmed" -eq 1 ]; then
+    echo "remote ollama serve stopped on $REMOTE (the GPU lock is released with it); its log (the ssh session's output): $log" >&2
+  else
+    echo "WARNING: could not confirm that the remote ollama serve this session started on $REMOTE stopped; it holds the" \
+         "shared GPU lock until it does. Check on $REMOTE: ssh $REMOTE 'wsl.exe -d $DISTRO -- pgrep -af ollama'; do not" \
+         "delete the lock (MACHINE_POLICY.md); report it to the user. The results of the command stand. Log: $log" >&2
+    [ "$status" -eq 0 ] && status=3
+  fi
+  exit "$status"
+}
+trap stop_remote EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+ssh -n -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+  -o ConnectTimeout=30 -o ControlPath=none -L "127.0.0.1:$PORT:127.0.0.1:$REMOTE_PORT" "$REMOTE" \
+  "wsl.exe -d $DISTRO -- bash -lc \"$serve_payload\"" >"$log" 2>&1 &
+ssh_pid=$!
+
+ready=0
+for _ in $(seq 240); do
+  kill -0 "$ssh_pid" 2>/dev/null || break
+  if curl --noproxy '*' -sf -m 2 "http://127.0.0.1:$PORT/api/version" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 0.5
+done
+if [ "$ready" -ne 1 ]; then
+  if kill -0 "$ssh_pid" 2>/dev/null; then
+    echo "ERROR: the remote ollama serve did not answer through the tunnel within 120 s (log: $log); nothing was run" >&2
+    exit 3
+  fi
+  wait "$ssh_pid"
+  code=$?
+  case "$code" in
+    75)
+      echo "ERROR: the shared GPU lock $GPU_LOCK on $REMOTE is held by another workload; nothing was run; do not preempt" \
+           "it or delete the lock: run again when it is free (MACHINE_POLICY.md)" >&2
+      exit 75 ;;
+    255)
+      echo "ERROR: ssh $REMOTE failed (offline, unreachable, or the local forward of port $PORT failed; log: $log): nothing" \
+           "was run; mark the LLM step blocked and go on with the work on this Mac (MACHINE_POLICY.md)" >&2
+      exit 3 ;;
+  esac
+  if [ "$code" -eq 3 ] && grep -q "$PORT_BUSY" "$log"; then
+    echo "ERROR: something already listens on $REMOTE's 127.0.0.1:$REMOTE_PORT (inside WSL $DISTRO): a server not started" \
+         "by this wrapper is neither used nor stopped; nothing was run; ask the user" >&2
+    exit 3
+  fi
+  echo "ERROR: the remote ollama serve ended (status $code) before it answered (log: $log); nothing was run" >&2
+  exit 3
+fi
+
+II_INFERENCE_HOST=gpu-server II_INFERENCE_TUNNEL_PID="$ssh_pid" "$@"
+exit $?

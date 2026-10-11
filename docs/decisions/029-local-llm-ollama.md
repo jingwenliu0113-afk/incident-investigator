@@ -18,6 +18,9 @@
   解析不了的 tool call 參數由 harness 拒收；回覆檢查加上兩項不依賴 `truncate: false` 的檢查；探測的防護自我測試要求 server 自己拒絕並加上多則訊息的情況；
   server 與模型只在一次 heavy lock 內存在（`tools/with-local-ollama`、執行結束時卸載模型）；Ollama 版本釘選改列為待使用者確認；探測記錄電力狀態。
   只拒絕更多或只增加紀錄，沒有放寬任何條件。
+  **修訂 1（2026-10-11，使用者決定「同意」；Pilot 上 retrieval / agent 已在 Mac 跑過、任何 held-out 資料與 freeze 之前）**：推論改在使用者的
+  RTX 5070 Ti 桌機（`ollama.host` = `gpu-server`，`tools/with-remote-ollama`；eval、snapshot 與 ground truth 留在 Mac），這種執行不需要 Mac heavy lock、
+  不檢查 Mac 的電力模式，改為記錄 GPU 的狀態；三個 LLM 方法要在 Pilot 上用 GPU 重跑。模型與其他設定、預算、指標都不變。見文末「修訂 1」。
 - 影響範圍：新增 `agent/ollama.py`（adapter）、`eval/probe.py`（`python -m eval local-probe`）、`tools/with-local-ollama`；
   `eval/runner.py`（`load_llm_config`、`llm_fit`、`start_llm`、`pinned_model`、`finish_llm`、`run_llm`、`_llm`、`run_config.json` 的 `llm`、評分表多一行）；
   `agent/harness.py`（`_arguments`：adapter 標記為解析不了的參數照 020 §3 拒收；`CallError` 的說明）；`eval/__main__.py`；
@@ -26,6 +29,10 @@
   `power.jsonl`、評分的 `latency_power`、`pilot_llm_problems`）；`agent/ollama.py`（`pinned_record`）；`collect/freeze.py`（026 修訂 3）；
   decision 023、026、028 的補註；README；NEXT。
   **不改**任何預算數值、指標、切分、門檻、freeze 協定，也不改 decision 013、020–024、026 的任何規則（`RETRYABLE` 仍只有 `api_error`、`transport_error`）。
+  **修訂 1（2026-10-11）**：新增 `tools/with-remote-ollama`、`eval/inference_host.py`；`eval/llm_methods.json`（`ollama.host`、`note`）；
+  `agent/ollama.py`（`HOSTS`、`config_problems`、`run_record` 的 `host`）；`eval/runner.py`（`start_llm`、`host_watch`、`MacPower`、`GpuState`、
+  `power.jsonl` 的 `host`、評分的 `latency_power` 與表）；`eval/probe.py` 與 `eval/__main__.py`（`--host`）；MACHINE_POLICY「遠端 GPU」；
+  026 解讀 32 的補註；README；`tools/README.md`；NEXT。
 
 ## 背景
 
@@ -360,3 +367,141 @@
 - `tests/test_heldout_freeze.py`、`tests/test_collect_cli.py`：見 026 修訂 3。
 - `tests/test_eval_runner.py`、`tests/test_eval_heldout.py`：原本以「committed 設定是 proposed」測試的拒絕，改用測試內寫的 proposed 設定；
   另測 committed 設定在 held-out 上也在 heavy lock 拒絕。
+
+## 修訂 1（2026-10-11，使用者決定）：推論改在 RTX 5070 Ti
+
+- 使用者原話：「不然就先停吧 我沒有更高瓦數的usec 還是說你要去5070ti上跑？」；助理提出下面的計畫，使用者回答「同意」。
+  時間：Pilot 上的 retrieval 與 agent 已在 Mac 跑完並評分（2026-10-10/11），dump-all 的重跑停在 5/10；任何 held-out 資料與 freeze 之前。
+- 只改「模型在哪裡推論」與跟著它的執行條件（wrapper、heavy lock、電力 → GPU 狀態的紀錄）。模型、digest、Ollama 版本、`num_ctx`、`num_predict`、
+  temperature、seed、think、`timeout_s`、price、預算、指標、切分、門檻、評分都不變。
+
+### 背景
+
+- Mac（M4 Pro）在高效能模式下跑本機模型，耗電超過 70 W 的充電器：2026-10-11 dump-all 的重跑（08:07 起）接著 AC 電池仍每小時約掉 17–18%，
+  跑完前會沒電，使用者在 10:38 停止（做完 5/10；中途停止的 Pilot 執行不評分）。029「照建議」第 5 項的電力條件（高效能 + AC）因此無法在整個執行中維持。
+- held-out（每個 fault 5 個，約 50 個 incident × 三個方法）依 Pilot 的速度估計需要約 35–50 小時的 Mac 重負載，在 70 W 下不可行；使用者沒有更高瓦數的充電器。
+- 使用者有一台 RTX 5070 Ti 桌機（16 GB VRAM；Windows 11 + OpenSSH，預設 shell 是 cmd；WSL Ubuntu-22.04），已設定好 alias `ssh gpu-server`；
+  使用者的其他 project 在 WSL 裡以 `flock -n /tmp/ai-portfolio-gpu.lock` 共用 GPU。
+
+### 決策
+
+1. **推論主機是設定的一部分**：`eval/llm_methods.json` 新增 `ollama.host`，值只能是 `"local"`（這台 Mac：`with-mac-lock` + `with-local-ollama`，
+   本文件原本的規則）或 `"gpu-server"`（`tools/with-remote-ollama`）；其他值或沒有這個欄位，`load_llm_config` 拒絕。committed 設定改為 `"gpu-server"`，
+   其他欄位逐項不變（`approved`、`qwen3.5:9b-q4_K_M`、digest `sha256:6488c96f…3ea7`、Ollama 0.35.0、`num_ctx` 262,144、`num_predict` 8192、seed 42、
+   think 關、temperature 0、price 0、`timeout_s` 3600、預算），`note` 補一句本修訂。
+2. **只有模型呼叫在桌機上**：eval 迴圈仍在 Mac 執行；snapshot、ground truth、評分與結果都不離開 Mac（ground truth 的隔離不變）。模型呼叫經 SSH 的本機轉送：
+   Mac `127.0.0.1:11434` → gpu-server `127.0.0.1:11434`（WSL2 的 localhost 轉送把 WSL 的 `127.0.0.1:11434` 開在 Windows 的 localhost）。
+   adapter 的「只連 loopback」規則與它的檢查都不變（仍連 `127.0.0.1`）。**照實說明**：在這個 wrapper 之下，那個 loopback 端點是一條通到使用者自己
+   GPU 桌機的 tunnel，不是這台 Mac 上的 server；它不是付費或第三方服務（MACHINE_POLICY「外部費用」：既有的本地硬體），拒絕 cloud 模型的檢查也照舊。
+3. **桌機上的安裝**（主 session 做，WSL 使用者的 home、不需要 sudo）：Ollama 0.35.0 在 `~/opt/ollama-0.35.0`（執行檔 `~/opt/ollama-0.35.0/bin/ollama`），
+   只給本 project 的 models 目錄 `~/ii-ollama-models`（從 Mac 複製 `qwen3.5:9b-q4_K_M` 的 manifest 與 blob，digest 同上）。兩個路徑只定義在
+   `tools/with-remote-ollama` 的開頭（只供測試覆寫，且只接受安全的字元）。版本與 digest 照舊由每次執行的釘選檢查經 API 確認。
+4. **`tools/with-remote-ollama`**（對照 `with-local-ollama`）：
+   - 本機 `127.0.0.1:11434` 已有程式在聽 → exit 3，不聯絡 gpu-server。
+   - 一個背景的 ssh session（`-L 127.0.0.1:11434:127.0.0.1:11434`、`ExitOnForwardFailure=yes`、`BatchMode=yes`、`ServerAliveInterval=30`、
+     `ControlPath=none`）同時在遠端執行
+     `wsl.exe -d Ubuntu-22.04 -- bash -lc "exec flock -n -E 75 /tmp/ai-portfolio-gpu.lock bash -c '…'"`，lock 內：遠端 `127.0.0.1:11434` 已有程式在聽
+     → exit 3（不是這次啟動的，不使用也不停止它）；否則印出啟動標記，再
+     `exec env OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 OLLAMA_MODELS=$HOME/ii-ollama-models $HOME/opt/ollama-0.35.0/bin/ollama serve`。
+   - GPU lock 被占用 → **exit 75**（與 with-mac-lock 同義），什麼都不執行、不等、不搶、不刪 lock。`-E 75` 是為了區分：flock 預設的 1 會和 server 自己的失敗混在一起。
+     ssh 本身失敗（255：離線、無法連線、本機轉送失敗）→ exit 3，LLM 的步驟標記 blocked。server 在 120 秒內沒有經 tunnel 回應 `/api/version` → exit 3。
+   - 回應之後以 `II_INFERENCE_HOST=gpu-server` 與 `II_INFERENCE_TUNNEL_PID`（本機 ssh 的 pid）執行指令。
+   - **結束（任何 exit 或 signal）**：只停止這次啟動的 server——只在這次 session 印出啟動標記（已取得 lock、遠端 port 空著、即將啟動）之後，
+     遠端 `pkill -TERM -x -f $HOME/opt/ollama-0.35.0/bin/ollama.serve`（`-x -f`：整個命令列完全等於「`<binary> serve`」；樣式裡的空白寫成 `.`），
+     等它結束（最多 30 秒，之後 KILL），GPU lock 隨它釋放；然後結束本機的 ssh，印出 serve 的 log 在哪裡（ssh session 的輸出，存在 Mac 的暫存檔）。
+     無法確認已停止（例如桌機在執行中離線）→ 印出在 gpu-server 上檢查的指令、exit 3（指令本身失敗時保留它的 exit code）；絕不刪 lock。
+     signal 送到整個 process group（本機 ssh 也被停止）時也照樣停止遠端 server。
+   - 「完整命令列 `<binary> serve` 就是這次的 server」的根據：這個路徑的執行檔只為本 project 安裝、只由這個 wrapper 啟動、只在 GPU lock 內（一次一個）；
+     沒有印出啟動標記（例如 lock 被占用）時什麼都不停止，所以別人留下的 server（包括同一路徑、被殺掉的 wrapper 留下的）不會被碰。剩下的情況：
+     這次的 server 在執行中自己結束、而另一個 wrapper 恰好在這之間於同一台 Mac 啟動並取得 lock——tunnel 還在時第二個 wrapper 會在本機 11434 被拒絕，
+     主 session 也一次只跑一個方法。
+   - 遠端命令只用 `$HOME` 一個變數，不含 cmd.exe 會解讀的字元（`"`、`%`、`^`、`!`）：不論 wsl.exe 是否先經過預設的 Linux shell，結果都相同。
+     停止之前先確認遠端有 `pkill` / `pgrep`（沒有就算無法確認，不會誤報已停止）。
+   - **不需要 Mac heavy lock**：這種執行中 Mac 只跑輕量的 eval 迴圈（讀 snapshot、組 prompt、Agent 工具的 sqlite 查詢、寫結果），重的推論在桌機上、
+     由 GPU lock 保護。量到的 latency 由桌機的推論主導，Mac 上其他 heavy workload 不會明顯影響它，這個迴圈也不會干擾它們。
+5. **Runner 與探測**（`eval/runner.py`、`eval/probe.py`，新增 `eval/inference_host.py`）：
+   - host `gpu-server`：要求在 wrapper 之下（`II_INFERENCE_HOST=gpu-server`，且 `II_INFERENCE_TUNNEL_PID` 是活著的程序：殘留在 shell 的變數會指向已結束的 pid），
+     **取代** Mac heavy lock；不符就在開任何 snapshot、寫任何檔案、讀 GPU 或連 server 之前拒絕（CLI exit 2），訊息給出 wrapper 的指令。
+     host `local`：完全不變（heavy lock、`with-local-ollama`、電力條件；wrapper 的變數不能代替 heavy lock）。
+   - `run_config.json` 的 `llm` 多 `host`（`agent.ollama.run_record` / `pinned_record`）。所以 freeze 的「Pilot 用的正好是凍結的設定」（026 修訂 3、解讀 32）
+     **自動要求 Pilot 在同一台主機上執行**；Mac 與桌機的執行 `run_config.json` 的 sha 也不同，中途停止留下的混合目錄照樣被拒絕。
+   - `python -m eval local-probe` 新增 `--host {local,gpu-server}`，預設是設定的 `ollama.host`；`gpu-server` 的要求與 runner 相同。報告多 `host`；
+     `gpu-server` 記錄 `gpu`（下面的 GPU 狀態）取代 `power`；GPU 讀不到或不是 RTX 5070 Ti 時寫進 warnings（探測只記錄、不停止）。
+6. **電力條件改成適用推論主機**（使用者同意的內容：「電力條件改成適用推論主機：桌機接市電，改為記錄 GPU 的狀態（型號、驅動、功耗上限），
+   不再檢查 Mac 的電力模式」；對 host `gpu-server` 取代「照建議」第 5 項，host `local` 的規則逐字不變）：
+   - host `gpu-server` **不檢查、也不讀** Mac 的電力模式。
+   - **GPU 狀態**：一次唯讀的
+     `ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- nvidia-smi --query-gpu=name,driver_version,power.limit,power.draw,clocks.sm,temperature.gpu,memory.used --format=csv,noheader'`
+     （`BatchMode`、連線逾時 20 秒、整體逾時 60 秒；只用使用者的 alias）。數值記成數字（`[N/A]` 記 null），也保留原始那一行；
+     讀不到（ssh 或 nvidia-smi 失敗、逾時、輸出不是查詢的 7 個欄位）整個樣本記為 `null`，不猜。
+   - 取樣的時間點與 Mac 的電力檢查相同：執行開始時、每個 incident 的每次嘗試之前（釘選檢查之後）與之後。
+   - **停止的規則（完整）**：只有兩種情況停止——(a) 讀到的 GPU 名稱不含 `RTX 5070 Ti`；(b) **連續兩個樣本讀不到**（依取樣的順序：執行開始、每次嘗試之前、之後；
+     讀到一次就重新計數）。停在哪裡：執行開始時 → 不開始（什麼都不寫、不做釘選檢查）；嘗試之前 → 停在嘗試之前（該 incident 什麼都不寫、不用掉 held-out 嘗試）；
+     嘗試之後 → 那一行照寫、嘗試產生的東西保留，執行在下一個 incident 之前停止（held-out：有 prediction 的 incident 永不重跑，023 §5）。
+     只有一個樣本讀不到：記為 null，執行繼續（表上列出）。功耗上限、驅動、clock、溫度都只記錄、不檢查。
+   - **紀錄**：同一個 sidecar `results/<set>/<method>/power.jsonl`（只附加、fsync、`run_config_sha256` 照舊），一種格式、多一個 `host` 欄位（Mac 的行也寫
+     `host: "local"`）：`{incident_id, attempt, run_config_sha256, host, before, after, formal, problems}`；`gpu-server` 的 `before` / `after` 是
+     `{at, gpu}`（Mac 是 `{at, power}`）；`formal` = 之前與之後的樣本都讀到、而且是 RTX 5070 Ti；`problems` 前面標 `before:` / `after:`。
+     仍然不寫進 `run_config.json` 或 prediction。
+   - **評分**（024 的「Budgets, usage and visible data」）：`usage.latency_power` 多 `host`，`condition` 依主機；`gpu-server` 另有 `gpus`
+     （計時的 incident 的樣本中看到的 GPU 名稱、驅動、功耗上限）。latency 不在條件下量測的 incident 照舊列出、不剔除（`gpu-server`：
+     「NOT measured with a readable RTX 5070 Ti state before and after the incident」；最後一行是別的主機取樣的也列出）；都符合時寫
+     「Inference host: gpu-server … the Mac's power mode is not a condition of this run」，再列 GPU（名稱、驅動、功耗上限；中途改變時全部列出）。
+     「Model runtime」一行寫推論主機：本機照舊是「a local model on this Mac」，桌機是「the user's own RTX 5070 Ti desktop, reached through an SSH tunnel」。
+     「AC power in the high power mode」的字句只出現在 host `local` 的表，held-out 失敗嘗試的那一行也依主機。
+
+### 為什麼
+
+- 使用者沒有更高瓦數的充電器；Mac 推論在 70 W 下維持不了 029 的電力條件，held-out 的約 35–50 小時也不可行。桌機接市電、有獨立的 GPU。
+- 只移模型呼叫：snapshot 與 ground truth 留在 Mac，「Agent 只讀 frozen snapshot」與 ground truth 的物理隔離完全不變；桌機上只有模型與 Ollama，
+  不落地任何 incident 資料（請求的內容只在推論時經過）。
+- tunnel 讓 adapter 的 loopback 規則、截斷防護、釘選檢查都不必改：它看到的仍是同一版本、同一 digest 的 Ollama API。
+- GPU lock 沿用使用者其他 project 的慣例，與它們公平共用 GPU；`flock -n` 不等待，一個長時間的執行不會卡住別人，也不會被卡住。
+- 電力 → GPU 狀態：桌機接市電，沒有電池或低耗電模式的問題；速度取決於 GPU 的型號、驅動與功耗上限，所以記錄它們，讓 latency 可以解讀。
+  停止規則只擋兩件事：跑在錯的 GPU 上（結果與 latency 不可比），以及一直看不到狀態（ssh 或 GPU 有問題）；單一次讀取失敗多半是暫時的網路問題，
+  不值得讓數小時的執行停下，但會在表上列出。
+- host 進 `llm` 紀錄：Metal（Mac）與 CUDA（桌機）的 kernel 在 temperature 0 下也可能給出不同的輸出，所以 Pilot 與 held-out 必須在同一台主機上跑；
+  放進 freeze 已經比對的紀錄，就由程式強制，不必另訂規則。
+
+### 放棄的替代方案
+
+- **留在 Mac、每次充飽再跑**：Pilot 的 dump-all 一次就約 4.5 小時，充電與執行交替會讓 Pilot 拖上好幾天，held-out 的 35–50 小時更不可行；電力條件仍可能在中途失敗。
+- **整個 eval 在桌機上執行**（複製 repo、snapshot 與 ground truth 過去）：snapshot 與 ground truth 會離開 Mac，隔離要重新設計，也違反 MACHINE_POLICY
+  「主要開發一律在 Mac、桌機只是按需的算力 worker」。
+- **adapter 直接連遠端的 URL**（例如桌機的位址）：破壞 adapter「只連 loopback」的保證（§1.2），而那正是「不可能連到付費或第三方服務」的根據。
+- **桌機上用 Windows 版 Ollama**：GPU lock 的慣例在 WSL 裡（`flock`），Windows 的程序不在 lock 之內。
+- **桌機上的 server 一直開著**：GPU 與其他 project 共用；server 與模型只在一次 lock 內存在（與 §3.8 相同的理由）。
+- **以 pid 或命令列裡的 token 精確辨識 server**：要在 cmd → wsl → bash 之間可靠地傳遞 `$$`，或改變 server 的 argv（改變它的啟動方式），都不可靠；
+  改用「這個路徑的執行檔只由這個 wrapper、只在 lock 內啟動」加上啟動標記。
+- **GPU 讀不到一次就停止**：見「為什麼」。**完全不檢查 GPU**：可能在錯的 GPU 上跑完而不自知。
+
+### 對實驗的影響
+
+- **三個 LLM 方法都要在 Pilot 上用 GPU 重跑**（retrieval、agent、dump-all，各自從頭跑到 exit 0 再評分）：Metal 與 CUDA 的 kernel 在 temperature 0 下
+  也可能給出不同的輸出。retrieval 與 agent 在 Mac 上的執行（2026-10-10/11）與分數**被取代**，只留作紀錄（NEXT），不進任何比較；freeze 也會拒絕它們
+  （它們的 `llm` 沒有 `host`）。中途停止的 dump-all 本來就不評分。
+- latency 是桌機 GPU 的數字（經 SSH tunnel，含少量網路延遲），與 Mac 的數字不可比；報告標明推論主機與 GPU。`tokens_in` / `tokens_out` 仍是同一個模型的 tokenizer。
+- freeze 釘住 `host: "gpu-server"`（整個 `llm_methods.json` 的 sha 與每個 LLM 方法 Pilot 的 `llm`）；held-out 必須在同一台桌機上跑。換回 Mac 是另一個修訂，
+  要在 freeze 之前、並在 Mac 上重跑 Pilot。
+- evidence gold：GPU 重跑之後再用 `gold-todo` 列出（它只看目前的 prediction、只列還沒判斷的）。
+- 桌機離線時 LLM 的步驟 blocked（MACHINE_POLICY）；GPU lock 被其他 project 占用時等之後再跑（exit 75）。
+- 不改任何預算、指標、切分、門檻、評分、模型、digest、Ollama 版本、`num_ctx`、`num_predict`、temperature、seed、think、`timeout_s`。
+
+### 測試
+
+- `tests/test_with_remote_ollama.py`：PATH 上假的 `ssh` 扮演遠端——照 WSL 的方式以預設 shell 執行 `bash -lc "…"`，遠端的 11434 對應到一個空的 loopback port，
+  `-L` 是一個小 relay；遠端 PATH 上有假的 `flock`（lock 檔在測試的暫存目錄，從不碰 Mac 的 `/tmp`）、`pkill` / `pgrep`（登記命令列的程序表，`-x -f` 的完全比對）
+  與 stub 的 `ollama`。測：固定的環境與 models 目錄、tunnel、`II_INFERENCE_HOST`、交回 exit code、一定停止自己的 server 而且只停它（同一執行檔的 runner、
+  別的 ollama、bash 都還在）、GPU lock 隨之釋放；lock 被占用 → 75、什麼都不停止（包括同一路徑留下的 server）；本機或遠端的 port 被占用 → 3、不碰它；
+  ssh 失敗 → 3 並說 blocked；server 起不來 → 3；整個 process group 收到 SIGTERM 仍停止遠端 server；停止無法確認 → 3、提示、不刪 lock
+  （之後的執行因 lock 被占用得到 75）；遠端路徑只接受安全的字元、停止的樣式跟著啟動的執行檔。拿掉停止或拿掉 `-x` 時測試會失敗（已確認）。
+- `tests/test_remote_inference.py`：`gpu_facts` 的命令與解析（CRLF、`[N/A]`）、讀不到是 null 不是猜測；wrapper 檢查（沒有變數、殘留變數的 pid 已結束）；
+  committed 的 host 是 `gpu-server` 且在 `pinned_record` 裡；gpu-server 的執行在 wrapper 外 → 什麼都不寫、不讀 GPU、不連 server；在 wrapper 內不要求
+  heavy lock、不讀 Mac 的電力，`power.jsonl` 有 `host` 與前後的 GPU，評分與表的文字（沒有 AC / 高效能 / this Mac）；一次讀不到 → 繼續並列出；連續兩次 →
+  三種位置的停止；不是 RTX 5070 Ti → 開始、之前、之後三種停止；held-out 嘗試之前停止不用掉嘗試、失敗嘗試的 GPU 讀不到列在 `failed_not_formal`；
+  別的主機取樣的行列出；host `local` 仍要求 heavy lock（wrapper 的變數不能代替）；探測的 `--host`、預設值與 CLI。
+- `tests/test_heldout_freeze.py`：Pilot 的 `run_config` 是 host `local`、要凍結的設定是 `gpu-server` → freeze 拒絕（`llm` 不同）；在 gpu-server 重跑後通過。
+- 修改：`tests/ollama_fixtures.py` 的 `approved_config` 預設 host `local`（原本的本機測試照舊成立）；`tests/test_local_llm.py`（committed 設定多 `host`、
+  `llm` 與 `latency_power` 多 `host`、host 必填、committed 設定在 wrapper 外拒絕）；`tests/test_local_probe.py`（明確 `--host local`）；
+  `tests/test_eval_heldout.py`（committed 設定在 wrapper 外拒絕，同樣的設定改成 host `local` 在 heavy lock 拒絕）。
+  全部不執行 ssh、nvidia-smi、pmset、Ollama 或任何 server，也不連網路。

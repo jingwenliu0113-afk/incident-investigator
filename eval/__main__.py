@@ -7,8 +7,9 @@
     python -m eval compare --method agent --against stat-anomaly --set pilot   # paired differences (decision 023 §7)
     python -m eval gate --method agent --against stat-anomaly --set heldout    # SPEC Gate from written scores (023 §7)
     python -m eval demo                           # 2 minutes: the statistical baseline on the SYNTHETIC sample (decision 027)
-    ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model <ollama tag> [--num-ctx N]
+    ./tools/with-remote-ollama uv run python -m eval local-probe --model <ollama tag> [--host gpu-server] [--num-ctx N]
         [--think] [--context-sizes 8000,32000,100000] [--out PATH]   # one local model on the SYNTHETIC sample (decision 029)
+    ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval local-probe --model <ollama tag> --host local ...
 
 `gate` reads only scores.json and the compare outputs (it never runs a method) and writes gate.json / gate.md next to
 the Agent's scores: the Gate decision on the held-out set, a diagnostic only (NOT a Gate decision) on the Pilot.
@@ -17,8 +18,10 @@ Predictions and scores go to data/external/results/<set>/<method>/ (gitignored);
 Worksheets and gold judgments stay on the ground-truth side next to the label. The demo only reads data/samples/synthetic/
 and writes nothing; its numbers are not results. The local probe also runs only on that sample (dump-all, retrieval
 and the Agent with one local Ollama model, a context-guard self-test and prefill / decode speed on generated filler),
-needs the Mac heavy lock, writes its JSON to stdout or --out (never under data/) and is not a result either; it exits 3
-when the local Ollama did not refuse a prompt above num_ctx itself (GUARD FAILED; the report is still written).
+writes its JSON to stdout or --out (never under data/) and is not a result either; it exits 3 when the Ollama did not
+refuse a prompt above num_ctx itself (GUARD FAILED; the report is still written). --host (default: ollama.host of
+eval/llm_methods.json, decision 029 revision 1): gpu-server needs tools/with-remote-ollama, local the Mac heavy lock
+and tools/with-local-ollama; `eval run` of an LLM method has the same requirement for the configured host.
 """
 
 from __future__ import annotations
@@ -49,6 +52,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--file", type=Path, help="gold-add: the filled worksheet")
     parser.add_argument("--annotator", help="gold-add: human:<name> (gold judgments are made by a person)")
     parser.add_argument("--model", help="local-probe: the tag of an installed local Ollama model (decision 029)")
+    parser.add_argument("--host", choices=["local", "gpu-server"],
+                        help="local-probe: where the model runs (default: ollama.host of eval/llm_methods.json; decision "
+                             "029 revision 1): gpu-server under tools/with-remote-ollama, local under tools/with-mac-lock "
+                             "and tools/with-local-ollama")
     parser.add_argument("--num-ctx", type=int, help="local-probe: the context length (default: the model's, at most 65536)")
     parser.add_argument("--think", action="store_true", help="local-probe: think on (default off)")
     parser.add_argument("--context-sizes", help="local-probe: proxy-token sizes of generated filler for the speed "
@@ -132,8 +139,8 @@ def _local_probe(ns) -> int:
         return 2
     print(BANNER, file=sys.stderr)
     try:
-        report = run_probe(ns.model, num_ctx=ns.num_ctx, think=ns.think, context_sizes=sizes)
-    except (ValueError, OSError, LookupError, RuntimeError, CallError) as e:  # RuntimeError: the heavy lock is not held
+        report = run_probe(ns.model, host=ns.host, num_ctx=ns.num_ctx, think=ns.think, context_sizes=sizes)
+    except (ValueError, OSError, LookupError, RuntimeError, CallError) as e:  # RuntimeError: no heavy lock / no wrapper
         print(f"error: {e}", file=sys.stderr)
         return 2
     text = json.dumps(report, indent=2) + "\n"

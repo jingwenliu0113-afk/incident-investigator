@@ -581,6 +581,24 @@ def test_the_freeze_needs_pilot_llm_runs_with_exactly_the_settings_it_freezes(tm
     assert not (repo / S).exists() and not (repo / F).exists()
 
 
+def test_the_freeze_refuses_a_pilot_run_on_another_inference_host(tmp_path):
+    # decision 029 revision 1 (user decision 2026-10-11): ollama.host is part of the llm record of run_config.json, so a
+    # Pilot run on this Mac ("local") is not the Pilot of settings that freeze the RTX 5070 Ti desktop ("gpu-server")
+    from ollama_fixtures import approved_config
+
+    repo, layout = project(tmp_path, llm=approved_config(host="gpu-server"))  # the agent's Pilot ran with host "local"
+    assert json.loads((layout.root / "results/pilot/agent/run_config.json").read_text())["llm"]["host"] == "local"
+    plan_it(repo, layout)
+    git(repo, "add", P)
+    git(repo, "commit", "-q", "-m", "held-out plan")
+    with pytest.raises(ValueError, match="agent: its Pilot results were not produced .* differs from "
+                                         "eval/llm_methods.json in llm .*026 #32"):
+        freeze_it(repo, layout)
+    assert not (repo / S).exists() and not (repo / F).exists()
+    pilot_llm_results(layout, "agent", approved_config(host="gpu-server"))  # run on gpu-server to the end and scored
+    assert freeze_it(repo, layout)["checked"]["pilot_run_config_sha256"].keys() == {"agent"}
+
+
 def test_only_llm_methods_need_a_pilot_run_config(tmp_path):
     repo, layout = project(tmp_path)
     assert not (layout.root / "results/pilot/stat-anomaly/run_config.json").exists()  # a result from before decision 024

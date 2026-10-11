@@ -84,22 +84,23 @@ def fit_problems(config: dict) -> list[str]:
             if entry["fits"] is False]
 
 
-def start_llm(config: dict | None, project_dir: Path | None) -> dict | None:
-    """The start of an LLM run on the local model (decision 029), before any snapshot is opened or anything written: the
-    Mac heavy lock (a local model run is a heavy workload, MACHINE_POLICY), the formal power state (user decision
-    2026-10-10), the pin check against the running Ollama and a loud report of worst cases above num_ctx. Returns the
-    runtime for run_config.json; None for no local config.
+def start_llm(config: dict | None, project_dir: Path | None) -> tuple[dict | None, object | None]:
+    """The start of an LLM run on the local model (decision 029), before any snapshot is opened or anything written: where
+    the model runs (`ollama.host`, decision 029 revision 1) decides the guard and the per-incident samples —
+    "local": the Mac heavy lock (a local model run is a heavy workload, MACHINE_POLICY) and the formal power state (user
+    decision 2026-10-10); "gpu-server": tools/with-remote-ollama instead of the heavy lock and the GPU state instead of the
+    Mac's power mode (user decision 2026-10-11). Then the pin check against the running Ollama and a loud report of worst
+    cases above num_ctx. Returns (the runtime for run_config.json, the sampler of the host's state for POWER_LOG);
+    (None, None) for no local config.
     The run keeps this `config` to the end: a config file changed during the run changes nothing in it."""
     if not config or config.get("provider") != "ollama":
-        return None
+        return None, None
     import sys
 
     from agent.ollama import model_from_config, run_record
-    from env.lock import PROJECT_DIR
-    from env.soak import require_heavy_lock
 
-    require_heavy_lock(Path(project_dir) if project_dir is not None else PROJECT_DIR)
-    formal_power("at the start of the run")
+    watch = host_watch(config["ollama"]["host"], project_dir)
+    watch.before("at the start of the run")
     _, facts = model_from_config(config)
     num_ctx = config["ollama"]["num_ctx"]
     for method, entry in llm_fit(config["budgets"], num_ctx, config["ollama"]["num_predict"]).items():
@@ -107,7 +108,7 @@ def start_llm(config: dict | None, project_dir: Path | None) -> dict | None:
             print(f"WARNING (decision 029): {method}'s worst case ({entry['worst_case']:,} proxy tokens with every reply "
                   f"kept) is above num_ctx {num_ctx:,}; such a call stops with CallError context_overflow, never truncated",
                   file=sys.stderr)
-    return run_record(config, facts)
+    return run_record(config, facts), watch
 
 
 def run_llm(kind: str, snapshot, incident_id: str, model, config: dict, *, cache_root: Path):
@@ -144,7 +145,7 @@ def pinned_model(config: dict) -> dict:
     return {"model": model, "config": config}
 
 
-POWER_LOG = "power.jsonl"  # per-incident power samples of a local-model run, beside its results (append-only)
+POWER_LOG = "power.jsonl"  # per-incident samples of the inference host's state, beside the results (append-only)
 POWER_CONDITION = "AC Power, powermode 2 (decision 025 revision 3)"
 
 
@@ -181,7 +182,7 @@ def _power_after(out_dir: Path, incident_id: str, attempt: int | None, before: d
     latency is reported as measured under non-formal power (a held-out incident is never run again, decision 023 §5)."""
     sample = _power_sample()
     _append(out_dir, {"incident_id": incident_id, "attempt": attempt, "run_config_sha256": run_config_sha256,
-                      "before": before, "after": {"at": sample["at"], "power": sample["power"]},
+                      "host": "local", "before": before, "after": {"at": sample["at"], "power": sample["power"]},
                       "formal": not sample["problems"], "problems": sample["problems"]}, name=POWER_LOG)
     if stop and sample["problems"]:
         label = incident_id if attempt is None else f"{incident_id}'s attempt {attempt}"
@@ -192,13 +193,98 @@ def _power_after(out_dir: Path, incident_id: str, attempt: int | None, before: d
                          "restore the high power mode on AC power before running again")
 
 
+class MacPower:
+    """Host "local" (decision 029, user decision 2026-10-10 item 5): the formal power state before, a pmset sample after."""
+
+    host = "local"
+
+    def before(self, when: str) -> dict:
+        return formal_power(when)
+
+    def after(self, out_dir: Path, incident_id: str, attempt: int | None, before: dict, run_config_sha256: str, *,
+              stop: bool = True) -> None:
+        _power_after(out_dir, incident_id, attempt, before, run_config_sha256, stop=stop)
+
+
+class GpuState:
+    """Host "gpu-server" (decision 029 revision 1, user decision 2026-10-11: 「電力條件改成適用推論主機：桌機接市電，改為記錄
+    GPU 的狀態（型號、驅動、功耗上限），不再檢查 Mac 的電力模式」). The GPU state is read (eval.inference_host.gpu_facts) at
+    the start of the run and before and after every incident's attempt, at the places of the Mac power checks, and each
+    attempt's samples go to POWER_LOG (the same line, `host` gpu-server, `gpu` instead of `power`). The rule:
+    - a sample that cannot be read is recorded as null (`gpu`: null) and the run goes on;
+    - the run stops only when a GPU that was read is not an RTX 5070 Ti, or when two samples in a row could not be read
+      (in the order taken: the start, then before and after each attempt);
+    - at the start: nothing is run; before an attempt: the run stops before it (nothing of the incident is written, no
+      held-out attempt is used); after an attempt: its line is written and what it produced stands, then the run stops.
+    - `formal` (the latency condition of the score) is true only when both samples of the attempt were read and are an
+      RTX 5070 Ti; otherwise the score lists the incident (its latency is kept, never removed)."""
+
+    host = "gpu-server"
+
+    def __init__(self):
+        self.unread = 0  # consecutive samples that could not be read
+
+    def _sample(self) -> tuple[dict, list[str]]:
+        import eval.inference_host as ih
+
+        facts = ih.gpu_facts()
+        self.unread = self.unread + 1 if facts is None else 0
+        return {"at": _now(), "gpu": facts}, ih.gpu_problems(facts)
+
+    def _stop(self, sample: dict) -> str | None:
+        import eval.inference_host as ih
+
+        if wrong := ih.wrong_gpu(sample["gpu"]):
+            return "; ".join(wrong)
+        if self.unread >= 2:
+            return f"{self.unread} GPU samples in a row could not be read (nvidia-smi on gpu-server through ssh)"
+        return None
+
+    def before(self, when: str) -> dict:
+        sample, problems = self._sample()
+        if why := self._stop(sample):
+            raise ValueError(f"the GPU state {when} stops the run: {why} (decision 029 revision 1); the run stops before "
+                             "the next incident's attempt, so nothing of it is written and no attempt is used; check "
+                             "gpu-server before running again")
+        return {**sample, "problems": problems}
+
+    def after(self, out_dir: Path, incident_id: str, attempt: int | None, before: dict, run_config_sha256: str, *,
+              stop: bool = True) -> None:
+        sample, problems = self._sample()
+        both = [f"before: {p}" for p in before.get("problems", [])] + [f"after: {p}" for p in problems]
+        _append(out_dir, {"incident_id": incident_id, "attempt": attempt, "run_config_sha256": run_config_sha256,
+                          "host": self.host, "before": {"at": before["at"], "gpu": before["gpu"]}, "after": sample,
+                          "formal": not both, "problems": both}, name=POWER_LOG)
+        if stop and (why := self._stop(sample)):
+            label = incident_id if attempt is None else f"{incident_id}'s attempt {attempt}"
+            held = "" if attempt is None else "; a held-out incident with a prediction is never run again (decision 023 §5)"
+            raise ValueError(f"the GPU state after {label} stops the run: {why} (decision 029 revision 1): what the "
+                             f"attempt produced stands, {POWER_LOG} records the sample and the score lists the incident's "
+                             f"latency as not measured under the condition{held}; check gpu-server before running again")
+
+
+def host_watch(host: str, project_dir: Path | None):
+    """The guard of the inference host (raises before anything runs) and its sampler (decision 029 revision 1)."""
+    if host == "gpu-server":
+        import eval.inference_host as ih
+
+        ih.require_remote()  # tools/with-remote-ollama, instead of the Mac heavy lock
+        return GpuState()
+    from env.lock import PROJECT_DIR
+    from env.soak import require_heavy_lock
+
+    require_heavy_lock(Path(project_dir) if project_dir is not None else PROJECT_DIR)
+    return MacPower()
+
+
 def _power_log(out_dir: Path) -> list[dict]:
     path = Path(out_dir) / POWER_LOG
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()] if path.exists() else []
 
 
 def finish_llm(config: dict | None) -> None:
-    """decision 029: the local model leaves memory before the run (and with it the heavy lock) ends; reported, never raised."""
+    """decision 029: the local model leaves memory before the run (and with it the heavy lock, or the GPU lock of
+    tools/with-remote-ollama) ends; reported, never raised."""
     if not config or config.get("provider") != "ollama":
         return
     import sys
@@ -214,8 +300,9 @@ def finish_llm(config: dict | None) -> None:
 def _llm(kind: str):
     def run(snapshot, incident_id, *, model=None, config=None):
         if model is None or config is None:
-            raise ValueError(f"{kind} runs only through run_method, which takes the heavy lock and checks the pinned model "
-                             "at the start of the run and before every incident's attempt (decision 029)")
+            raise ValueError(f"{kind} runs only through run_method, which checks the inference host's guard (the heavy lock "
+                             "or tools/with-remote-ollama) and the pinned model at the start of the run and before every "
+                             "incident's attempt (decision 029)")
         cache = Path(snapshot.path).parents[2] / "cache"  # <data root>/cache, beside the Agent tools' index (decision 019)
         return run_llm(kind, snapshot, incident_id, model, config, cache_root=cache)
     return run
@@ -253,7 +340,8 @@ def pilot_llm_problems(results_root: Path, config: dict | None, methods) -> tupl
     """decision 026 #32 (user decision 2026-10-10, 「照建議」 item 7b), read by the held-out freeze: every LLM method's
     Pilot results were produced with exactly the LLM settings being frozen. Its Pilot run_config.json records a Pilot run
     of that method with this config's model, budgets and local runtime (agent.ollama.pinned_record: provider, model,
-    digest, Ollama version, num_ctx, num_predict, temperature, seed, think); its Pilot scores.json, once written, embeds
+    digest, Ollama version, num_ctx, num_predict, temperature, seed, think and, since 029 revision 1, the inference
+    host); its Pilot scores.json, once written, embeds
     that run_config (scored after that run; a missing scores.json is the freeze's other check), and every incident it
     scores has its latest POWER_LOG line naming that run_config.json (review 2026-10-10: a run with these settings that
     stopped midway leaves the predictions of an earlier run for the incidents it did not reach). Returns
@@ -403,7 +491,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
 
     freeze, listing = heldout_guard(layout, project_dir)
     config = load_llm_config() if method in LLM_METHODS else None  # refuses: not approved, no adapter, not pinned
-    llm = start_llm(config, project_dir)  # decision 029: heavy lock and pin check before anything is written
+    llm, watch = start_llm(config, project_dir)  # decision 029: the host's guard and the pin check before anything is written
     out_dir = Path(out_root) / "heldout" / method
     out_dir.mkdir(parents=True, exist_ok=True)
     lock = out_dir / "run.lock"
@@ -439,7 +527,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
             attempt = len({e["attempt"] for e in events if e["event"] == "start"})
             while attempt < HELDOUT_MAX_ATTEMPTS:
                 kw = pinned_model(config) if llm else {}  # decision 029: before the attempt starts (raises: no attempt used)
-                before = formal_power(f"before {inc}'s attempt {attempt + 1}") if llm else None  # the same (user 2026-10-10)
+                before = watch.before(f"before {inc}'s attempt {attempt + 1}") if llm else None  # the host's state (029)
                 attempt += 1
                 _append(out_dir, {"incident_id": inc, "attempt": attempt, "event": "start", "at": _now()})
 
@@ -449,7 +537,7 @@ def _run_heldout(layout: DataLayout, method: str, out_root: Path, project_dir: P
 
                 def power_after(stop: bool = True) -> None:  # after the attempt's end event (decision 029, 2026-10-10)
                     if llm:
-                        _power_after(out_dir, inc, attempt, before, run_sha, stop=stop)
+                        watch.after(out_dir, inc, attempt, before, run_sha, stop=stop)
 
                 try:
                     out = METHODS[method](snapshot, inc, **kw)
@@ -510,7 +598,7 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
     if split == "heldout":
         return _run_heldout(layout, method, out_root, project_dir)
     config = load_llm_config() if method in LLM_METHODS else None  # refuses before any snapshot is opened
-    llm = start_llm(config, project_dir)  # decision 029: heavy lock and pin check before anything is written
+    llm, watch = start_llm(config, project_dir)  # decision 029: the host's guard and the pin check before anything is written
     out_dir = Path(out_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
     # decision 024: the budgets of this run stay with its results, written before any prediction
@@ -524,7 +612,7 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
     try:
         for inc, _ in incidents_in(layout, split):
             kw = pinned_model(config) if llm else {}  # decision 029: the pin check before every incident
-            before = formal_power(f"before {inc}") if llm else None  # and the power state (user decision 2026-10-10)
+            before = watch.before(f"before {inc}") if llm else None  # and the host's state (029, 029 revision 1)
             snapshot = open_snapshot(layout.incident_dir(inc) / "normalized", layout)
             out = METHODS[method](snapshot, inc, **kw)
             pred, transcript = out if isinstance(out, tuple) else (out, None)
@@ -536,7 +624,7 @@ def run_method(layout: DataLayout, method: str, split: str, out_root: Path, *, p
                 (out_dir / f"{inc}.transcript.json").write_text(json.dumps(transcript, indent=2) + "\n")
             written.append(path)
             if llm:
-                _power_after(out_dir, inc, None, before, run_sha)
+                watch.after(out_dir, inc, None, before, run_sha)
     finally:
         finish_llm(config if llm else None)
     return written
@@ -632,30 +720,50 @@ def _usage_aggregate(rows: list[dict]) -> dict:
 
 def _latency_power(out_dir: Path, rows: list[dict], run_config: dict | None, failed: list[dict] | None = None) -> dict | None:
     """decision 029, user decision 2026-10-10 (item 5): the scored incidents whose latency was not measured under the
-    formal power state, from the latest POWER_LOG line of each (the attempt that produced its prediction; on the Pilot,
-    the latest run). Held-out (`failed`: the ledger's failed attempts, whose latency the report adds up): also the timed
-    failed attempts whose own line is not formal or missing (review 2026-10-10). Reported next to the latency, never
-    removed from it. None for a run without a local model."""
+    condition of the run's inference host (decision 029 revision 1: "local" = the formal power state of this Mac,
+    "gpu-server" = a readable RTX 5070 Ti state before and after), from the latest POWER_LOG line of each (the attempt
+    that produced its prediction; on the Pilot, the latest run); a line sampled on another host is listed too. Held-out
+    (`failed`: the ledger's failed attempts, whose latency the report adds up): also the timed failed attempts whose own
+    line is not formal or missing (review 2026-10-10). gpu-server: also the GPU (name, driver, power limit) of every
+    sample read for the timed incidents. Reported next to the latency, never removed from it. None for a run without a
+    local model. A run_config from before revision 1 has no host: it ran on this Mac."""
     if not (run_config or {}).get("llm"):
         return None
+    from eval.inference_host import GPU_CONDITION
+
+    host = run_config["llm"].get("host") or "local"
     lines = _power_log(out_dir)
     latest = {e["incident_id"]: e for e in lines}
     by_attempt = {(e["incident_id"], e.get("attempt")): e for e in lines}
 
     def why(entry: dict | None) -> str | None:
         if entry is None:
-            return f"no power sample in {POWER_LOG}"
+            return f"no power sample in {POWER_LOG}" if host == "local" else f"no GPU sample in {POWER_LOG}"
+        if (entry.get("host") or "local") != host:
+            return f"sampled on inference host {entry.get('host') or 'local'}, not {host}"
         return None if entry.get("formal") is True else "; ".join(entry.get("problems") or []) or "not formal"
 
     timed = [r["incident_id"] for r in rows if r["usage"].get("latency_s") is not None]  # abstentions have no latency
     not_formal = [{"incident_id": inc, "attempt": (latest.get(inc) or {}).get("attempt"), "reason": reason}
                   for inc in timed if (reason := why(latest.get(inc))) is not None]
-    out = {"condition": POWER_CONDITION, "incidents_timed": len(timed), "not_formal": not_formal}
+    out = {"host": host, "condition": POWER_CONDITION if host == "local" else GPU_CONDITION,
+           "incidents_timed": len(timed), "not_formal": not_formal}
     if failed is not None:
         out["failed_not_formal"] = [
             {"incident_id": e["incident_id"], "attempt": e["attempt"], "reason": reason} for e in failed
             if (e.get("usage") or {}).get("latency_s") is not None
             and (reason := why(by_attempt.get((e["incident_id"], e["attempt"])))) is not None]
+    if host == "gpu-server":
+        seen = []
+        for inc in timed:
+            entry = latest.get(inc) or {}
+            for side in ("before", "after"):
+                for g in ((entry.get(side) or {}).get("gpu") or {}).get("gpus", []):
+                    card = {"name": g.get("name"), "driver_version": g.get("driver_version"),
+                            "power_limit_w": g.get("power_limit_w")}
+                    if card not in seen:
+                        seen.append(card)
+        out["gpus"] = seen
     return out
 
 
@@ -924,10 +1032,23 @@ def _heldout_lines(result: dict) -> list[str]:
     lines.append(f"Failed attempts: {f['count']} (tokens in {f['tokens_in']}, out {f['tokens_out']}, cost USD {f['cost_usd']}, "
                  f"latency s {f['latency_s']}).")
     if failed := (result["usage"].get("latency_power") or {}).get("failed_not_formal"):  # decision 029, review 2026-10-10
-        lines.append("Latency of failed attempts NOT measured under the formal power condition (AC power, high power mode; "
-                     "kept in the failed attempts' latency above): " + "; ".join(
+        lines.append(f"Latency of failed attempts NOT measured {_host_condition(result['usage']['latency_power'])} "
+                     "(kept in the failed attempts' latency above): " + "; ".join(
                          f"{e['incident_id']} attempt {e['attempt']} ({e['reason']})" for e in failed) + ".")
     return lines
+
+
+def _host_condition(power: dict) -> str:
+    """The latency condition of the run's inference host, as the table says it (decision 029 and its revision 1)."""
+    if power.get("host", "local") == "local":
+        return "under the formal power condition (AC power, high power mode)"
+    return "with a readable RTX 5070 Ti state before and after the incident (inference host gpu-server)"
+
+
+def _gpu_text(card: dict) -> str:
+    limit = card.get("power_limit_w")
+    return (f"{card.get('name')}, driver {card.get('driver_version')}, power limit "
+            + ("unknown" if limit is None else f"{limit:g} W"))
 
 
 def _fmt(x) -> str:
@@ -943,17 +1064,19 @@ def _usage_lines(result: dict) -> list[str]:
         budgets = ", ".join(f"{k} {v}" for k, v in config["budgets"].items()) or "none"
         lines += [f"Visible data: {config['scope'] or 'not described'}.", f"Model: {config['model'] or '-'}. Budgets: {budgets}."]
         if llm := config.get("llm"):
+            where = ("cost 0 = a local model on this Mac, no external cost." if (llm.get("host") or "local") == "local"
+                     else "inference host gpu-server: the user's own RTX 5070 Ti desktop, reached through an SSH tunnel "
+                          "(decision 029 revision 1); cost 0 = no external cost.")
             lines.append(f"Model runtime (decision 029): {llm['provider']} {llm['ollama_version']}, {llm['model']} @ "
                          f"{llm['model_version']}, num_ctx {llm['num_ctx']}, num_predict {llm['num_predict']}, temperature "
-                         f"{llm['temperature']}, seed {llm['seed']}, think {str(llm['think']).lower()}; cost 0 = a local "
-                         "model on this Mac, no external cost.")
+                         f"{llm['temperature']}, seed {llm['seed']}, think {str(llm['think']).lower()}; {where}")
     lines += ["", f"Usage over the {result['aggregate']['n_incidents']} scored incidents:", "",
               "| quantity | n | mean | median | max |", "|---|---:|---:|---:|---:|"]
     for name, s in usage["fields"].items():
         lines.append(f"| {name} | {s['n']} | {_fmt(s['mean'])} | {_fmt(s['median'])} | {_fmt(s['max'])} |")
     cost = "-" if usage["cost_total"] is None else f"{usage['cost_total']:.2f}"
     lines += ["", f"Total cost (USD): {cost}."]
-    if (power := usage.get("latency_power")) is not None:  # decision 029, user decision 2026-10-10
+    if (power := usage.get("latency_power")) is not None and power.get("host", "local") == "local":  # decision 029
         if power["not_formal"]:
             lines.append("Latency NOT measured under the formal power condition (AC power, high power mode; decision 029, "
                          "user decision 2026-10-10; kept in the numbers above): " + "; ".join(
@@ -962,6 +1085,19 @@ def _usage_lines(result: dict) -> list[str]:
             lines.append(f"Power: the latency of all {power['incidents_timed']} timed incidents was measured on AC power in "
                          "the high power mode (pmset before and after each incident; decision 029, user decision "
                          "2026-10-10).")
+    elif power is not None:  # decision 029 revision 1 (user decision 2026-10-11): the RTX 5070 Ti desktop
+        if power["not_formal"]:
+            lines.append("Latency NOT measured with a readable RTX 5070 Ti state before and after the incident (inference "
+                         "host gpu-server; decision 029 revision 1; kept in the numbers above): " + "; ".join(
+                             f"{e['incident_id']} ({e['reason']})" for e in power["not_formal"]) + ".")
+        else:
+            lines.append(f"Inference host: gpu-server (the user's RTX 5070 Ti desktop on mains power, through an SSH tunnel; "
+                         f"decision 029 revision 1): the GPU state was read before and after all {power['incidents_timed']} "
+                         "timed incidents; the Mac's power mode is not a condition of this run.")
+        if power["gpus"]:
+            lines.append(("GPU (nvidia-smi before and after each incident): " if len(power["gpus"]) == 1 else
+                          "GPU states seen (nvidia-smi before and after each incident; they changed during the run): ")
+                         + "; ".join(_gpu_text(card) for card in power["gpus"]) + ".")
     if usage["stop_reasons"]:
         lines.append("Stop reasons: " + ", ".join(f"{k} {n}" for k, n in usage["stop_reasons"].items()) + ".")
     if usage["exposure"] is None:

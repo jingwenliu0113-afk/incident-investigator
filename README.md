@@ -6,7 +6,7 @@
 再用分層指標比較 Agent 與三種 baseline。Ground truth 與 Agent 可讀資料在檔案系統上物理隔離。
 
 > 狀態（2026-10-10）：Core 的工具鏈完成並測試（900+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集並完成人工 label review**；
-> 第一張 baseline 表（統計 baseline、Pilot）在下方。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029），在 Pilot 上的執行是下一步，尚無結果；held-out 在 freeze 之後收集。
+> 第一張 baseline 表（統計 baseline、Pilot）在下方。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029）；2026-10-11 起模型改在使用者的 RTX 5070 Ti 桌機上推論（029 修訂 1，eval 仍在 Mac），在 Pilot 上的執行是下一步，尚無結果；held-out 在 freeze 之後收集。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 
 ## 結果
@@ -22,7 +22,7 @@ label 全部經人工 review（decision 018，review 時未看任何方法輸出
 - 依難度（leakage audit）：easy 5 個、hard 5 個；origin_top1 兩者都是 0.60。
 - 失敗（origin 或 fault type 錯）8 個：`mechanism`（origin 對、機制錯）4、`rule_limit`（統計規則本身的限制）4。
 - Evidence：引用全部存在（existence 1.0）；弱標籤（時間窗內的 affected 服務）1.0，但人工盲標的 gold precision 是 0.91（28 筆中 25 筆 relevant）——弱標籤會把故障時間窗內看起來正常的紀錄也算進去，所以兩者分開報（decision 017）。
-- LLM 方法（dump-all、retrieval、Agent）尚無結果：付費 API 延後；使用者 2026-10-10 暫時改用本機模型（Ollama，decision 029），在合成範例上探測 tool calling 與速度（不是結果）之後批准 qwen3.5 9B（q4_K_M、`num_ctx` 262,144、think 關、Ollama 0.35.0 釘選；執行要求 heavy lock 與高效能模式 + AC 供電），下一步在 Pilot 上執行。結論只限於這個本機模型。held-out（每個 fault 5 個）在 freeze 之後收集，Gate 只在 held-out 上判定。
+- LLM 方法（dump-all、retrieval、Agent）尚無結果：付費 API 延後；使用者 2026-10-10 暫時改用本機模型（Ollama，decision 029），在合成範例上探測 tool calling 與速度（不是結果）之後批准 qwen3.5 9B（q4_K_M、`num_ctx` 262,144、think 關、Ollama 0.35.0 釘選）。2026-10-11 起推論改在使用者的 RTX 5070 Ti 桌機（decision 029 修訂 1）：snapshot、ground truth 與評分都留在 Mac，只有模型呼叫經 SSH tunnel（`tools/with-remote-ollama`，共用的 GPU lock）送到桌機的 Ollama，每個 incident 前後記錄 GPU 狀態；下一步在 Pilot 上執行三個方法。結論只限於這個本機模型。held-out（每個 fault 5 個）在 freeze 之後收集，Gate 只在 held-out 上判定。
 
 ## Pipeline
 

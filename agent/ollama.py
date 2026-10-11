@@ -1,9 +1,12 @@
 """The local Ollama adapter for the model interface of decision 020 §6 (decision 029): complete(system, messages, tools)
--> {content, usage} with Anthropic Messages API shapes, over Ollama's /api/chat on this Mac only.
+-> {content, usage} with Anthropic Messages API shapes, over Ollama's /api/chat on a loopback endpoint only.
 
 - Loopback only: the transport refuses any host but 127.0.0.1, localhost (resolving to loopback only) and ::1, uses
   http.client directly (no proxy settings) and the pin check refuses Ollama's cloud (remote) models, so this adapter can
-  never reach a remote or paid service.
+  never reach a paid or third-party service. Where the model runs is `ollama.host` (decision 029 revision 1, HOSTS):
+  "local" = an Ollama server on this Mac (tools/with-local-ollama); "gpu-server" = the Ollama server on the user's own
+  RTX 5070 Ti desktop, whose loopback endpoint here is the SSH tunnel of tools/with-remote-ollama (the adapter still
+  connects to 127.0.0.1 only; snapshots and ground truth never leave this Mac).
 - Never a silently truncated call: the request sets truncate and shift to false (Ollama is expected to error instead of
   dropping old messages or shifting the context; the probe's self-test confirms it on this Ollama), and every reply is
   checked without trusting that: a prompt_eval_count is present, the proxy tokens sent are not above num_ctx, the count is
@@ -31,6 +34,7 @@ from agent.harness import CallError
 from collect.snapshot import proxy_tokens
 
 DEFAULT_URL = "http://127.0.0.1:11434"
+HOSTS = ("local", "gpu-server")  # ollama.host: where the model runs (decision 029 revision 1, user decision 2026-10-11)
 DEFAULT_TIMEOUT_S = 3600.0
 LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1")
 CONTEXT_OVERFLOW = "context_overflow"  # the request or its reply does not fit num_ctx
@@ -323,7 +327,8 @@ def server_facts(transport: Transport, model: str) -> dict:
         _, tags = transport("GET", "/api/tags")
         status, show = transport("POST", "/api/show", {"model": model})
     except (OSError, http.client.HTTPException) as e:
-        raise ValueError(f"cannot reach the local Ollama server: {type(e).__name__}: {e} (start it: ollama serve)") from e
+        raise ValueError(f"cannot reach the local Ollama server: {type(e).__name__}: {e} (run under "
+                         "tools/with-local-ollama or tools/with-remote-ollama, decision 029)") from e
     entry = next((m for m in tags.get("models") or [] if model in (m.get("name"), m.get("model"))), None)
     show = show if status == 200 else {}
     info = show.get("model_info") or {}
@@ -340,7 +345,8 @@ def pin_problems(facts: dict, *, digest: str | None = None, version: str | None 
     if facts["digest"] is None:
         problems.append(f"{model} is not installed (not listed by /api/tags)")
     if facts["remote"]:
-        problems.append(f"{model} is a remote (cloud) model: only models that run on this Mac are allowed (decision 029)")
+        problems.append(f"{model} is a remote (cloud) model: only models that run on this Mac or the user's own GPU "
+                        "desktop are allowed (decision 029)")
     if digest is not None and facts["digest"] != digest:
         problems.append(f"{model} has digest {facts['digest']}, not the pinned {digest}")
     if version is not None and facts["ollama_version"] != version:
@@ -378,6 +384,9 @@ def config_problems(config: dict) -> list[str]:
         HttpTransport(o.get("url"))
     except ValueError as e:
         problems.append(str(e))
+    if o.get("host") not in HOSTS:
+        problems.append(f"ollama.host must be one of {', '.join(HOSTS)} (where the model runs, decision 029 revision 1), "
+                        f"got {o.get('host')!r}")
     if not isinstance(o.get("version"), str) or not o.get("version"):
         problems.append("ollama.version must pin the Ollama version (/api/version)")
     num_ctx, num_predict = o.get("num_ctx"), o.get("num_predict")
@@ -411,11 +420,12 @@ def model_from_config(config: dict, *, transport: Transport | None = None) -> tu
 
 
 def run_record(config: dict, facts: dict) -> dict:
-    """The local runtime in run_config.json (decision 024 / 029): every value is pinned, so a resumed run matches."""
+    """The local runtime in run_config.json (decision 024 / 029): every value is pinned, so a resumed run matches. `host`
+    (029 revision 1) is where the model ran: the held-out freeze compares it like the rest (decision 026 #32)."""
     o = config["ollama"]
     return {"provider": "ollama", "model": config["model"], "model_version": facts["digest"],
             "ollama_version": facts["ollama_version"], "num_ctx": o["num_ctx"], "num_predict": o["num_predict"],
-            "temperature": config["temperature"], "seed": o["seed"], "think": o["think"]}
+            "temperature": config["temperature"], "seed": o["seed"], "think": o["think"], "host": o["host"]}
 
 
 def pinned_record(config: dict) -> dict | None:

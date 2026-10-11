@@ -190,12 +190,24 @@ def test_without_the_list_or_with_an_unapproved_model_nothing_runs_or_is_written
         with pytest.raises(ValueError, match="approved"):  # an unapproved model never runs (NEXT A1)
             run_method(layout, method, "heldout", out, project_dir=project)
     assert not (out / "heldout").exists()
-    monkeypatch.setattr(runner, "LLM_CONFIG", committed)  # approved 2026-10-10 (decision 029): refused at the heavy lock
+    # approved 2026-10-10 (decision 029), inference host gpu-server since 2026-10-11 (029 revision 1): refused outside
+    # tools/with-remote-ollama; the same settings on host local are refused at the Mac heavy lock
+    from eval.inference_host import NotWrapped
+
+    monkeypatch.setattr(runner, "LLM_CONFIG", committed)
+    monkeypatch.delenv("II_INFERENCE_HOST", raising=False)
 
     def busy(project_dir):
         raise soak.LockNotHeld("Mac heavy lock not held; run via ./tools/with-mac-lock (MACHINE_POLICY.md)")
 
     monkeypatch.setattr(soak, "require_heavy_lock", busy)
+    for method in ("agent", "dump-all", "retrieval"):
+        with pytest.raises(NotWrapped, match="with-remote-ollama"):
+            run_method(layout, method, "heldout", out, project_dir=project)
+    local = tmp_path / "local.json"
+    doc = json.loads(committed.read_text())
+    local.write_text(json.dumps({**doc, "ollama": {**doc["ollama"], "host": "local"}}))
+    monkeypatch.setattr(runner, "LLM_CONFIG", local)
     for method in ("agent", "dump-all", "retrieval"):
         with pytest.raises(soak.LockNotHeld):
             run_method(layout, method, "heldout", out, project_dir=project)

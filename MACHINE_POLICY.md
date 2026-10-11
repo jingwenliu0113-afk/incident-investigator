@@ -71,6 +71,22 @@ Core 原則上不需要 RTX。
 
 遠端桌機離線時，標記 blocked 並繼續 Mac 工作。
 
+### LLM 方法的推論（2026-10-11 起，使用者明確要求）
+
+使用者 2026-10-11 明確要求並同意：LLM 方法（dump-all、retrieval、Agent）的**模型推論**改在 RTX 5070 Ti 桌機上執行
+（Mac 的 70 W 充電器供不上高效能模式的本機推論；decision 029 修訂 1）。
+
+- **只有模型呼叫在桌機上**：eval 迴圈、snapshot、ground truth、評分與結果都留在 Mac，不複製到桌機。
+  模型呼叫經 `./tools/with-remote-ollama` 開的 SSH tunnel（Mac `127.0.0.1:11434` → 桌機 `127.0.0.1:11434`）送到 WSL Ubuntu-22.04 裡的 Ollama；
+  adapter 仍然只連 loopback。這不是付費或第三方服務（「外部費用」不適用：既有的本地硬體）。
+- **GPU lock**：桌機的 GPU 與使用者其他 project 共用，一律在 WSL Ubuntu-22.04 裡以 `flock -n /tmp/ai-portfolio-gpu.lock` 取得
+  （經 `ssh gpu-server`；`with-remote-ollama` 會做，lock 被占用時 exit 75）。被占用 → 等之後再跑；**不得搶占、不得刪除 lock、不得停止別人的程序**。
+  server 只在 lock 內存在，結束時只停止自己啟動的那一個。
+- 這種遠端推論**不需要 Mac heavy lock**：Mac 只跑輕量的 eval 迴圈；重的推論在桌機上，由 GPU lock 保護。
+- 只使用 Ollama 0.35.0（`~/opt/ollama-0.35.0`）與只給本 project 用的 models 目錄（`~/ii-ollama-models`），都在 WSL 使用者的 home、不需要 sudo；
+  不更動桌機的其他設定或其他 project 的檔案。
+- **gpu-server 離線或連不上時**：LLM 的步驟標記 blocked，繼續 Mac 上可完成的工作；不改回 Mac 推論（那是使用者的決定）。
+
 ## Credential 安全
 
 若遠端已由使用者設定完成，只能使用預設 alias：

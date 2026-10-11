@@ -117,10 +117,11 @@ class FakeOllama:
 
 
 def approved_config(**ollama):
-    """eval/llm_methods.json as the user would approve a local model (decision 029); budgets as committed."""
+    """eval/llm_methods.json as the user would approve a local model (decision 029); budgets as committed. The inference
+    host is this Mac ("local": heavy lock and the formal power state) unless host="gpu-server" (029 revision 1)."""
     return {"status": "approved", "note": "test", "provider": "ollama", "model": MODEL, "model_version": DIGEST,
             "temperature": 0, "price_per_mtok": {"input": 0, "output": 0},
-            "ollama": {"url": "http://127.0.0.1:11434", "version": VERSION, "num_ctx": 196_608, "num_predict": 8192,
+            "ollama": {"url": "http://127.0.0.1:11434", "host": "local", "version": VERSION, "num_ctx": 196_608, "num_predict": 8192,
                        "seed": 42, "think": False, "timeout_s": 3600, **ollama},
             "budgets": {"dump_all_proxy_tokens": 120_000, "retrieval_queries": 8, "retrieval_k": 25,
                         "agent_max_tool_calls": 40, "agent_max_proxy_tokens": 120_000, "agent_max_turns": 30}}

@@ -237,6 +237,8 @@
       之後算的；`scores.json` 不存在由解讀 2 的檢查拒絕。這樣「Pilot 的結果」包括 plan 記錄的、報告用的分數。
     - **不比對** `scope`（固定的描述文字）與 `llm_methods.json` 中不進 `run_config.json` 的欄位（`url`、`timeout_s`、`note`）：使用者同意的是 llm 紀錄與預算；
       整個 `llm_methods.json` 已由 freeze 紀錄的 `llm.config_sha256` 釘住（解讀 8）。
+    - **補註（2026-10-11，decision 029 修訂 1）**：`llm` 另有 `host`（推論主機：`local` = 這台 Mac、`gpu-server` = 使用者的 RTX 5070 Ti 桌機），
+      所以這項比對也要求 Pilot 在要凍結的主機上執行；規則本身不變。
     - 只有 provider `ollama` 有 runtime 紀錄；其他 provider 的期望 `llm` 是 null。它們現在沒有 adapter、不能執行；換回付費 API 時另寫 decision 並更新這一項。
     - **混合的 Pilot 目錄（修訂 3 審查，2026-10-10；原本列為「已知限制」、程式不檢查）**：Pilot 的執行沒有嘗試紀錄（NEXT A1）；一次在中途停止的
       Pilot 執行會留下新的 `run_config.json` 與前一次執行的部分 prediction（`run_method` 先寫 `run_config.json`，再逐一寫 prediction），

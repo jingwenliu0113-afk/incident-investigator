@@ -1,6 +1,6 @@
 {
   "status": "approved",
-  "note": "decisions 020 / 021 / 029. Approved by the user on 2026-10-10 (「照建議」: the eight recommendations after the synthetic probe; decision 029 「使用者決定（2026-10-10）：照建議」): the local Ollama model qwen3.5 9B (q4_K_M) on this Mac instead of a paid API (provisional, decision 029), its manifest digest and Ollama 0.35.0 pinned (a mismatch refuses the run; no Ollama upgrade until the held-out evaluation is done), num_ctx 262144 (the model's maximum, so the dump-all budget fits in real tokens), think off, num_predict 8192, temperature 0, seed 42, price 0 (local, no external cost). timeout_s stays the proposed 3600 (not one of the eight items; the probe's speeds put a single call near the full context at about 43-50 minutes, decision 029; raising it is the user's decision, before the freeze). Runs need the Mac heavy lock and the high power mode on AC power. The budgets are unchanged. Any other provider has no adapter.",
+  "note": "decisions 020 / 021 / 029. Approved by the user on 2026-10-10 (「照建議」: the eight recommendations after the synthetic probe; decision 029 「使用者決定（2026-10-10）：照建議」): the local Ollama model qwen3.5 9B (q4_K_M) on this Mac instead of a paid API (provisional, decision 029), its manifest digest and Ollama 0.35.0 pinned (a mismatch refuses the run; no Ollama upgrade until the held-out evaluation is done), num_ctx 262144 (the model's maximum, so the dump-all budget fits in real tokens), think off, num_predict 8192, temperature 0, seed 42, price 0 (local, no external cost). timeout_s stays the proposed 3600 (not one of the eight items; the probe's speeds put a single call near the full context at about 43-50 minutes, decision 029; raising it is the user's decision, before the freeze). Runs need the Mac heavy lock and the high power mode on AC power. The budgets are unchanged. Any other provider has no adapter. Decision 029 revision 1 (user decision 2026-10-11, 「同意」): the model runs on the user's RTX 5070 Ti desktop (ollama.host gpu-server: Ollama 0.35.0 inside WSL Ubuntu-22.04 under the shared GPU lock, reached only through the SSH tunnel of tools/with-remote-ollama; the url stays loopback and the eval, snapshots and ground truth stay on this Mac). Such runs need that wrapper instead of the Mac heavy lock and record the GPU state instead of checking the Mac's power mode; host local keeps the rules above. Every other setting is unchanged.",
   "provider": "ollama",
   "model": "qwen3.5:9b-q4_K_M",
   "model_version": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
@@ -11,6 +11,7 @@
   },
   "ollama": {
     "url": "http://127.0.0.1:11434",
+    "host": "gpu-server",
     "version": "0.35.0",
     "num_ctx": 262144,
     "num_predict": 8192,

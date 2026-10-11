@@ -1,8 +1,20 @@
 # NEXT
 
-## 目前位置（2026-10-10，LLM 設定批准後）
+## 目前位置（2026-10-11，推論改在 RTX 5070 Ti 之後）
 
-**2026-10-11 Pilot 上的 LLM 方法執行（qwen3.5 9B，本機；診斷用，不是 Gate 判定）**：
+**使用者決定（2026-10-11）「同意」：LLM 方法的推論改在 RTX 5070 Ti 桌機（decision 029 修訂 1，分支 `remote-gpu`）**。
+- 背景：70 W 充電器供不上 Mac 高效能模式的本機推論（AC 下電池每小時約掉 17–18%），held-out 約需 35–50 小時的 Mac 重負載。
+- 做法：eval 迴圈、snapshot、ground truth、評分都留在 Mac；只有模型呼叫經 `./tools/with-remote-ollama` 的 SSH tunnel
+  （Mac `127.0.0.1:11434` → gpu-server `127.0.0.1:11434`）送到 WSL Ubuntu-22.04 裡的 Ollama 0.35.0（`~/opt/ollama-0.35.0`、models 在 `~/ii-ollama-models`），
+  server 只在共用的 GPU lock（`flock -n /tmp/ai-portfolio-gpu.lock`）內存在；lock 被占用 → exit 75（之後再跑，不搶不刪）；gpu-server 離線 → LLM 步驟 blocked。
+  `eval/llm_methods.json` 的 `ollama.host` = `gpu-server`（其他設定逐項不變）；這種執行不需要 Mac heavy lock、不檢查 Mac 的電力模式，
+  改為每個 incident 前後記錄 GPU 狀態（nvidia-smi；讀不到記 null，GPU 不是 RTX 5070 Ti 或連續兩次讀不到才停止）。`host` 進 `run_config.json` 的 `llm`，
+  所以 freeze 要求 Pilot 在同一台主機上跑。
+- **影響**：三個 LLM 方法都要在 Pilot 上用 GPU 重跑（Metal 與 CUDA 在 temperature 0 下也可能不同）；下面 Mac 上的 retrieval / agent 分數**被取代**，只留作紀錄。
+- 測試：1098 passed（`-m "not network and not docker_daemon"`；ssh、nvidia-smi、pmset、Ollama 一律以假的執行檔或 monkeypatch 代替，沒有連到 gpu-server）。
+- **下一步（主 session）**：合併 `remote-gpu` → 遠端的安裝與檢查（下一步 8.2 的「開始前」）→ 探測 → 三個方法的 Pilot 執行 → 評分、compare、gate（診斷）。
+
+**2026-10-11 Pilot 上的 LLM 方法執行（qwen3.5 9B，在 Mac 上；診斷用，不是 Gate 判定；已被 029 修訂 1 取代，只留作紀錄）**：
 - retrieval 與 agent 完成並評分（高效能 + AC，10 個 incident 的 latency 都在正式電力下量到）：
 
   | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 失敗（022） | 平均 latency |
@@ -12,14 +24,14 @@
   | agent | 0.60 | 0.60 | 0.60 | 0.71 | 0.40 | seen_misread 3、no_answer 1 | 422 s |
 
 - **dump-all 重跑（2026-10-11 08:07 起）由使用者決定停止**（10:38，做完 5/10）：70W 充電器供不上高效能模式的耗電，接著 AC 電池仍每小時約掉 17–18%，跑完前會沒電。中途停止的 Pilot 執行不評分。
-  - **待使用者決定**：改在 RTX 5070 Ti 上推論（使用者提出；Windows 11 + WSL Ubuntu-22.04，16 GB VRAM，共用 GPU lock `/tmp/ai-portfolio-gpu.lock` 以 `flock -n`）。要換就是 029 的修訂（推論主機、電力條件），且 retrieval / agent 也要在同一台重跑；或留在 Mac，充飽後再跑（held-out 約 40 小時的重負載在 70W 下不可行）。
-- **dump-all 停在 INC-004 之後**（2026-10-11 02:27 台北，電力模式變成 0 = 自動；不是本 session 改的，程式依 029 停止）。Pilot 中途停止的執行不評分，
-  背景排程等高效能 + AC 與 heavy lock 後**從頭重跑**（約 4.5 小時：每個 incident 約 27 分鐘），之後 score、compare、gate（診斷）。
+  - **已決定（2026-10-11，使用者「同意」）**：改在 RTX 5070 Ti 上推論（decision 029 修訂 1，見上）；retrieval / agent 也在同一台重跑。
+- **dump-all 停在 INC-004 之後**（2026-10-11 02:27 台北，電力模式變成 0 = 自動；不是本 session 改的，程式依 029 停止）。Pilot 中途停止的執行不評分。
+  （原本排定在 Mac 上從頭重跑；已由 029 修訂 1 取代：三個方法都改在 GPU 上重跑。）
 - **Pilot 上看到、還沒處理的方法問題**（看過 Pilot 結果才發現：要改就是 020 / 021「在 Pilot 上修訂一次」的那一次，**由使用者決定**，目前不改）：
   1. retrieval INC-005、INC-011：模型把概覽的每分鐘列當成證據（`m-cart-10:00` 這種自編的 id），概覽列沒有可引用的 id，更正兩次後放棄作答。
   2. agent INC-006：重複呼叫同一個查無資料的工具，到回合上限後只回文字、沒有提交（turn_limit → 放棄作答）。
   3. agent 幾乎只給一個 origin 候選（top3 = top1 = 0.60），stat-anomaly 的 top3 是 0.90。
-- **需要使用者（人工）**：三個 LLM 方法的新引用要補 evidence gold（decision 017；dump-all 完成後 `uv run python -m eval gold-todo --set pilot`，只列新的）。
+- **需要使用者（人工）**：三個 LLM 方法的新引用要補 evidence gold（decision 017；三個方法在 GPU 上都跑完後 `uv run python -m eval gold-todo --set pilot`，只列新的）。
 
 **Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。
 A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B，decision 029「使用者決定（2026-10-10）：照建議」），`eval/llm_methods.json` 是 `approved`；
@@ -305,24 +317,44 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
      （preflight 與 normalize 都拒絕 dirty tree）；可以改 `eval/`、`agent/`、`baselines/`、文件。
 5. ✅ **Gate 前請使用者做的人工作業**（2026-10-10 完成，human:jingwen）：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
 6. LLM 方法（dump-all / retrieval / agent）已登錄在 `python -m eval run`；`eval/llm_methods.json` 已於 2026-10-10 由使用者批准（`approved`，本機 Ollama 的
-   qwen3.5 9B，decision 029）。付費 API 的 adapter 沒有（換回時另寫 decision、先報告成本）。執行要求 heavy lock、`with-local-ollama` 與高效能模式 + AC。
+   qwen3.5 9B，decision 029）。付費 API 的 adapter 沒有（換回時另寫 decision、先報告成本）。2026-10-11 起推論主機是 RTX 5070 Ti 桌機
+   （`ollama.host` = `gpu-server`，029 修訂 1）：執行要求 `./tools/with-remote-ollama`（不需要 heavy lock、不檢查 Mac 電力，記錄 GPU 狀態）。
+   host `local`（Mac）的規則不變：heavy lock、`with-local-ollama` 與高效能模式 + AC。
 7. ✅ 第一張 baseline 表（Pilot，stat-anomaly v2）已產生（README「結果」）。
-8. **剩下的 Core 依序**（LLM 方法暫時改試本機模型，decision 029，見 A1）：
+8. **剩下的 Core 依序**（LLM 方法暫時改試本機模型，decision 029；2026-10-11 起在 RTX 5070 Ti 上推論，029 修訂 1；見 A1）：
    0. ✅ **新 lock 的 soak #6 PASSED**（2026-10-10，A0，decision 028「結果」）。
    1. ✅ **合成範例探測**（2026-10-10，三個本機模型，029「探測結果」）；✅ **使用者決定「照建議」**（2026-10-10，029 文末；`llm_methods.json` = `approved`）。
       （探測的指令與看法保留在 029 §5；之後不再需要。）
-   2. **下一步（主 session，不需要使用者）：三個 LLM 方法在 Pilot 上執行**，先合併 `llm-approve` 進 main（測試通過後 push）。
-      每個方法各自一次 heavy lock（方法之間釋放，讓其他 Project 有空檔）；`with-local-ollama` 在 lock 內啟動 server、跑完一定停掉
-      （lock 被占用 → exit 75、不搶；11434 已經有 server → exit 3，不用它也不停它，回報使用者）。
-      **開始前**：Mac 在高效能模式（`pmset` 的 `powermode` 2）且接 AC 電源（程式在開始時與每個 incident 之前檢查，不符就停止、exit 2）；
-      執行中不改 main checkout（設定在開始時讀一次，但程式模組會在執行中載入）。順序：retrieval 最短，當作金絲雀（第一次用 `num_ctx` 262,144，
-      探測只跑到 196,608：若 `/api/ps` 的 context 不是 262,144，第一個 incident 就會以 `context_unverified` 停下 → 回報使用者）；然後 agent；最後 dump-all。
+   2. **下一步（主 session，不需要使用者）：三個 LLM 方法在 Pilot 上用 RTX 5070 Ti 執行**（decision 029 修訂 1）。先合併 `remote-gpu` 進 main（測試通過後 push）。
+      Mac 上 2026-10-10/11 的 retrieval / agent 結果被取代：三個方法都從頭重跑到 exit 0，`run_config.json`、prediction 與 `power.jsonl` 的新行會寫在同一個目錄
+      （舊的 Mac 行留著，評分與 freeze 只看每個 incident 的最後一行與目前的 `run_config.json`）。
+      **開始前（主 session 在 gpu-server 上確認一次；只讀，不改任何設定）**：
       ```bash
-      ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval run --method retrieval --set pilot   # 估計 < 1 小時（第二次呼叫帶回的檢索結果多時可能到約 2 小時）
-      ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval run --method agent --set pilot       # 估計 1–4 小時
-      ./tools/with-mac-lock ./tools/with-local-ollama uv run python -m eval run --method dump-all --set pilot    # 估計約 5 小時（每個 incident 約 30 分鐘）
+      # Ollama 0.35.0 在 WSL 的 home（印出 client version is 0.35.0；沒有 server 時的警告是正常的）
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "$HOME/opt/ollama-0.35.0/bin/ollama --version"'
+      # 只給本 project 的 models 目錄：manifest 的 sha256 必須是 6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "sha256sum $HOME/ii-ollama-models/manifests/registry.ollama.ai/library/qwen3.5/9b-q4_K_M"'
+      # wrapper 與 runner 需要的指令都在（flock、pkill、pgrep、nvidia-smi）
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "command -v flock pkill pgrep nvidia-smi"'
+      # runner 每個 incident 前後用的同一個 GPU 查詢：一行，名稱含 RTX 5070 Ti
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- nvidia-smi --query-gpu=name,driver_version,power.limit,power.draw,clocks.sm,temperature.gpu,memory.used --format=csv,noheader'
       ```
-      每個都跑完（exit 0）之後才評分（不需要 lock）：
+      Mac 上不能有程式在聽 `127.0.0.1:11434`（例如 Ollama app；wrapper 會 exit 3）。執行中不改 main checkout。
+      **探測（合成範例，不是結果）**：確認整條路徑（tunnel、GPU lock、WSL2 的 localhost 轉送、server 自己拒絕過長的 prompt）與 GPU 上的速度；
+      `num_ctx` 262,144 在 16 GB VRAM 上是否完全放在 GPU 也看這裡的速度與 `/api/ps`：
+      ```bash
+      ./tools/with-remote-ollama uv run python -m eval local-probe --model qwen3.5:9b-q4_K_M --num-ctx 262144 \
+          --context-sizes 8000,32000,100000,200000 --out <session 的 scratchpad>/probe-gpu.json
+      ```
+      exit 0 才繼續；exit 3 = GUARD FAILED 或 wrapper 拒絕（訊息說明）、exit 75 = GPU lock 被占用（之後再跑，不搶不刪）、ssh 失敗 = blocked → 回報使用者。
+      報告的 `host` 應是 `gpu-server`、`gpu` 是 RTX 5070 Ti、`ollama.digest` 是釘選的 digest。
+      **三個方法**（順序：retrieval 當金絲雀、agent、dump-all；每個方法一次 wrapper，方法之間 GPU lock 釋放，讓其他 project 有空檔）：
+      ```bash
+      ./tools/with-remote-ollama uv run python -m eval run --method retrieval --set pilot
+      ./tools/with-remote-ollama uv run python -m eval run --method agent --set pilot
+      ./tools/with-remote-ollama uv run python -m eval run --method dump-all --set pilot
+      ```
+      每個都跑完（exit 0）之後才評分（不需要 wrapper 或 lock）：
       ```bash
       uv run python -m eval score --method retrieval --set pilot
       uv run python -m eval score --method agent --set pilot
@@ -330,20 +362,19 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
       uv run python -m eval compare --method agent --against stat-anomaly --set pilot   # paired 比較（Pilot：只是描述）
       uv run python -m eval gate --method agent --against stat-anomaly --set pilot      # Pilot 診斷，不是 Gate 判定
       ```
-      - 時間是依探測速度的估計（029「探測結果」），不是量測；第一個方法跑完後依實際的 latency 更新。
-      - **每個 LLM 方法**（包括第一個跑的 retrieval）開始時 stderr 都會印
-        `WARNING (decision 029): agent's worst case (409,730 proxy tokens …) is above num_ctx 262,144`：`start_llm` 對三個方法的 fit 都報告，
-        不管這次跑的是哪個；只是報告（029 §2.5），不是錯誤。Agent 真的超過時那次呼叫以 `context_overflow` 停止、不會靜默截斷。
-        Agent 的實際 / proxy 比例最高約 1.68，工具輸出用滿 120,000 proxy 的長對話有可能碰到。
-      - `timeout_s` 是 3600：dump-all 接近滿 context 的一次呼叫估計 33–50 分鐘。若 Pilot 上有呼叫逾時（`transport_error`、exit 2），
-        或評分表的 dump-all `latency_s` max 接近 3600，回報使用者決定要不要加長（029「`timeout_s`」；freeze 之前改不需重跑 Pilot 的其他方法）。
-      - exit 2（`error: …`）：`CallError`（例如 `context_overflow`）、釘選不符、電力不是正式條件。Pilot 沒有嘗試紀錄，重跑時整個 Pilot 從頭執行、
-        所有 prediction 與 `run_config.json` 重寫（A1）；**中途停止的執行不要評分**，要重跑到 exit 0 再評分（就算評分了，freeze 也會以 `power.jsonl` 的
-        `run_config_sha256` 拒絕留下的舊 prediction，026 解讀 32）。原因回報使用者，不自行改預算或設定。
-      - 評分表的「Budgets, usage and visible data」段會列出 latency 不是在正式電力條件下量測的 incident（`power.jsonl`）。
+      - 時間要等探測量到 GPU 的速度再估。Mac 上的參考（不可比）：retrieval 平均 280 s / incident、agent 422 s、dump-all 約 27 分鐘。
+      - **每個 LLM 方法**開始時 stderr 都會印 `WARNING (decision 029): agent's worst case (409,730 proxy tokens …) is above num_ctx 262,144`：
+        只是報告（029 §2.5），不是錯誤。Agent 真的超過時那次呼叫以 `context_overflow` 停止、不會靜默截斷。
+      - `timeout_s` 是 3600（不變）。若 Pilot 上有呼叫逾時（`transport_error`、exit 2），或評分表的 dump-all `latency_s` max 接近 3600，回報使用者決定。
+      - exit 2（`error: …`）：`CallError`（例如 `context_overflow`、`context_unverified`：`/api/ps` 的 context 不是 262,144）、釘選不符、
+        GPU 狀態停止（不是 RTX 5070 Ti，或連續兩次讀不到）、不在 wrapper 之下。exit 75：GPU lock 被占用（之後再跑）。exit 3：wrapper 拒絕或 ssh 失敗
+        （gpu-server 離線 → LLM 步驟標記 blocked，繼續 Mac 上的工作）、或結束時無法確認遠端 server 已停止（照訊息在 gpu-server 上檢查、回報使用者，不刪 lock）。
+        Pilot 沒有嘗試紀錄，重跑時整個 Pilot 從頭執行；**中途停止的執行不要評分**（freeze 也會以 `power.jsonl` 的 `run_config_sha256` 拒絕，026 解讀 32）。
+        原因回報使用者，不自行改預算或設定。
+      - 評分表的「Budgets, usage and visible data」段寫推論主機與 GPU（名稱、驅動、功耗上限），並列出前後 GPU 狀態沒有都讀到的 incident（latency 照樣保留）。
       - 之後：`uv run python -m eval gold-todo --set pilot` 產生 LLM 方法新引用的 evidence gold 工作表（只列新的；由使用者標註，decision 017）。
    3. held-out：plan → freeze（`collect heldout-freeze` 現在由程式要求：目前 lock 有通過的 soak（soak #6 已滿足）、三個 LLM 方法的 Pilot `run_config.json`
-      正好是 `llm_methods.json` 的設定且分數是從那次執行算的，026 解讀 31、32；013 正式版要 LLM 結果）→ held-out 收集（`collect next --set heldout`，K = 5）
+      正好是 `llm_methods.json` 的設定（含 `host` = `gpu-server`）且分數是從那次執行算的，026 解讀 31、32；013 正式版要 LLM 結果）→ held-out 收集（`collect next --set heldout`，K = 5）
       → held-out 評測與 Gate。
    - 若使用者之後換回付費 API：另寫 decision、加 adapter，**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、token 量與預估成本並等批准**，
      並在 freeze 之前用那個模型重跑 Pilot（029「對實驗的影響」）。模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
@@ -357,7 +388,12 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
     Ollama 0.35.0 **釘選**（held-out 結束前不升級 Ollama，含 Homebrew 自動更新）、`num_ctx` 262,144、think 關、`num_predict` 8192、預算不變；
     LLM 執行要求高效能模式 + AC 並記錄（`power.jsonl`）；freeze 由程式檢查 soak 與 Pilot 的 LLM 設定（026 修訂 3）。`eval/llm_methods.json` = `approved`。
     原本待確認的三項（版本釘選或只記錄、電力條件、freeze 是否強制）都已決定：釘選、套用並記錄、強制。
-  - **下一步不需要使用者**：三個方法在 Pilot 上執行（下一步 8.2）。執行中被拒絕或停止（`CallError`、釘選、電力）時回報使用者，不自行改設定或預算。
+  - **已決定（2026-10-11，使用者「同意」；decision 029 修訂 1）**：推論改在 RTX 5070 Ti 桌機（`ollama.host` = `gpu-server`，`./tools/with-remote-ollama`：
+    SSH tunnel、WSL Ubuntu-22.04 裡的 Ollama 0.35.0、共用 GPU lock `flock -n /tmp/ai-portfolio-gpu.lock`）；eval、snapshot 與 ground truth 留在 Mac。
+    這種執行不需要 Mac heavy lock，電力條件改為記錄 GPU 狀態（GPU 不是 RTX 5070 Ti 或連續兩次讀不到才停止）。三個方法都要在 GPU 上重跑 Pilot
+    （Mac 上的 retrieval / agent 結果被取代）；freeze 釘住 `host`。
+  - **下一步不需要使用者**：遠端檢查、探測、三個方法在 Pilot 上執行（下一步 8.2）。執行中被拒絕或停止（`CallError`、釘選、GPU 狀態、GPU lock、
+    gpu-server 離線 → blocked）時回報使用者，不自行改設定或預算，也不改回 Mac 推論。
   - **之後需要使用者**：LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
     若 Pilot 的 dump-all 有呼叫逾時或最長的呼叫接近 3600 秒：決定要不要加長 `ollama.timeout_s`（不在「照建議」八項之內，維持提案的 3600；freeze 之前決定，029）。
   - 已完成並合併進 main（decision 029）：Ollama adapter（只連 loopback、拒絕 cloud 模型；`truncate` / `shift` 關閉、每個回覆檢查——包括不依賴
@@ -421,7 +457,8 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
 - 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
   執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
   （理由：跑 decision 004 的 soak test；當時 daemon 是停止狀態，沒有其他 workload 在跑），接著先 `compose down --volumes` 清掉本 Project 被 restart policy 拉起的 container。
-- 遠端 RTX 5070 Ti：Core 不需要，沒有使用。
+- 遠端 RTX 5070 Ti：2026-10-11 起用於 LLM 方法的模型推論（使用者明確要求，decision 029 修訂 1、MACHINE_POLICY「遠端 GPU」）；只透過 `ssh gpu-server`
+  與 `./tools/with-remote-ollama`，GPU lock 共用、不搶不刪。其他 Core 工作仍只在 Mac。
 - Docker Desktop：依 `MACHINE_POLICY.md`，在 Core 階段是本 Project 專用。
   機器上不屬於本 Project 的 Docker 資源都保持原狀：`pgvector/pgvector:pg17` image、`rtu-maintenance-platform-db-1`（停止中）container、它的 volume `rtu-maintenance-platform_rtu_db_data` 與 network `rtu-maintenance-platform_default`。
 - 本機已下載 28 個鎖定的 image（約 11.7 GB），保留給之後的收集使用。

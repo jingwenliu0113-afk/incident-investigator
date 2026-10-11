@@ -8,9 +8,11 @@ truncation guard's self-test on generated filler with a tiny context (one long m
 messages: the server itself must refuse both with a context error, "server"; caught only by the adapter's reply checks
 is a GUARD FAILED, the CLI then exits 3), sends one prompt twice (does temperature 0 repeat, and is prompt_eval_count the
 whole prompt even when it is cached?) and, when asked, measures prefill / decode speed at given sizes of generated filler
-(no incident data). It records the model digest, the Ollama version and the power state it saw, unloads the model at
-the end, needs the Mac heavy lock (a local model run is a heavy workload) and writes nothing under data/: the report goes
-to stdout or --out.
+(no incident data). It records the model digest, the Ollama version and the state of the inference host it saw, unloads
+the model at the end and writes nothing under data/: the report goes to stdout or --out. Where the model runs is
+`host` (decision 029 revision 1; default: eval/llm_methods.json's ollama.host): "local" needs the Mac heavy lock (a
+local model run is a heavy workload) and records the power state (pmset); "gpu-server" needs tools/with-remote-ollama,
+like the runner, and records the GPU state (nvidia-smi through ssh gpu-server) instead.
 """
 
 from __future__ import annotations
@@ -229,21 +231,29 @@ def out_problem(path: Path) -> str | None:
     return None
 
 
-def run_probe(model_tag: str, *, num_ctx: int | None = None, think: bool = False, context_sizes=(), transport=None,
-              require_lock=None, sample_root: Path | None = None, config_path: Path | None = None) -> dict:
+def run_probe(model_tag: str, *, host: str | None = None, num_ctx: int | None = None, think: bool = False,
+              context_sizes=(), transport=None, require_lock=None, sample_root: Path | None = None,
+              config_path: Path | None = None) -> dict:
     import agent.ollama as ollama
     import collect.provenance as provenance
+    import eval.inference_host as inference_host
     from collect.snapshot import open_snapshot
     from env.soak import require_heavy_lock
     from eval.demo import check_sample
     from eval.runner import LLM_CONFIG, LLM_METHODS, fit_problems, llm_fit
 
-    (require_lock or require_heavy_lock)(PROJECT_DIR)
+    config = json.loads(Path(config_path or LLM_CONFIG).read_text())  # its budgets and settings, approved or not: never needs approval
+    host = host or (config.get("ollama") or {}).get("host") or inference_host.LOCAL
+    if host not in ollama.HOSTS:
+        raise ValueError(f"the probe's host must be one of {', '.join(ollama.HOSTS)} (decision 029 revision 1), got {host!r}")
+    if host == inference_host.REMOTE:
+        inference_host.require_remote()  # tools/with-remote-ollama, the same requirement as the runner
+    else:
+        (require_lock or require_heavy_lock)(PROJECT_DIR)
     root = Path(sample_root) if sample_root is not None else PROJECT_DIR / SAMPLE_DIR
     manifest = check_sample(root)  # synthetic: true and every file exactly as listed, or ValueError
     if manifest.get("incident_id") != INCIDENT:
         raise ValueError(f"{root} is not the synthetic sample ({INCIDENT}): the probe runs on nothing else (decision 029)")
-    config = json.loads(Path(config_path or LLM_CONFIG).read_text())  # its budgets and settings, approved or not: never needs approval
     o, budgets = config.get("ollama") or {}, config["budgets"]
     num_predict, seed = o.get("num_predict") or 8192, o.get("seed") or 42
     temperature = config.get("temperature") if config.get("temperature") is not None else 0
@@ -287,7 +297,12 @@ def run_probe(model_tag: str, *, num_ctx: int | None = None, think: bool = False
         unloaded = ollama.unload(transport, model_tag)
     if unloaded is not None:
         warnings.append(unloaded)
-    return {"banner": BANNER, "synthetic": True,
+    if host == inference_host.REMOTE:  # read only: the speed depends on it (decision 029 revision 1)
+        state = {"gpu": inference_host.gpu_facts()}
+        warnings += inference_host.gpu_problems(state["gpu"])
+    else:
+        state = {"power": provenance.power_facts()}  # read only (pmset, decision 025): speed depends on it
+    return {"banner": BANNER, "synthetic": True, "host": host,
             "sample": {"path": SAMPLE_DIR.as_posix() if root == PROJECT_DIR / SAMPLE_DIR else str(root),
                        "incident_id": INCIDENT, "generator": manifest.get("generator")},
             "ollama": {"version": facts["ollama_version"], "model": model_tag, "digest": facts["digest"],
@@ -295,8 +310,7 @@ def run_probe(model_tag: str, *, num_ctx: int | None = None, think: bool = False
                        "details": facts["details"], "parameters": facts["parameters"]},
             "settings": {"num_ctx": num_ctx, "num_predict": num_predict, "temperature": temperature, "seed": seed,
                          "think": think, "budgets": budgets},
-            "power": provenance.power_facts(),  # read only (pmset, decision 025): speed depends on it
-            "warnings": warnings, "fit": llm_fit(budgets, num_ctx, num_predict), "guard_selftest": guard,
+            **state, "warnings": warnings, "fit": llm_fit(budgets, num_ctx, num_predict), "guard_selftest": guard,
             "methods": methods, "repeat_check": repeat, "speed": speed, "unloaded": unloaded is None,
             "config_if_approved": {"provider": "ollama", "model": model_tag, "model_version": facts["digest"],
                                    "price_per_mtok": {"input": 0, "output": 0},
