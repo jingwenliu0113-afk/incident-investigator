@@ -557,3 +557,21 @@ gpu-server 的探測改用 `./tools/with-remote-ollama uv run python -m eval loc
   `llm` 與 `latency_power` 多 `host`、host 必填、committed 設定在 wrapper 外拒絕）；`tests/test_local_probe.py`（明確 `--host local`）；
   `tests/test_eval_heldout.py`（committed 設定在 wrapper 外拒絕，同樣的設定改成 host `local` 在 heavy lock 拒絕）。
   全部不執行 ssh、nvidia-smi、pmset、Ollama 或任何 server，也不連網路。
+
+## 修訂 1 的探測與 Pilot 執行（2026-10-11）
+
+- **遠端安裝**（主 session，使用者同意的計畫）：WSL Ubuntu-22.04 的使用者目錄，不用 sudo。
+  - Ollama 0.35.0 官方 Linux 版（`ollama-linux-amd64.tar.zst`，sha256 與 release 的 `sha256sum.txt` 相符）→ `~/opt/ollama-0.35.0`。
+    GitHub 的下載每條連線只有約 30 KB/s，所以分段平行下載後合併、再核對。
+  - 模型放在 `~/ii-ollama-models`：manifest 與三個小 blob 從 Mac 逐 byte 複製；6.59 GB 的模型 blob 以 digest 從 Ollama registry 下載，sha256 相符。
+    registry 上 `qwen3.5:9b-q4_K_M` 這個 tag 已經指向新的版本（另有 projector、模型 blob 不同），所以**不能用 `ollama pull`**；以 digest 取舊 blob 才能保持釘選的 manifest digest。
+  - 啟動後 `/api/tags` 回報 digest `6488c96f…`、`/api/version` 0.35.0。
+- **GPU 探測**（合成範例，**不是結果**；`tools/with-remote-ollama`，num_ctx 262,144）：
+  - 防護自我測試通過（兩項都是 server 拒絕）；同一 prompt 兩次相同、prompt_eval_count 相同。
+  - dump-all、retrieval、Agent 都提交合格答案（payment、error_response）：41 s、73 s、50 s。
+  - prefill 8k / 32k / 100k / 200k：4,252 / 3,856 / 2,826 / 2,061 tok/s；decode 65 → 40 tok/s。
+  - `/api/ps`：262,144 context 時 15.1 GB 中 13.8 GB 在 GPU（16 GB VRAM 放不下全部，其餘在 CPU；輸出不受影響，只是較慢）。
+    KV cache 量化等會改變數值的設定**沒有**使用。
+  - wrapper 結束後遠端 server 已停止、GPU lock 已釋放（主 session 以 `pgrep` 與 `flock -n` 確認）。
+- **Pilot 執行**：三個方法都 exit 0（2026-10-11 04:04–05:08Z，commit `f001e94`），結果見 README「結果」與 NEXT。
+  Mac 上先前跑的結果封存在 `data/external/archive/pilot-llm-mac-2026-10-11/`，只留紀錄、不評分。
