@@ -200,7 +200,7 @@ gpu-server 的探測改用 `./tools/with-remote-ollama uv run python -m eval loc
 - **預算數值**：不變（B = 120,000、q = 8、k = 25、Agent 40 次 / 120,000 / 30 回合）。選定的模型放不下時，要不要改預算是使用者的決定（另寫 decision log）。
   **→ 不變**：`num_ctx` 262,144 放得下（第 2 項）。
 - `llm_methods.json` 維持 `proposed`；三個 LLM 方法在 Pilot 上執行要等使用者同意（提案第 3 步）。
-  **→ 已批准**（`approved`）；Pilot 上的執行是下一步（NEXT）。
+  **→ 已批准**（`approved`）；Pilot 上的執行是下一步（NEXT）。（2026-10-16 註：2026-10-11 已在 RTX 5070 Ti 上執行，見文末。）
 - `num_predict` 8192 只是建議值，隨模型一起由使用者批准。**→ 維持 8192**（第 6 項）。
 - **Ollama 版本是釘選（不符就拒絕）還是只記錄**：§3.2；程式目前釘選，待使用者確認，確認後以補註定案。
   **→ 釘選**（第 4 項；held-out 結束前不升級 Ollama）。
@@ -330,6 +330,11 @@ gpu-server 的探測改用 `./tools/with-remote-ollama uv run python -m eval loc
 - **之後怎麼確認**：Pilot 的 dump-all 會量到接近滿 context 的實際 latency（評分表的 `latency_s` max；dump-all 每個 incident 主要是一次呼叫）。
   若最長的呼叫接近 3,600，或 Pilot 上有呼叫逾時，回報使用者決定要不要加長。Pilot 的 `run_config.json` 不記 `timeout_s`（026 解讀 32 也不比對它），
   所以 freeze 之前改它不需要重跑 Pilot；但 freeze 以 `llm.config_sha256` 釘住整個 `llm_methods.json`，**freeze 之後就不能改**。
+- **結果（2026-10-16 讀 Pilot 的評分；沒有觸發）**：推論在 RTX 5070 Ti（修訂 1），每個 incident 的 `latency_s`（從開始到提交的經過時間，
+  包含該 incident 的所有模型呼叫）最長：Agent 1,214 s（最多 31 次呼叫）、dump-all 201 s（最多 3 次呼叫，含更正）、retrieval 76 s；
+  任何一次呼叫都不會超過它所在 incident 的經過時間，所以都遠低於 3,600。三個方法的 30 個 incident 都以 `submitted` / `submitted_after_limit` 結束，沒有 `transport_error`、沒有逾時。
+  上面的觸發條件不成立，`timeout_s` **維持 3600**，不需要使用者決定（使用者仍可在 freeze 之前改，Pilot 不需重跑）。
+  上面的估計是 Mac 上的速度；GPU 上 dump-all 的實際呼叫遠比估計快（修訂 1 的探測：prefill 200k 約 2,061 tok/s）。
 
 ### 電力條件的實作（第 5 項）
 

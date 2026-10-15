@@ -398,7 +398,9 @@ def method_version_problems(results_root: Path, split: str, methods) -> list[str
     method that a run of its current version (LLM_METHOD_VERSIONS) did not write. The rerun of dump-all / retrieval has
     the original run's model, budgets and runtime, so its run_config.json is the same file and the freeze check
     (pilot_llm_problems, decision 026 #32) cannot tell a rerun that stopped midway, or no rerun at all, from a complete
-    one; this check can. The main session runs it before `eval score` (NEXT); scoring and the freeze never call it."""
+    one; this check can. `python -m eval version-check --set pilot [--method m ...]` prints it (exit 1 when it lists
+    anything); the main session runs that before `eval score` and again before `collect heldout-freeze` (NEXT). It is a
+    process check: scoring and the freeze never call it."""
     problems = []
     for m in [m for m in methods if m in LLM_METHODS]:
         want, out_dir = LLM_METHOD_VERSIONS[m], Path(results_root) / split / m

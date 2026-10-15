@@ -1,13 +1,30 @@
 # NEXT
 
-## 目前位置（2026-10-15，decision 021 的 Pilot 修訂已重跑完成；下一步是 evidence gold 互動標註）
+## 目前位置（2026-10-16：Pilot 上四個方法都有結果；使用者的 evidence gold 盲標 91 筆進行中）
 
-**Pilot 上四個方法都有最終結果（診斷用，不是 Gate 判定）。剩下的 Core：使用者的 evidence gold 盲標（91 筆，互動式、一次一個 incident）→ held-out freeze → held-out 收集 → held-out 評測與 Gate。**
-- **使用者決定（2026-10-11）選方案 (a)**（原話見 decision 021「Pilot 上的修訂（2026-10-11，使用者決定）」）：dump-all 與 retrieval 共用的概覽寫明它的列是彙總、
-  沒有 id、不能引用（`baselines/overview.py`）。引用驗證、評分門檻、模型、資料、預算、推論主機、020 的任務說明與 Agent 都不變；這是 021 在 Pilot 上唯一的一次修訂
-  （freeze 宣告 `"021": used`）。(b) 只給一個 origin 候選、(c) Agent 到回合上限：**不改**，保留為失敗分析的發現（decision 022 補註）。
-- **重跑（2026-10-15，commit `292e125`，RTX 5070 Ti）**：修訂前輸出封存在 `data/external/archive/pilot-llm-gpu-2026-10-11-before-021-revision/`；
-  retrieval 431 s、dump-all 1,437 s 都 exit 0；版本確認通過（每一筆都是 `method.version` "2"）；已評分、compare、gate、gold-todo。
+**Core 還沒完成，Gate 還沒判定，不進 Advanced。** Pilot 上四個方法都已執行並評分（診斷用，不是 Gate 判定）。剩下的 Core 依序見「下一步（Core，依序）」，
+第一步是使用者的 evidence gold 盲標（91 筆，一次一個 incident）。沒有技術上的 blocker；需要使用者的事項見「Blocked / 需要使用者」A。
+
+- **使用者決定（2026-10-16）**，原話：
+  > 我的決定：
+  >
+  > 1. Gold 背景資訊選 a，依 decision 017 顯示，但必須保持方法盲標。
+  > 2. 重複證據維持原規則，不修改 91 筆工作表的標註單位；可以提醒我哪些是重複內容。
+  > 3. 同意修正所有過期文件、錯誤敘述及失效指令，確保 README、NEXT、Decision Logs 與實際程式一致。
+  > 4. README 發布方式選 a，Freeze 前預留正式結果連結，之後以固定的新結果文件及 decision 紀錄呈現，不修改封存的 README。
+  >
+  > Gold 標註仍由我確認，不得自行冒充人工標註。
+  > 完成 91 筆標註後，重新計算 Pilot 的相關分數、比較與診斷性 Gate，並完成 Freeze 前稽核。
+  > 不修改既有評測門檻、不放寬 Gate、不自行進入 Advanced。
+  > 其他技術問題自行解決，持續測試、Review、Commit、Push。需要我人工標註時，再依 Incident 分組詢問我。
+
+  - 1、2 記在 decision 017「補註（2026-10-16）」（照 017 現行規則，**不是 017 在 Pilot 上的那一次修訂**）；怎麼做見「下一步」1。
+  - 3 是本次的文件同步（下面「文件同步（2026-10-16）」）。
+  - 4 是 decision 030：held-out 最終結果的固定檔名 `docs/decisions/100-heldout-final-results.md`（100 保留，一般 decision 用 031–099）；README 已加預留連結
+    （held-out 評測完成前打不開）。README 在 freeze 時封存，之後不改；held-out 的結果只寫在 100 與同時新增的 decision 紀錄。
+  - 「重新計算 Pilot 的分數、比較與診斷性 Gate」是「下一步」2、3；「Freeze 前稽核」是「下一步」4–8（README 定稿、013 正式版、Pilot 修訂宣告、
+    version-check、plan），freeze 本身再由程式檢查（「下一步」9）。門檻、Gate、指標、切分、預算、評分、引用驗證都不改。
+- **Pilot 結果**（n = 10，診斷用；2026-10-15 的評分。gold 標完後的重新評分預期只改 evidence 的 gold 欄位——評分程式在這之後沒有改——見「下一步」2）：
 
   | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 失敗（022） | 平均 latency |
   |---|---:|---:|---:|---:|---:|---|---:|
@@ -18,26 +35,344 @@
   | *dump-all（修訂前）* | *0.50* | *0.70* | *0.70* | *0.66* | *0.40* | *mechanism 3、no_answer 2、seen_misread 1* | *133 s* |
   | *retrieval（修訂前）* | *0.50* | *0.80* | *0.80* | *0.83* | *0.50* | *mechanism 5、seen_misread 2* | *56 s* |
 
-  - 修訂後 dump-all 的 `invalid_submission` 2 → 0；兩個方法的引用全部存在（existence 1.0）、只有 `s-` / `l-`。**錯誤降低但沒有消除**：dump-all INC-007、008、010 的
-    第一次提交仍引用概覽列，被拒收後在更正中改用紀錄 id。retrieval INC-007、009、011 沒有附證據。Agent 的 existence 0.96（020 的範圍，這次不改）。詳見 021「重跑結果」。
+  - **decision 021 的 Pilot 修訂**（使用者 2026-10-11 選 (a)，原話見 021）：dump-all 與 retrieval 共用的概覽寫明它的列是彙總、沒有 id、不能引用（`baselines/overview.py`）。
+    引用驗證、評分門檻、模型、資料、預算、推論主機、020 的任務說明與 Agent 都不變；這是 021 在 Pilot 上唯一的一次修訂（freeze 宣告 `"021": used`）。
+    (b)、(c) 不改，保留為失敗分析的發現（decision 022 補註）。
+  - **重跑（2026-10-15，commit `292e125`，RTX 5070 Ti）**：修訂前的輸出封存在 `data/external/archive/pilot-llm-gpu-2026-10-11-before-021-revision/`；
+    retrieval 431 s、dump-all 1,437 s 都 exit 0；版本確認通過（每一筆都是 `method.version` "2"；2026-10-16 用 `method_version_problems` 再確認一次）；已評分、compare、gate、gold-todo。
+  - **引用（修訂後）**：dump-all 的 `invalid_submission` 2 → 0；兩個方法的引用全部存在（existence 1.0）、只有 `s-` / `l-`。**錯誤降低但沒有消除：最後一次允許的提交才改正**——
+    dump-all 的 INC-007、008、009、010 在第一次提交（evidence 寫成字串，以格式被拒收）與第一次更正（id 是概覽列，以 id 格式被拒收）都引用概覽列，
+    第三次（最後一次允許的）提交才改用紀錄 id。retrieval 修訂後沒有引用概覽列；它的 INC-007、009、011 查詢沒有找到任何紀錄、沒有附證據。
+    Agent 的 existence 0.96（020 的範圍，這次不改）。詳見 021「重跑結果」（2026-10-16 更正：原本寫成 3 個 incident、只有第一次提交）。
+  - **origin 候選數（(b)）**：提出方案時（2026-10-11 的執行）每個 incident 最多一個候選；修訂後重跑，dump-all 的 INC-007 給了 2 個（origin_top1 0.70、top3 0.80），
+    retrieval 每個 1 個（0.80 / 0.80）；Agent 沒有重跑，每個 1 個、INC-008 沒有答案（0.60 / 0.60）。(b) 仍是失敗分析的發現（022 補註，2026-10-16 更正）。
+  - **evidence gold**：stat-anomaly 0.906（n = 8 個有引用的 incident，coverage 1.0）；LLM 方法引用中依 017 抽出的 91 筆還沒有判定，
+    標完並重新評分之前不報 LLM 方法的 gold precision（算法見「下一步」2）。
 - **Gate（Pilot 診斷，不是判定）**：條件 1 不成立（agent − stat-anomaly 的 origin_top1 差 0.00，95% [-0.50, 0.50]）；條件 2 不評估（每個 fault 只有 1 個 incident）；
   條件 3 不成立（3/6 = 0.50）。**依 SPEC Gate，進 Advanced 要「Agent 在 held-out 明顯勝過最強統計 baseline」**：held-out 還沒收集，Gate 無法判定，**不進 Advanced**；
-  Pilot 的診斷也沒有顯示 Agent 勝過統計 baseline。下一個 Core 步驟是 held-out。
-- **下一步（需要使用者）：evidence gold 互動標註**，91 筆（INC-002 10、003 12、004 9、005 9、006 11、007 7、008 10、009 7、010 9、011 7）。
-  主 session 一次帶一個 incident：唯讀顯示工作表（記錄內容與 label 的背景，不顯示是哪個方法引用的）→ 使用者在對話中逐項回答「是 / 否 / 略」→
-  主 session 填好工作表並 `uv run python -m eval gold-add --incident <INC> --file <filled> --annotator human:jingwen`（使用者不編輯 JSON）。
-  完成後重新評分三個 LLM 方法（gold precision / coverage），更新 README。
-- **之後（Core）**：held-out freeze（023 §6：Pilot 修訂宣告 011 / 013 / 014 / 021 等、013 正式版、soak 與 Pilot LLM 設定由程式檢查）→ held-out 收集（Mac、Docker、
-  高效能 + AC、heavy lock；K = 5，約 50 個 slot）→ 四個方法在 held-out 上各跑一次（LLM 在 RTX 5070 Ti）→ compare → **Gate 判定** → 依 SPEC 決定進 Advanced 或收尾 / 改題。
+  Pilot 的診斷也沒有顯示 Agent 勝過統計 baseline。gold 不進任何 Gate 條件，「下一步」3 的重算預期不變，照實記錄。
+- **`timeout_s`（原 A1 的待決事項）：沒有觸發，維持 3600**。Pilot（RTX 5070 Ti）每個 incident 的 `latency_s`（從開始到提交的經過時間，含所有模型呼叫）最長：
+  Agent 1,214 s、dump-all 201 s、retrieval 76 s；任何一次呼叫都不超過它所在 incident 的經過時間，所以都遠低於 3,600；30 個 incident 都已提交，沒有
+  `transport_error`、沒有逾時。029「`timeout_s`」的觸發條件不成立，不需要使用者決定（029「結果（2026-10-16）」）。
+- **文件同步（2026-10-16，使用者決定 3）**：
+  - 新增唯讀指令 `uv run python -m eval version-check --set pilot [--method <m> ...]`（預設三個 LLM 方法；`--method` 可重複）：印出 `method_version_problems`，
+    有任何一筆 exit 1、沒有 exit 0；不寫任何檔案；只接受 `--set pilot` 與 LLM 方法。**流程上的檢查**：`eval score` 與 `collect heldout-freeze` 都不呼叫它
+    （評分與 freeze 的程式不變）。取代原本指向已刪除的「目前位置第 3 步」的說法（NEXT、021、`eval/runner.py` 的 docstring）。
+  - decision 030（新增）；017、019、020、021、022、023、024、026、029 的日期補註或更正（規則都不變）；`docs/decisions/README.md` 註明 100 保留。
+  - README：狀態、預留連結、gold precision 的算法、origin 候選數與概覽列引用的敘述、held-out 段的 `version-check` 與 `gold-todo --set heldout`、decision 範圍（001–030）。
+  - NEXT：本節、「下一步」與「Blocked」改寫成同一個順序；舊的內容移到文末「歷史紀錄」並標明。
+  - 測試：1115 passed（`-m "not network and not docker_daemon"`；新增 3 個：`version-check` 兩個、freeze 之後新增 100 與改 README 一個）。
+- **已完成的 Core 範圍**：
 
-### 歷史（2026-10-11 之前的「目前位置」）
+  | 項目 | decision |
+  |---|---|
+  | 環境鎖定與 soak（soak #6 PASSED，目前的 lock） | 001、004、007、008、028 |
+  | run group 收集協定 | 009，含修訂 1–5 |
+  | label 與 review（Pilot 10 個，human:jingwen） | 006、010、016、018 |
+  | canonical snapshot 與凍結的 policy v1 | 011；renderer v2 |
+  | docker_stats 覆蓋 | 012 |
+  | 分層評分（正式版待「下一步」5） | 013 |
+  | 統計 baseline v2（Pilot 修訂放棄） | 014 |
+  | leakage audit | 015 |
+  | evidence relevance（Pilot 的 LLM 引用 gold 待「下一步」1） | 017 |
+  | Agent 工具與執行框架 | 019、020 |
+  | dump-all 與 retrieval（Pilot 修訂已使用） | 021 |
+  | 失敗分類 | 022 |
+  | held-out 協定（Accepted，K = 5）與程式實作 | 023、026 |
+  | 預算、用量與可見資料的報告 | 024 |
+  | 收集時的電力模式紀錄 | 025 |
+  | paired 比較與 Gate 計算 | 023 §7、「實作說明：Gate 計算」 |
+  | 合成範例與 2 分鐘 demo | 027 |
+  | 本機 LLM（qwen3.5 9B，RTX 5070 Ti）與三個 LLM 方法的 Pilot 執行 | 029、029 修訂 1 |
+  | held-out 結果的發布方式 | 030 |
+  | 端到端測試、README | — |
+
+## 下一步（Core，依序）
+
+1. **使用者的 evidence gold 盲標（91 筆；需要使用者，2026-10-16 起進行中）**：INC-002 10、003 12、004 9、005 9、006 11、007 7、008 10、009 7、010 9、011 7
+   （2026-10-15 `eval gold-todo --set pilot` 產生的工作表，ground-truth 側各 incident 的 `evidence_gold_todo.json`）。
+   - **一次一個 incident**。主 session 唯讀顯示工作表：每一項的 record 內容（render v2，017 補註）與 017 §3 的背景（label 的 fault_type、origin_service、
+     affected_services 與 fault 的相對時間；使用者決定 1 選 a）；**不顯示是哪個方法引用的，也不顯示弱標籤**（方法盲標）。
+   - 使用者逐項回答「是 / 否 / 略」。**「略」保持 `relevant: null`**：`gold-add` 不寫入，之後的 `gold-todo` 會再列出；不進分母，只讓 coverage 變低。
+   - **重複**（使用者決定 2）：照 017 以 `(id, t0, t1)` 為單位，內容重複的項目（同一筆 record 的不同時間範圍，或文字相同的不同紀錄）照樣是分開的項目、各自回答；
+     主 session 顯示時標明它和哪一項重複。不合併、不刪項目，也不替使用者判定。
+   - 每個 incident 答完：主 session 把這個 incident 的問答紀錄（每一項的編號與使用者的回答）列給使用者確認；**確認之後**才填工作表並
+     `uv run python -m eval gold-add --incident <INC> --file <filled> --annotator human:jingwen`（使用者不編輯 JSON；寫入後不能改，017 §3）。
+     主 session 永不自己判定、永不以 `human:` 冒充人工標註。
+   - **INC-002 第 10 項**：使用者回答之前看到了助理的一段說明；寫入時在該項的 `note` 記錄這件事（判定仍是使用者的；`gold-add` 保留 `note`）。
+   - 進度以各 incident 的 `evidence_gold.json` 為準（開始時共 28 筆，都是 2026-10-10 判定的 stat-anomaly 樣本）。
+2. **重新評分三個 LLM 方法（Pilot）**：10 個 incident 都處理完之後（`uv run python -m eval gold-todo --set pilot` 的 `to_judge` 只剩「略」的項目）：
+   ```bash
+   uv run python -m eval version-check --set pilot   # 021：評分之前（只讀；exit 1 = 有不是目前版本的 prediction → 不評分）
+   uv run python -m eval score --method dump-all --set pilot
+   uv run python -m eval score --method retrieval --set pilot
+   uv run python -m eval score --method agent --set pilot
+   ```
+   stat-anomaly 的引用都已判定（coverage 1.0），新的判定只能加在別的鍵上，不改它的分數，不需要重新評分。
+   **gold precision 的讀法**（017 §3、§4，`eval/relevance.py` 的 `gold_score`）：每個方法、每個 incident = relevant 的引用數 / 已有 gold 判定的引用數
+   （任何人判定、以 `(id, t0, t1)` 為鍵，不分是哪個方法的樣本抽到的）；跨 incident = 該方法至少有一筆已判定引用的 incident 的**等權平均**（n、run-group
+   cluster bootstrap 區間），不是合在一起算（stat-anomaly：0.906 是 8 個 incident 的平均，合在一起的 25 / 28 = 0.893 不是報告的數字）；「略」不寫入、
+   不進分母，只降低 coverage；各方法的 n 不同，所以不是 paired 的比較。
+3. **Pilot 的 compare 與 gate 再算一次**（診斷，不是 Gate 判定）：agent 的 `scores.json` 改變，compare 記錄的 sha 就不符、gate 會拒絕，所以兩個都重跑：
+   ```bash
+   uv run python -m eval compare --method agent --against stat-anomaly --set pilot
+   uv run python -m eval gate --method agent --against stat-anomaly --set pilot
+   ```
+4. **README 結果更新（gold 數字）**：三個 LLM 方法的 gold precision（n、平均、區間）與 coverage；修訂前（封存）的 dump-all / retrieval 沒有 gold（封存目錄不被
+   `gold-todo` 讀）。README 在 freeze 時封存，這一步之後定稿；確認 decision 030 的預留連結還在。
+5. **013 正式版**（decision 013、023 §7：§7 的 paired 比較與 Gate 判準寫進 013 正式版，用掉 013 唯一的一次修訂；其他由 Pilot 引起的 013 修改必須和它併在一起）。
+   **程式不檢查它的內容**：`collect/freeze.py` 只檢查 Pilot 修訂宣告的 013 是 `used`、而且指名 frozen commit 裡存在的 decision 檔。內容是流程上的檢查。
+   主 session 依 023 §7 起草；要併入其他 013 修改時先問使用者（A11）。
+6. **Pilot 修訂宣告**（`collect heldout-freeze --pilot-revisions <file>` 的輸入，023 §6「用掉或明確放棄」）：
+
+   | decision | 宣告 | 根據 |
+   |---|---|---|
+   | 011 | `waived` | policy v1（程式強制：v1 ⇔ waived） |
+   | 013 | `used`，指名 013 正式版所在的 decision 檔 | 程式強制 `used`（023 §7） |
+   | 014 | `waived` | 使用者 2026-10-10 放棄；程式強制 |
+   | 021 | `used`，`docs/decisions/021-dump-all-and-retrieval-baselines.md` | 使用者 2026-10-11 選 (a) |
+   | 015、017、019、020、022 | **使用者決定** `used` / `waived`（A9） | 推導的建議：五個都 `waived`（015：Pilot 稽核後沒有修訂——修訂 1 在 Pilot 之前、只用無 fault 資料，不占額度；Pilot 的詞彙命中都是 0。017：2026-10-16 的補註不改規則。019、020：021 的修訂刻意不改它們；020 的 2026-10-10 修正自己寫明不是 Pilot 修訂。022：2026-10-11 補註寫明沒有使用） |
+
+   程式只檢查格式與 011 / 013 / 014 三個強制項目；五個由使用者決定的項目，程式兩者都接受。
+7. **version-check（freeze 之前再一次）**：`uv run python -m eval version-check --set pilot` → exit 0 才繼續。`collect heldout-freeze` 不呼叫它
+   （freeze 的 `pilot_llm_problems` 分不出 021 修訂前後的執行，decision 021「審查（2026-10-11）」），所以這是流程上的檢查。
+8. **heldout-plan**：`uv run python -m collect heldout-plan --amendments <amendments.json>` 寫一次 `docs/heldout/plan.json` → 人檢查後 commit。
+   label review 的 affected 與 user symptom 全部維持 a priori；7 個 incident 有 notes——要不要把 notes 當成 amendments 吸收（`field: notes`，每項要理由，
+   023 解讀 3）由使用者決定（A10）。移除 fault 只依 023 §1 的證據（觸發、無效率、詞彙命中），永不依任何方法的分數。
+9. **heldout-freeze → held-out 收集 → held-out 方法執行 → Gate**：
+   - freeze 之前：README 已定稿（第 4 步）、A4 若要改也在這之前、checkout 乾淨。
+     `uv run python -m collect heldout-freeze --pilot-revisions <revisions.json>` → 只把 `docs/heldout/slots.json` 與 `freeze.json` commit 成一個 commit。
+     程式另檢查：目前 env lock 有通過的 soak（soak #6）、三個 LLM 方法的 Pilot `run_config.json` 正好是 `llm_methods.json`（含 host `gpu-server`）且分數是從那次執行算的（026 解讀 31、32）。
+   - held-out 收集（Mac、Docker、高效能 + AC、Mac heavy lock；K = 5，約 50 個 slot）：README「Held-out」段的指令依序；沒有 loop，每個 run 一次 `./tools/with-mac-lock`。
+   - held-out 方法執行：每個方法、每個 incident 只跑一次；只對 `api_error` / `transport_error` 重試、最多 2 次（023 §5）。LLM 方法每個方法一次
+     `./tools/with-remote-ollama uv run python -m eval run --method <m> --set heldout`（開始前照歷史紀錄「原下一步 8.2」的遠端唯讀確認）。
+   - score → compare → gate（held-out 上才是 Gate 判定）→ 結果只寫進 `docs/decisions/100-heldout-final-results.md` 與一份新的 decision（decision 030），README 不改。
+   - 依 SPEC「Gate」：判定 `pass` 才可能進 Advanced，而且要使用者確認（使用者 2026-10-16：不自行進入 Advanced）；不通過時依 SPEC「收尾或改題」，由使用者決定。
+
+## Blocked / 需要使用者（回來時一次處理）
+
+### A. 需要使用者
+
+（編號接在之前用過的 A0–A7 之後，避免和 decision 裡的「NEXT A1」等舊編號混淆；舊的項目見下面「已處理」。）
+
+- **A8 evidence gold 盲標（91 筆）**：「下一步」1，2026-10-16 起進行中；主 session 一次帶一個 incident 詢問，使用者確認之後才寫入。
+- **A9 Pilot 修訂宣告的五項**（015、017、019、020、022 寫 `used` 或 `waived`；「下一步」6）：推導的建議是五個都 `waived`，由使用者決定。
+- **A10 heldout-plan 是否吸收 label review 的 notes**（「下一步」8）。
+- **A11（需要時）013 正式版**：主 session 依 023 §7 起草；若要併入其他由 Pilot 引起的 013 修改，那是設計決定，先問使用者（「下一步」5）。
+- **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 選**「沒有偏好」** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
+  freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
+  只用於 023 §6 允許的修正）；freeze 釘住所有程式，之後就無法加入。不影響其他工作。
+
+已處理（2026-10-16）：
+- 原 A1 的「`timeout_s` 要不要加長」：Pilot 上沒有觸發（見「目前位置」），維持 3600，不需要決定。
+- 原 A1（LLM 方法）整項已處理：模型批准（2026-10-10）、推論改到 RTX 5070 Ti（2026-10-11）、三個方法在 Pilot 上執行（2026-10-11）、021 修訂後重跑（2026-10-15）。
+  原文保留在下面「原 A1（已處理）」。
+
+原 A1（已處理；保留當時的寫法）：
+- **原 A1 LLM 方法（dump-all / retrieval / agent）**：付費 API 由使用者決定先延後（2026-10-09）；2026-10-10 使用者暫時同意先試本機模型
+  （decision 029；原話「先暫時兩個都同意，先關掉 grafana 下載再測本地模型，之後可以考慮再換回來原本的方案」，之後可能換回付費 API）。
+  - **已決定（2026-10-10，使用者「照建議」；029「使用者決定（2026-10-10）：照建議」）**：qwen3.5 9B（`qwen3.5:9b-q4_K_M`、digest `sha256:6488c96f…3ea7`）、
+    Ollama 0.35.0 **釘選**（held-out 結束前不升級 Ollama，含 Homebrew 自動更新）、`num_ctx` 262,144、think 關、`num_predict` 8192、預算不變；
+    LLM 執行要求高效能模式 + AC 並記錄（`power.jsonl`）；freeze 由程式檢查 soak 與 Pilot 的 LLM 設定（026 修訂 3）。`eval/llm_methods.json` = `approved`。
+    原本待確認的三項（版本釘選或只記錄、電力條件、freeze 是否強制）都已決定：釘選、套用並記錄、強制。
+  - **已決定（2026-10-11，使用者「同意」；decision 029 修訂 1）**：推論改在 RTX 5070 Ti 桌機（`ollama.host` = `gpu-server`，`./tools/with-remote-ollama`：
+    SSH tunnel、WSL Ubuntu-22.04 裡的 Ollama 0.35.0、共用 GPU lock `flock -n /tmp/ai-portfolio-gpu.lock`）；eval、snapshot 與 ground truth 留在 Mac。
+    這種執行不需要 Mac heavy lock，電力條件改為記錄 GPU 狀態（GPU 不是 RTX 5070 Ti 或連續兩次讀不到才停止）。三個方法都要在 GPU 上重跑 Pilot
+    （Mac 上的 retrieval / agent 結果被取代）；freeze 釘住 `host`。
+  - （當時）下一步不需要使用者：遠端檢查、探測、三個方法在 Pilot 上執行（原下一步 8.2）——**已完成**（2026-10-11；021 修訂後的重跑 2026-10-15）。
+    執行中被拒絕或停止（`CallError`、釘選、GPU 狀態、GPU lock、gpu-server 離線 → blocked）時回報使用者，不自行改設定或預算，也不改回 Mac 推論（held-out 照樣適用）。
+  - （當時）之後需要使用者：LLM 方法的引用要再補 evidence gold——**現在是 A8 /「下一步」1**。`ollama.timeout_s` 要不要加長——**沒有觸發，維持 3600**（「目前位置」）。
+  - 已完成並合併進 main（decision 029）：Ollama adapter（只連 loopback、拒絕 cloud 模型；`truncate` / `shift` 關閉、每個回覆檢查——包括不依賴
+    `truncate: false` 的送出量與計數下限——截斷或無法確認未截斷一律是不可重試的 `CallError`；解析不了的 tool call 參數照 020 §3 拒收）、
+    模型 digest 與 Ollama 版本釘選（每個 incident 的檢查在嘗試開始之前：server 不在或模型被換時執行停止、不用掉 held-out 嘗試）、整個執行只用開始時的設定、
+    執行前的 fit check（放不下就拒絕，不改預算）、heavy lock 與 `tools/with-local-ollama`（server 只在 lock 內存在、結束時卸載模型）、
+    `run_config.json` 的 `llm`、`eval local-probe`（防護自我測試要求 server 自己拒絕，否則 exit 3）。
+    scripted fake model 與合成範例探測都不產生方法結果。審查（2026-10-10，合併前）的修正見 029 開頭。
+  - **探測完成（2026-10-10）**：結果見 029「探測結果」；qwen3.5 9B 是唯一三個方法都能提交合格答案的模型（dump-all / retrieval 在修正 020 的更正訊息之後）。
+  - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤，
+    或 029 的 `context_overflow` 等）、釘選或電力中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫，
+    `run_config.json` 與所有 prediction 都重寫（中途停止的執行不要評分，026 解讀 32）。本機模型重跑只花時間；換回付費 API 時，估算 Pilot 成本要把這種重跑算進去。
+
+已處理（2026-10-10 使用者決定；023「使用者決定」的「追加（2026-10-10）」）：
+- 原 A6 系統的 git 壞了（2026-10-10 19:25 xcode-select 指向不相容的 Xcode）：使用者 23:00 已切回 Command Line Tools，`/usr/bin/git` 恢復正常；期間本 session 只在自己的指令前加 `DEVELOPER_DIR`，沒有改任何系統設定。
+- 原 A0 grafana 的 plugin 下載逾時：使用者決定暫時關掉（decision 028），**soak #6 PASSED**（`data/external/soak/20261010T053643Z/`，新 lock `sha256:1e749f67…`，
+  R1–R9 全過；收集的 preflight 與 freeze 的 soak 檢查（026 解讀 31）都接受它）。`grafana-opensearch-datasource` 沒有安裝、grafana 沒有重啟；
+  Grafana 13 的背景安裝器仍會在暖機時下載 4 個沒有固定版本的介面 app（非同步、grafana 不進 snapshot，028「結果」）。
+  **使用者 2026-10-10「照建議」第 8 項：背景安裝器維持現狀**（不加 overlay、不重算 lock、不再 soak）。換回原方案或再改，只能在 freeze 前另寫 decision
+  （逐 byte 還原 overlay 與 lock 就能沿用 soak #5，028「換回原本的方案」）。不重做校準（policy v1 已凍結、014 的門檻固定）。
+- 原 A3 gold 標註量：**照原規定**，不修訂 017（023「追加（2026-10-10，第二次）」第 5 項）。
+- 原 A5 Gate 的 Pilot 診斷讀法：**使用者確認**（Pilot 上 K < 2 的 fault 不評估條件 2；held-out 不變；023 第二次追加第 6 項、Gate 解讀 4）。
+- 原 A2 的 freeze 前事項：統計 baseline 在 Pilot 上的「最多修訂一次」（decision 014）**放棄**，stat-anomaly 維持 v2（014「補註（2026-10-10）」；
+  Pilot 的 8 個失敗 = rule_limit 4、mechanism 4，沒有發現設計缺陷；n = 10、每個 fault 1 個 incident）。
+- 原 A4.1 待人處理的 slot：**b，與 Pilot 相同**，`collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`（已實作，026 修訂 2、解讀 11、12）。
+- 原 A4.3 held-out 撤回：**不允許**（維持預設，026 解讀 30）。
+- 原 A2：Pilot 的 label review 與 evidence gold 標註（human:jingwen，2026-10-10）。
+- 原 A0 前半：intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）：使用者已 ack（`collect ack-failures`）；
+  flag 寫入改為同一個 inode、沒生效就重寫（decision 009 修訂 5，已在 main）。
+
+已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定高效能模式 + AC 供電（decision 025 修訂 3；原本的自動模式由使用者改掉，RG-002 撤回重收）；
+真實 snapshot sample 不進 git（需要時用 synthetic fixture）；`/usr/bin/git` 已由使用者修好；電力模式限制解除。
+
+### B. LLM 方法的估算（原 A1 用；付費 API 時的估算，保留給換回付費 API 時參考）
+
+目前用本機模型（沒有外部費用，`cost_usd` = 0）；時間估計見 029「探測結果」與「使用者決定（2026-10-10）」的 `timeout_s` 一節。
+建議值在 `eval/llm_methods.json`（2026-10-10 起 `approved`，預算不變）。每個 incident 的 token 量估算（proxy token ≈ UTF-8 bytes / 4；實際 tokenizer 的數字可能高 0–30%，未實測）：
+
+| 方法 | 呼叫數 / incident | input tokens / incident | output tokens / incident |
+|---|---|---|---|
+| dump-all（B = 120k） | 1（+ 最多 2 次更正） | 約 12–16 萬 | 約 1–2 千 |
+| retrieval（q = 8、k = 25） | 2 | 約 9 萬（概覽約 1.8 萬 × 2 + 檢索結果約 5 萬） | 約 2–3 千 |
+| agent（40 次工具、工具輸出 ≤ 120k、30 回合） | ≤ 31 | 典型約 40–60 萬，最壞約 180 萬（每回合重送整段對話；prompt caching 可大幅降低） | 約 1–3 萬 |
+
+- **實測（2026-10-09，soak #5 的 38 分鐘無 fault snapshot，用計量用的假模型，proxy tokens）**：dump-all 一次請求 131k；
+  retrieval 兩次請求 17k + 19k（無 fault 時查詢命中很少；有 fault 時第二次最多再加約 50k）；agent 模擬 25 次工具呼叫的探索：26 回合、input 累計 422k、
+  最後一回合 59k、工具輸出 51k（工具輸出用滿 120k 時累計約 0.8–1M）。實際 tokenizer 的數字尚未量（需要 API）。
+- Pilot（10 個 incident）× 3 個方法：input 約 0.6–2 千萬 tokens（agent 佔大部分）。held-out 的數量在其協定決定。
+- 成本 = tokens × 所選模型的單價（使用者確認目前價格）；建議先在 1–2 個 Pilot incident 上跑一次，量到實際 token 後再估全部。
+- 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
+
+### C. 暫時無法進行（不需要使用者，條件解除後繼續）
+- 目前沒有。
+- held-out 收集沒有 loop（`collect pilot-loop` 只收 Pilot；026 解讀 28）：Mac heavy lock 被其他 Project 占用時 `./tools/with-mac-lock … collect run --set heldout`
+  exit 75，不搶、不刪，之後再跑（期間做 Mac 上不需要 lock 的工作）。
+- GPU lock 被占用時 `./tools/with-remote-ollama` exit 75（同樣不搶不刪，之後再跑）；gpu-server 離線（ssh 失敗，exit 3）→ LLM 步驟標記 blocked，繼續 Mac 上的工作。
+- 已解除：`/usr/bin/git` 失效（2026-10-08 17:05Z 起，使用者已處理）；Mac 自動電力模式下延後正式收集（2026-10-09 使用者解除；正式收集條件後來改為高效能模式 + AC，decision 025 修訂 3）。
+
+### D. 歷史紀錄與環境狀態
+- （歷史）soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。
+- 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
+  執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
+  （理由：跑 decision 004 的 soak test；當時 daemon 是停止狀態，沒有其他 workload 在跑），接著先 `compose down --volumes` 清掉本 Project 被 restart policy 拉起的 container。
+- 遠端 RTX 5070 Ti：2026-10-11 起用於 LLM 方法的模型推論（使用者明確要求，decision 029 修訂 1、MACHINE_POLICY「遠端 GPU」）；只透過 `ssh gpu-server`
+  與 `./tools/with-remote-ollama`，GPU lock 共用、不搶不刪。其他 Core 工作仍只在 Mac。
+- Docker Desktop：依 `MACHINE_POLICY.md`，在 Core 階段是本 Project 專用。
+  機器上不屬於本 Project 的 Docker 資源都保持原狀：`pgvector/pgvector:pg17` image、`rtu-maintenance-platform-db-1`（停止中）container、它的 volume `rtu-maintenance-platform_rtu_db_data` 與 network `rtu-maintenance-platform_default`。
+- 本機已下載 28 個鎖定的 image（約 11.7 GB），保留給之後的收集使用。
+- Docker Desktop VM 的 kernel log（`~/Library/Containers/com.docker.docker/Data/log/vm/init.log*`）約 2.5 分鐘輪替一次，只保留約 25 分鐘；
+  OOM 證據要在 run 期間抓（soak 工具的 `docker-events.jsonl`）。
+
+## 歷史紀錄（不再更新；現況以上面「目前位置」「下一步」「Blocked」三節為準）
+
+以下各節保留當時的寫法：其中的「下一步」「尚未」「待使用者決定」與測試數都是當時的狀態。2026-10-16 只做三種修改：失效的指令改成現在的指令
+（版本確認 → `uv run python -m eval version-check --set pilot`）、已不存在的分支標明已合併並刪除、會被誤讀成現況的句子加上「（當時）」或結果。
+decision 裡的「NEXT 下一步 8.2」指下面「原下一步」的第 8 項第 2 點。
+
+### 原「下一步（Core，依序）」1–8（2026-10-08 – 10-15，全部完成）
+
+held-out 的指令以 README「Held-out」段與上面「下一步」為準；第 8 項第 2 點的遠端唯讀確認與 `with-remote-ollama` 的說明在 held-out 的方法執行照樣適用（`--set heldout`，每個 incident 只跑一次）。
+
+1. ✅ **soak #5 PASSED**（`data/external/soak/20261008T143533Z/`）：這個 lock 可以收集（decision 008「結果」）。
+2. ✅ 校準：soak #3 與 soak #5 在 commit `131446d` 上 F1–F6 全過。
+3. ✅ **policy v1 已凍結**：`sha256:95bc4b07…`（decision 011「凍結紀錄」）。之後任何改動都是 v2。
+4. ✅ **Pilot Set 收集完成**（2026-10-10：INC-002..011，10 個有效 incident，高效能 + AC；RG-002 撤回）。以下流程是 Pilot 的，保留作參考（`pilot-loop` 只收 Pilot；held-out 沒有 loop，026 解讀 28，單步指令見 README「Held-out」）。
+   **每個 Pilot fault 的流程**（decision 016 的順序；`uv run python -m collect status --set pilot` 看進度）。
+   **一次跑完整個 Pilot**：`uv run python -m collect pilot-loop --labeler agent:claude-code`（**不要**包 with-mac-lock：迴圈只在每個 `collect run` 期間持有 lock，
+   run 之間釋放；lock 被占用時每 5 分鐘重試、最多 4 小時，不搶；需要人看的 fault、run 被拒、process 失敗都會停下；全部收齊後自動 leakage → stat-anomaly run / score；
+   每一步的輸出在 `data/external/logs/pilot-loop/`；exit 0 完成、3 需要人、75 lock 一直被占用）。開始前會印出目前的電力模式（decision 025）。
+   手動的單步流程：
+   1. `uv run python -m collect next --set pilot` → 印出下一個 `--flag F --variant V`（全部收齊時不印；exit 3 = 某個 fault 需要人看：
+      連續 3 個 run group 無效，或 fault 兩次沒被觸發）。
+   2. `./tools/with-mac-lock uv run python -m collect run --set pilot --flag F --variant V`（約 45 分鐘；lock 被占用時 exit 75，不搶）。
+      run group 無效 → 記錄原因，`next` 會再給同一個 fault（新 seed，decision 009 §4）。
+   3. 有效時：`uv run python -m collect process --incident INC-nnn --labeler agent:claude-code`（normalize → Day 1 #6 replay → a priori label，做過的步驟跳過）。
+   4. 收完或告一段落時：`uv run python -m eval leakage --set pilot` → `uv run python -m eval run --method stat-anomaly --set pilot` →
+      `uv run python -m eval score --method stat-anomaly --set pilot`（v2；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
+   - 每次 run 之間 lock 會釋放（wrapper 一次只包一個 run），其他 Project 可以在空檔取得。
+   - 非正式的整條 pipeline 檢查：`./tools/with-mac-lock uv run python -m collect smoke --root <scratch>`（normal 10、fault / recovery 各 2 分鐘，
+     資料只寫在 scratch，永不進任何集合；跑完自動 normalize → replay → label → review 工作表 → leakage → 統計 baseline）。
+     **冒煙測試進行中整個 working tree 都要保持乾淨**（normalize 檢查 `git status --porcelain`，不只 `collect/`、`env/`）。
+   - **run 進行中不改 `collect/`、`env/`**（run 會在中途延遲 import 這些模組；改了會讓一個 run 混用兩個版本），也要保持 working tree 乾淨
+     （preflight 與 normalize 都拒絕 dirty tree）；可以改 `eval/`、`agent/`、`baselines/`、文件。
+5. ✅ **Gate 前請使用者做的人工作業**（2026-10-10 完成，human:jingwen）：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
+6. LLM 方法（dump-all / retrieval / agent）已登錄在 `python -m eval run`；`eval/llm_methods.json` 已於 2026-10-10 由使用者批准（`approved`，本機 Ollama 的
+   qwen3.5 9B，decision 029）。付費 API 的 adapter 沒有（換回時另寫 decision、先報告成本）。2026-10-11 起推論主機是 RTX 5070 Ti 桌機
+   （`ollama.host` = `gpu-server`，029 修訂 1）：執行要求 `./tools/with-remote-ollama`（不需要 heavy lock、不檢查 Mac 電力，記錄 GPU 狀態）。
+   host `local`（Mac）的規則不變：heavy lock、`with-local-ollama` 與高效能模式 + AC。
+7. ✅ 第一張 baseline 表（Pilot，stat-anomaly v2）已產生（README「結果」）。
+8. **（當時）剩下的 Core 依序**（LLM 方法暫時改試本機模型，decision 029；2026-10-11 起在 RTX 5070 Ti 上推論，029 修訂 1；見 A1）：
+   0. ✅ **新 lock 的 soak #6 PASSED**（2026-10-10，A0，decision 028「結果」）。
+   1. ✅ **合成範例探測**（2026-10-10，三個本機模型，029「探測結果」）；✅ **使用者決定「照建議」**（2026-10-10，029 文末；`llm_methods.json` = `approved`）。
+      （探測的指令與看法保留在 029 §5；之後不再需要。）
+   2. ✅ **三個 LLM 方法在 Pilot 上用 RTX 5070 Ti 執行**（decision 029 修訂 1；2026-10-11 完成，結果見「目前位置」）。
+      ✅ **dump-all 與 retrieval 依 decision 021 的 Pilot 修訂已重跑完成**（2026-10-15，commit `292e125`：封存、版本確認、評分、compare、gate、gold-todo；結果見「目前位置」）。
+      下面是原本那次執行（2026-10-11）的紀錄與指令；「先合併 `remote-gpu`」（分支已快轉合併進 main、已刪除）與「開始前 1」都已完成。
+      原本的說明：先合併 `remote-gpu` 進 main（測試通過後 push）。
+      Mac 上 2026-10-10/11 的 retrieval / agent 結果被取代：三個方法都從頭重跑到 exit 0，`run_config.json`、prediction 與 `power.jsonl` 的新行會寫在同一個目錄
+      （舊的 Mac 行留著，評分與 freeze 只看每個 incident 的最後一行與目前的 `run_config.json`）。重跑會**覆寫** Mac 的 prediction、transcript、
+      `run_config.json`（評分時也覆寫 `scores.json`、`table.md`），所以先封存（029 修訂 1「審查」第 6 點）。
+      **開始前 1：封存 Mac 的輸出（主 session，只複製；封存目錄必須還不存在，在 `results/` 之外，不被評分、`gold-todo` 或 freeze 讀到）**：
+      ```bash
+      test ! -e data/external/archive/pilot-llm-mac-2026-10-11 && mkdir -p data/external/archive/pilot-llm-mac-2026-10-11 \
+        && cp -Rp data/external/results/pilot/retrieval data/external/results/pilot/agent data/external/results/pilot/dump-all \
+           data/external/archive/pilot-llm-mac-2026-10-11/
+      ```
+      **開始前 2：主 session 在 gpu-server 上確認一次（只讀，不改任何設定）**：
+      ```bash
+      # Ollama 0.35.0 在 WSL 的 home（印出 client version is 0.35.0；沒有 server 時的警告是正常的）
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "$HOME/opt/ollama-0.35.0/bin/ollama --version"'
+      # 只給本 project 的 models 目錄：manifest 的 sha256 必須是 6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "sha256sum $HOME/ii-ollama-models/manifests/registry.ollama.ai/library/qwen3.5/9b-q4_K_M"'
+      # wrapper 與 runner 需要的指令都在（flock、pkill、pgrep、nvidia-smi）
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "command -v flock pkill pgrep nvidia-smi"'
+      # runner 每個 incident 前後用的同一個 GPU 查詢：一行，名稱含 RTX 5070 Ti
+      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- nvidia-smi --query-gpu=name,driver_version,power.limit,power.draw,clocks.sm,temperature.gpu,memory.used --format=csv,noheader'
+      # Windows 那一側沒有程式在聽 11434（例如 Windows 版 Ollama）：沒有「本機位址 …:11434、外部位址 0.0.0.0:0 或 [::]:0（LISTENING）」的行才繼續
+      # （有 → 回報使用者，不停止它；TIME_WAIT 之類的行不算）
+      ssh gpu-server 'netstat -ano | findstr :11434'
+      ```
+      Mac 上不能有程式在聽 `127.0.0.1:11434`（例如 Ollama app；wrapper 會 exit 3）。執行中不改 main checkout。
+      wrapper 只用這次啟動的 server：就緒請求（`/api/version?ii_session=…`）必須出現在這次的 serve log；tunnel 接到別的 server 時 exit 3
+      （訊息說明是 Windows 那一側有程式在聽，或 log 裡的請求紀錄沒有 query string——兩者都回報使用者）。
+      **探測（合成範例，不是結果）**：確認整條路徑（tunnel、GPU lock、WSL2 的 localhost 轉送、server 自己拒絕過長的 prompt）與 GPU 上的速度；
+      `num_ctx` 262,144 在 16 GB VRAM 上是否完全放在 GPU 也看這裡的速度與 `/api/ps`：
+      ```bash
+      ./tools/with-remote-ollama uv run python -m eval local-probe --model qwen3.5:9b-q4_K_M --num-ctx 262144 \
+          --context-sizes 8000,32000,100000,200000 --out <session 的 scratchpad>/probe-gpu.json
+      ```
+      exit 0 才繼續；exit 3 = GUARD FAILED 或 wrapper 拒絕（訊息說明）、exit 75 = GPU lock 被占用（之後再跑，不搶不刪）、ssh 失敗 = blocked → 回報使用者。
+      wrapper 結束時印出「WARNING: could not confirm …」→ 照訊息在 gpu-server 上檢查（`pgrep -af ollama`），回報使用者，不刪 lock。
+      報告的 `host` 應是 `gpu-server`、`gpu` 是 RTX 5070 Ti、`ollama.digest` 是釘選的 digest。
+      **三個方法**（順序：retrieval 當金絲雀、agent、dump-all；每個方法一次 wrapper，方法之間 GPU lock 釋放，讓其他 project 有空檔）：
+      ```bash
+      ./tools/with-remote-ollama uv run python -m eval run --method retrieval --set pilot
+      ./tools/with-remote-ollama uv run python -m eval run --method agent --set pilot
+      ./tools/with-remote-ollama uv run python -m eval run --method dump-all --set pilot
+      ```
+      每個都跑完（exit 0）之後才評分（不需要 wrapper 或 lock）：
+      ```bash
+      uv run python -m eval score --method retrieval --set pilot
+      uv run python -m eval score --method agent --set pilot
+      uv run python -m eval score --method dump-all --set pilot
+      uv run python -m eval compare --method agent --against stat-anomaly --set pilot   # paired 比較（Pilot：只是描述）
+      uv run python -m eval gate --method agent --against stat-anomaly --set pilot      # Pilot 診斷，不是 Gate 判定
+      ```
+      - 時間要等探測量到 GPU 的速度再估。Mac 上的參考（不可比）：retrieval 平均 280 s / incident、agent 422 s、dump-all 約 27 分鐘。
+      - **每個 LLM 方法**開始時 stderr 都會印 `WARNING (decision 029): agent's worst case (409,730 proxy tokens …) is above num_ctx 262,144`：
+        只是報告（029 §2.5），不是錯誤。Agent 真的超過時那次呼叫以 `context_overflow` 停止、不會靜默截斷。
+      - `timeout_s` 是 3600（不變）。若 Pilot 上有呼叫逾時（`transport_error`、exit 2），或評分表的 dump-all `latency_s` max 接近 3600，回報使用者決定。（2026-10-16：沒有觸發，見「目前位置」。）
+      - exit 2（`error: …`）：`CallError`（例如 `context_overflow`、`context_unverified`：`/api/ps` 的 context 不是 262,144）、釘選不符、
+        GPU 狀態停止（不是 RTX 5070 Ti，或連續兩次讀不到）、不在 wrapper 之下。exit 75：GPU lock 被占用（之後再跑）。exit 3：wrapper 拒絕或 ssh 失敗
+        （gpu-server 離線 → LLM 步驟標記 blocked，繼續 Mac 上的工作）、或結束時無法確認遠端 server 已停止（照訊息在 gpu-server 上檢查、回報使用者，不刪 lock）。
+        Pilot 沒有嘗試紀錄，重跑時整個 Pilot 從頭執行；**中途停止的執行不要評分**（freeze 也會以 `power.jsonl` 的 `run_config_sha256` 拒絕，026 解讀 32）。
+        例外：021 修訂後的 dump-all / retrieval 重跑與原始執行的 `run_config.json` 相同，freeze 分不出來，改由版本確認擋下：
+        `uv run python -m eval version-check --set pilot`（唯讀；exit 1 = 有不是目前版本的 prediction，不評分；原本指向已刪除的「目前位置」第 3 步）。
+        原因回報使用者，不自行改預算或設定。
+      - 評分表的「Budgets, usage and visible data」段寫推論主機與 GPU（名稱、驅動、功耗上限），並列出前後 GPU 狀態沒有都讀到的 incident（latency 照樣保留）。
+      - 之後：`uv run python -m eval gold-todo --set pilot` 產生 LLM 方法新引用的 evidence gold 工作表（只列新的；由使用者標註，decision 017）。
+   3. （已由上面「下一步」5–9 取代）held-out：plan → freeze（freeze 之前再跑一次版本確認 `uv run python -m eval version-check --set pilot`，decision 021「審查（2026-10-11）」；`collect heldout-freeze` 現在由程式要求：目前 lock 有通過的 soak（soak #6 已滿足）、三個 LLM 方法的 Pilot `run_config.json`
+      正好是 `llm_methods.json` 的設定（含 `host` = `gpu-server`）且分數是從那次執行算的，026 解讀 31、32；013 正式版要 LLM 結果）→ held-out 收集（`collect next --set heldout`，K = 5）
+      → held-out 評測與 Gate。
+   - 若使用者之後換回付費 API：另寫 decision、加 adapter，**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、token 量與預估成本並等批准**，
+     並在 freeze 之前用那個模型重跑 Pilot（029「對實驗的影響」）。模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
+
+### 2026-10-11 之前的「目前位置」
 
 **Pilot Set 正式收集完成；label review 與 evidence gold 標註都已由使用者完成（human:jingwen，2026-10-10）；第一張 baseline 表已產生。
 A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B，decision 029「使用者決定（2026-10-10）：照建議」），`eval/llm_methods.json` 是 `approved`；
-下一步是三個 LLM 方法在 Pilot 上執行（下一步 8.2，主 session、不需要使用者；2026-10-11 起依 029 修訂 1 是每個方法一次 `./tools/with-remote-ollama`、
+下一步是三個 LLM 方法在 Pilot 上執行（下一步 8.2，2026-10-11 完成；主 session、不需要使用者；2026-10-11 起依 029 修訂 1 是每個方法一次 `./tools/with-remote-ollama`、
 不需要 heavy lock）。A0 已處理（grafana 的 plugin 下載關掉（decision 028）、
 新 lock 的 soak #6 PASSED、背景安裝器維持現狀）；A3、A5 已於 2026-10-10 確認。**
-- **使用者決定（2026-10-10）「照建議」與實作**（分支 `llm-approve`；decision 029 文末、026 修訂 3、023「追加（2026-10-10，第三次）」、028「結果」）：
+- **使用者決定（2026-10-10）「照建議」與實作**（分支 `llm-approve`，已快轉合併進 main、已刪除；decision 029 文末、026 修訂 3、023「追加（2026-10-10，第三次）」、028「結果」）：
   1. 模型 qwen3.5 9B（`qwen3.5:9b-q4_K_M`，digest `sha256:6488c96f…3ea7`），Ollama 0.35.0；2. `num_ctx` 262,144（模型上限；預算不變，dump-all 仍是 120,000 proxy）；
   3. think 關；4. Ollama 版本**釘選**（不符就拒絕；held-out 結束前不升級 Ollama，含 Homebrew 自動更新）；
   5. LLM 執行也要求**高效能模式 + AC**：開始時與每次嘗試之前檢查（不符就停止、不寫該 incident、不用掉 held-out 嘗試），前後的樣本記在
@@ -46,7 +381,7 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
      或 Pilot 分數不是從那次執行算的（026 解讀 32）；freeze 紀錄的格式與 held-out 的驗證不變，`heldout-freeze` 印出找到的 soak 報告與各 run_config 的 sha；
   8. grafana 的背景安裝器維持現狀。
   - `ollama.timeout_s` **維持提案的 3600**（不在八項之內；探測速度外插：約 23 萬 tokens 的 dump-all 呼叫約 33–43 分鐘，最壞約 50 分鐘、3600 的 83%）。
-    要不要加長是使用者的決定（freeze 之前；Pilot 不需重跑），見 029「`timeout_s`」一節與 A1。
+    要不要加長是使用者的決定（freeze 之前；Pilot 不需重跑），見 029「`timeout_s`」一節與 A1。（2026-10-16：Pilot 上沒有觸發，維持 3600。）
   - **審查（2026-10-10，只拒絕更多或只增加紀錄）**：`timeout_s` 改回 3600（實作時曾改成 7200，不在使用者同意的範圍）；`power.jsonl` 每一行另記
     `run_config_sha256`，freeze 拒絕「中途停止的 Pilot 執行留下前一次執行的 prediction」（026 解讀 32，原本只靠流程）；held-out 失敗嘗試的 latency
     不是正式電力條件時評分也列出（`failed_not_formal`）；補上不可重試錯誤 / 不合格 prediction 之後電力紀錄的測試；023 的解讀清單補 31、32。
@@ -103,31 +438,8 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
      「rename 換 inode」的推測沒有被證實；harness 改為同一個 inode 寫入、3 s 內沒生效就重寫，每次查詢記錄 flagd 提供的 variant（`served`）。
 - **正式收集**：固定高效能模式 + AC 供電（decision 025 修訂 3；preflight 與時間窗內每分鐘取樣都檢查，不符就拒絕 / 判無效）。
   收集期間 main checkout 必須保持乾淨、不改 `collect/`、`env/`：其他開發在獨立的 git worktree / 分支上做，Pilot 收完後再合併。
-- **LLM 方法**：付費 API 由使用者決定先延後；2026-10-10 使用者批准本機模型 qwen3.5 9B（A1、decision 029），下一步在 Pilot 上執行。
-- **已完成的 Core 範圍**：
-
-  | 項目 | decision |
-  |---|---|
-  | 環境鎖定與 soak | 001、004、007、008 |
-  | run group 收集協定 | 009，含修訂 1–5 |
-  | label 與 review | 006、010、016、018 |
-  | canonical snapshot 與凍結的 policy v1 | 011；renderer v2 |
-  | docker_stats 覆蓋 | 012 |
-  | 分層評分 | 013 |
-  | 統計 baseline v2 | 014 |
-  | leakage audit | 015 |
-  | evidence relevance | 017 |
-  | Agent 工具與執行框架 | 019、020 |
-  | dump-all 與 retrieval | 021 |
-  | 失敗分類 | 022 |
-  | held-out 協定（Accepted，K = 5）與程式實作（分支 `heldout-protocol`） | 023、026 |
-  | 預算、用量與可見資料的報告 | 024 |
-  | 收集時的電力模式紀錄 | 025 |
-  | paired 比較 | 023 §7 |
-  | Gate 計算（分支 `heldout-protocol`） | 023「實作說明：Gate 計算」 |
-  | 合成範例與 2 分鐘 demo（分支 `heldout-protocol`） | 027 |
-  | 端到端測試 | — |
-  | README | — |
+- **LLM 方法**：付費 API 由使用者決定先延後；2026-10-10 使用者批准本機模型 qwen3.5 9B（A1、decision 029），下一步在 Pilot 上執行（2026-10-11 已執行）。
+- **已完成的 Core 範圍**：（當時的表列出三個還在分支 `heldout-protocol` 的項目；它們已在 2026-10-10 合併。最新的表在上面「目前位置」。）
 
 - **本 session 的三輪審查**，找到並修正的都是真實資料才會出現的 bug：
   - 程式碼審查：10 項；
@@ -157,14 +469,13 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
   要用哪一種模式收集是使用者的決定（當時的 A5，已處理：decision 025 修訂 3）。測試 608 passed。
 - **held-out 工具、Gate 計算、合成範例與 demo（分支 `heldout-protocol`，合併審查後 918 passed（`-m "not network and not docker_daemon"`））**：原本的三個分支
   `heldout-protocol`、`gate-analysis`、`synthetic-sample` 已在 2026-10-10 合成 `heldout-protocol` 一個分支（也含 main 到 `9585027`：
-  decision 009 修訂 5、025 修訂、撤回、`ack-failures`）。**還沒合併進 main**：Pilot loop 結束、main checkout 閒置後才合併並 push；
-  剩下的 Pilot run 與 Pilot 評分都用合併後的程式。合併時：把這一句與「目前位置」開頭「本地分支 `heldout-protocol` … 尚未合併」那一行
-  改成合併的 commit 與合併後的測試數；NEXT 有衝突時，「目前位置」開頭以 main 的 Pilot 進度為準。
+  decision 009 修訂 5、025 修訂、撤回、`ack-failures`）。（當時）還沒合併進 main——**2026-10-10 Pilot 收完後已快轉合併進 main 並 push**（918 passed，見上面「合併」），
+  下面當時寫的合併指示已完成：剩下的 Pilot run 與 Pilot 評分都用合併後的程式。
   - **held-out 工具（decision 023 實作說明、026）**：
     `collect heldout-plan` → `heldout-freeze` → 每個 slot `next` → `run --set heldout`（不接受 `--seed`）→ `process` → `eval leakage --set heldout`
     → review（`collect review-sheet` / `collect review`）→ 未觸發的 slot 重收 → `collect heldout-list` → `eval run|score --set heldout`
     → `eval compare` → `eval gate`。沒有 freeze 紀錄時所有 held-out 收集與方法執行一律拒絕；
-    **plan、freeze 與收集都要等 LLM 方法已批准並在 Pilot 上跑過**（2026-10-10 已批准；Pilot 上的執行是下一步 8.2；freeze 另由程式檢查 soak 與 Pilot 的 LLM 設定，026 修訂 3）。freeze 之前必須 commit：API adapter、013 正式版
+    **plan、freeze 與收集都要等 LLM 方法已批准並在 Pilot 上跑過**（2026-10-10 已批准；Pilot 上的執行是下一步 8.2，2026-10-11 完成；freeze 另由程式檢查 soak 與 Pilot 的 LLM 設定，026 修訂 3）。freeze 之前必須 commit：API adapter（029 的 Ollama adapter，已完成）、013 正式版（現在是「下一步」5）
     （026「待使用者決定」1 的機制已實作；A4 若在 freeze 前改為要修正路徑，那個程式也要在 freeze 前 commit）；freeze 之後只能改 NEXT.md 與新增 decision 檔（README 也不能改）。
     待人處理的 slot 只記 slot id 與非 valid 的 run group id；人看過 run record 後 `collect ack-failures --set heldout --slot <slot>` 確認、重新計數再收（2026-10-10）。
     電力條件對 held-out 一樣成立（026 解讀 29）。
@@ -191,11 +502,10 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
     `excluded` / `closed_slots`；與 gate 一致，023「Gate 計算 / 輸出」更正）；026 解讀 11 更正（held-out 的 slot 無效上限沒有 Pilot 的
     `ack-failures` 重新計數；**已由 026 修訂 2 取代**，2026-10-10 使用者決定之後 held-out 也有 `ack-failures --set heldout --slot`）並在「待使用者決定」1 註明 Pilot 前例；027 補上 Pilot 修訂時重產範例的順序；README 的 held-out 段補上
     `collect review`、未觸發 slot 的重收、`eval compare` 與 `eval gate`，「評分」段說明 gate.json / gate.md。
-- **回來時請先看下面的「Blocked / 需要使用者」**。
 
-## 上次完成
+### 上次完成（session 紀錄）
 
-### 2026-10-08 晚 – 10-09（session 4）：細項紀錄
+#### 2026-10-08 晚 – 10-09（session 4）：細項紀錄
 
 - 記憶體設定已凍結（soak #2）。soak #3（raw export 的新 lock）：R1–R6、R8、R9 通過，R7 失敗 → 維持 FAILED。
 - soak #4（同一個 lock）：R7 失敗在 OpenSearch 清佇列時的 ambient 拒收、R8 失敗在一行 `{}`（空的 MetricsData）；raw 完整（accounting 平衡）。修訂 3 只放行 opensearch exporter 的關閉錯誤、把 `{}` 計為空訊息；memcg 探測 container 改名 `ii-probe-…`（policy 當 harness 排除）。soak #4 維持 FAILED。
@@ -231,11 +541,11 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
   retrieval = 模型提 ≤ q 個查詢 → 每個 BM25（FTS5）取 k 筆 → 依時間排序交回 → 提交。預算建議值（B 120k、q 8、k 25、Agent 40 次工具 / 120k tokens / 30 回合）**待使用者決定**。
 - **失敗分類 v1（decision 022）**：origin 或 fault_type 錯 = 失敗，依序歸一類：no_answer → coverage（review 的 telemetry_coverage 看不到 origin）→ mechanism →
   not_seen（exposure 沒有 origin 在 fault 期間的證據）→ seen_misread（看到了仍判錯 = 推理失敗）→ rule_limit（統計 baseline）。score 表列出各類次數。
-- **Held-out 協定（decision 023，Proposed）**：與 Pilot 相同的 10 個 fault、每個 K 個（使用者決定）、隨機 block 順序、方法執行前 review、freeze 紀錄、Gate 用單一 paired 檢定。
+- **Held-out 協定（decision 023，當時 Proposed；2026-10-09 使用者決定 K = 5 之後 Accepted）**：與 Pilot 相同的 10 個 fault、每個 K 個（使用者決定）、隨機 block 順序、方法執行前 review、freeze 紀錄、Gate 用單一 paired 檢定。
   已實作與 K 無關的分析：`python -m eval compare --method A --against B --set pilot`（paired run-group bootstrap、leave-one-fault-out）。
 - 沒有進入 Advanced / Optional；沒有任何付費用量。測試：602 passed（`-m "not network and not docker_daemon"`）。
 
-### 2026-10-08 session 3（decision 004–007、soak 工具、label schema、soak #1）
+#### 2026-10-08 session 3（decision 004–007、soak 工具、label schema、soak #1）
 
 - 使用者決定把 product-catalog 的 memory limit 調到 64 MiB → decision 004（事先固定的 soak 通過條件 R1–R6 與升級規則）。
 - decision 005：`ask_agent` 標為 known ambient failure（先不刪）；OpenSearch 不得作為 snapshot / source of truth。
@@ -270,7 +580,7 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
 - `MACHINE_POLICY.md` 新增「外部費用」：付費 API / 雲端 GPU / 付費資料服務在第一次使用前要報告用途、請求數、token / 運算量與成本，經使用者批准。
 - 測試：397 passed（`-m "not network and not docker_daemon"`；`docker_daemon` 會跑一個幾秒的 `--rm` collector validate container）。
 
-### 2026-10-08 session 2（smoke test + baseline commit）
+#### 2026-10-08 session 2（smoke test + baseline commit）
 
 - 兩輪 Mac smoke test（都持有 heavy lock）。完整紀錄（含所有問題與數字來源）：`docs/smoke-tests/2026-10-08-m1-mac-smoke.md`。
   - Run 1（互動式）：28/28 container 跑的是鎖定的 linux/arm64 manifest；traces / metrics / logs 都有進 backend；flagd 原子寫入 0.33–1.04 s 生效。
@@ -285,199 +595,8 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
 - 清理本 session 自己的診斷資源：`alpine:3` image，以及 `ii-inspect-probe` 留下的 anonymous volume `ed5c71e9…`（已確認來源才刪除）。
 - 第一個 baseline commit：`chore: establish core baseline`。
 
-### 2026-10-08 session 1
+#### 2026-10-08 session 1
 
 - 研究（5 個主題 + 反向覆核）→ `docs/research/2026-10-08-otel-demo-3.1.0-notes.md`。
 - 決策 001（鎖 3.1.0 = `dedc017`）、002（manifest 與 ground truth 物理隔離）、003（traffic 與 seed 政策）。
 - `env/`（lock 工具鏈）、`collect/`（provenance、layout、records、traffic）、`schemas/`，全部 TDD；兩輪 code review 確認的 14 個問題都已修好。
-
-## 下一步（Core，依序）
-
-1. ✅ **soak #5 PASSED**（`data/external/soak/20261008T143533Z/`）：這個 lock 可以收集（decision 008「結果」）。
-2. ✅ 校準：soak #3 與 soak #5 在 commit `131446d` 上 F1–F6 全過。
-3. ✅ **policy v1 已凍結**：`sha256:95bc4b07…`（decision 011「凍結紀錄」）。之後任何改動都是 v2。
-4. ✅ **Pilot Set 收集完成**（2026-10-10：INC-002..011，10 個有效 incident，高效能 + AC；RG-002 撤回）。以下流程保留給之後的參考與 held-out。
-   **每個 Pilot fault 的流程**（decision 016 的順序；`uv run python -m collect status --set pilot` 看進度）。
-   **一次跑完整個 Pilot**：`uv run python -m collect pilot-loop --labeler agent:claude-code`（**不要**包 with-mac-lock：迴圈只在每個 `collect run` 期間持有 lock，
-   run 之間釋放；lock 被占用時每 5 分鐘重試、最多 4 小時，不搶；需要人看的 fault、run 被拒、process 失敗都會停下；全部收齊後自動 leakage → stat-anomaly run / score；
-   每一步的輸出在 `data/external/logs/pilot-loop/`；exit 0 完成、3 需要人、75 lock 一直被占用）。開始前會印出目前的電力模式（decision 025）。
-   手動的單步流程：
-   1. `uv run python -m collect next --set pilot` → 印出下一個 `--flag F --variant V`（全部收齊時不印；exit 3 = 某個 fault 需要人看：
-      連續 3 個 run group 無效，或 fault 兩次沒被觸發）。
-   2. `./tools/with-mac-lock uv run python -m collect run --set pilot --flag F --variant V`（約 45 分鐘；lock 被占用時 exit 75，不搶）。
-      run group 無效 → 記錄原因，`next` 會再給同一個 fault（新 seed，decision 009 §4）。
-   3. 有效時：`uv run python -m collect process --incident INC-nnn --labeler agent:claude-code`（normalize → Day 1 #6 replay → a priori label，做過的步驟跳過）。
-   4. 收完或告一段落時：`uv run python -m eval leakage --set pilot` → `uv run python -m eval run --method stat-anomaly --set pilot` →
-      `uv run python -m eval score --method stat-anomaly --set pilot`（v2；表在 `data/external/results/pilot/stat-anomaly/table.md`）。
-   - 每次 run 之間 lock 會釋放（wrapper 一次只包一個 run），其他 Project 可以在空檔取得。
-   - 非正式的整條 pipeline 檢查：`./tools/with-mac-lock uv run python -m collect smoke --root <scratch>`（normal 10、fault / recovery 各 2 分鐘，
-     資料只寫在 scratch，永不進任何集合；跑完自動 normalize → replay → label → review 工作表 → leakage → 統計 baseline）。
-     **冒煙測試進行中整個 working tree 都要保持乾淨**（normalize 檢查 `git status --porcelain`，不只 `collect/`、`env/`）。
-   - **run 進行中不改 `collect/`、`env/`**（run 會在中途延遲 import 這些模組；改了會讓一個 run 混用兩個版本），也要保持 working tree 乾淨
-     （preflight 與 normalize 都拒絕 dirty tree）；可以改 `eval/`、`agent/`、`baselines/`、文件。
-5. ✅ **Gate 前請使用者做的人工作業**（2026-10-10 完成，human:jingwen）：label review（`python -m collect review-sheet --incident <INC>`，decision 018）與 evidence gold 標註（`python -m eval gold-todo --set pilot`，decision 017）。
-6. LLM 方法（dump-all / retrieval / agent）已登錄在 `python -m eval run`；`eval/llm_methods.json` 已於 2026-10-10 由使用者批准（`approved`，本機 Ollama 的
-   qwen3.5 9B，decision 029）。付費 API 的 adapter 沒有（換回時另寫 decision、先報告成本）。2026-10-11 起推論主機是 RTX 5070 Ti 桌機
-   （`ollama.host` = `gpu-server`，029 修訂 1）：執行要求 `./tools/with-remote-ollama`（不需要 heavy lock、不檢查 Mac 電力，記錄 GPU 狀態）。
-   host `local`（Mac）的規則不變：heavy lock、`with-local-ollama` 與高效能模式 + AC。
-7. ✅ 第一張 baseline 表（Pilot，stat-anomaly v2）已產生（README「結果」）。
-8. **剩下的 Core 依序**（LLM 方法暫時改試本機模型，decision 029；2026-10-11 起在 RTX 5070 Ti 上推論，029 修訂 1；見 A1）：
-   0. ✅ **新 lock 的 soak #6 PASSED**（2026-10-10，A0，decision 028「結果」）。
-   1. ✅ **合成範例探測**（2026-10-10，三個本機模型，029「探測結果」）；✅ **使用者決定「照建議」**（2026-10-10，029 文末；`llm_methods.json` = `approved`）。
-      （探測的指令與看法保留在 029 §5；之後不再需要。）
-   2. ✅ **三個 LLM 方法在 Pilot 上用 RTX 5070 Ti 執行**（decision 029 修訂 1；2026-10-11 完成，結果見「目前位置」）。
-      **dump-all 與 retrieval 依 decision 021 的 Pilot 修訂要重跑**：指令見「目前位置」的「下一步」；下面「開始前 2」的遠端只讀確認在重跑前照做，
-      其餘是原本那次執行的紀錄（例如「先合併 `remote-gpu`」「開始前 1」已完成）。
-      原本的說明：先合併 `remote-gpu` 進 main（測試通過後 push）。
-      Mac 上 2026-10-10/11 的 retrieval / agent 結果被取代：三個方法都從頭重跑到 exit 0，`run_config.json`、prediction 與 `power.jsonl` 的新行會寫在同一個目錄
-      （舊的 Mac 行留著，評分與 freeze 只看每個 incident 的最後一行與目前的 `run_config.json`）。重跑會**覆寫** Mac 的 prediction、transcript、
-      `run_config.json`（評分時也覆寫 `scores.json`、`table.md`），所以先封存（029 修訂 1「審查」第 6 點）。
-      **開始前 1：封存 Mac 的輸出（主 session，只複製；封存目錄必須還不存在，在 `results/` 之外，不被評分、`gold-todo` 或 freeze 讀到）**：
-      ```bash
-      test ! -e data/external/archive/pilot-llm-mac-2026-10-11 && mkdir -p data/external/archive/pilot-llm-mac-2026-10-11 \
-        && cp -Rp data/external/results/pilot/retrieval data/external/results/pilot/agent data/external/results/pilot/dump-all \
-           data/external/archive/pilot-llm-mac-2026-10-11/
-      ```
-      **開始前 2：主 session 在 gpu-server 上確認一次（只讀，不改任何設定）**：
-      ```bash
-      # Ollama 0.35.0 在 WSL 的 home（印出 client version is 0.35.0；沒有 server 時的警告是正常的）
-      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "$HOME/opt/ollama-0.35.0/bin/ollama --version"'
-      # 只給本 project 的 models 目錄：manifest 的 sha256 必須是 6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7
-      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "sha256sum $HOME/ii-ollama-models/manifests/registry.ollama.ai/library/qwen3.5/9b-q4_K_M"'
-      # wrapper 與 runner 需要的指令都在（flock、pkill、pgrep、nvidia-smi）
-      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- bash -lc "command -v flock pkill pgrep nvidia-smi"'
-      # runner 每個 incident 前後用的同一個 GPU 查詢：一行，名稱含 RTX 5070 Ti
-      ssh gpu-server 'wsl.exe -d Ubuntu-22.04 -- nvidia-smi --query-gpu=name,driver_version,power.limit,power.draw,clocks.sm,temperature.gpu,memory.used --format=csv,noheader'
-      # Windows 那一側沒有程式在聽 11434（例如 Windows 版 Ollama）：沒有「本機位址 …:11434、外部位址 0.0.0.0:0 或 [::]:0（LISTENING）」的行才繼續
-      # （有 → 回報使用者，不停止它；TIME_WAIT 之類的行不算）
-      ssh gpu-server 'netstat -ano | findstr :11434'
-      ```
-      Mac 上不能有程式在聽 `127.0.0.1:11434`（例如 Ollama app；wrapper 會 exit 3）。執行中不改 main checkout。
-      wrapper 只用這次啟動的 server：就緒請求（`/api/version?ii_session=…`）必須出現在這次的 serve log；tunnel 接到別的 server 時 exit 3
-      （訊息說明是 Windows 那一側有程式在聽，或 log 裡的請求紀錄沒有 query string——兩者都回報使用者）。
-      **探測（合成範例，不是結果）**：確認整條路徑（tunnel、GPU lock、WSL2 的 localhost 轉送、server 自己拒絕過長的 prompt）與 GPU 上的速度；
-      `num_ctx` 262,144 在 16 GB VRAM 上是否完全放在 GPU 也看這裡的速度與 `/api/ps`：
-      ```bash
-      ./tools/with-remote-ollama uv run python -m eval local-probe --model qwen3.5:9b-q4_K_M --num-ctx 262144 \
-          --context-sizes 8000,32000,100000,200000 --out <session 的 scratchpad>/probe-gpu.json
-      ```
-      exit 0 才繼續；exit 3 = GUARD FAILED 或 wrapper 拒絕（訊息說明）、exit 75 = GPU lock 被占用（之後再跑，不搶不刪）、ssh 失敗 = blocked → 回報使用者。
-      wrapper 結束時印出「WARNING: could not confirm …」→ 照訊息在 gpu-server 上檢查（`pgrep -af ollama`），回報使用者，不刪 lock。
-      報告的 `host` 應是 `gpu-server`、`gpu` 是 RTX 5070 Ti、`ollama.digest` 是釘選的 digest。
-      **三個方法**（順序：retrieval 當金絲雀、agent、dump-all；每個方法一次 wrapper，方法之間 GPU lock 釋放，讓其他 project 有空檔）：
-      ```bash
-      ./tools/with-remote-ollama uv run python -m eval run --method retrieval --set pilot
-      ./tools/with-remote-ollama uv run python -m eval run --method agent --set pilot
-      ./tools/with-remote-ollama uv run python -m eval run --method dump-all --set pilot
-      ```
-      每個都跑完（exit 0）之後才評分（不需要 wrapper 或 lock）：
-      ```bash
-      uv run python -m eval score --method retrieval --set pilot
-      uv run python -m eval score --method agent --set pilot
-      uv run python -m eval score --method dump-all --set pilot
-      uv run python -m eval compare --method agent --against stat-anomaly --set pilot   # paired 比較（Pilot：只是描述）
-      uv run python -m eval gate --method agent --against stat-anomaly --set pilot      # Pilot 診斷，不是 Gate 判定
-      ```
-      - 時間要等探測量到 GPU 的速度再估。Mac 上的參考（不可比）：retrieval 平均 280 s / incident、agent 422 s、dump-all 約 27 分鐘。
-      - **每個 LLM 方法**開始時 stderr 都會印 `WARNING (decision 029): agent's worst case (409,730 proxy tokens …) is above num_ctx 262,144`：
-        只是報告（029 §2.5），不是錯誤。Agent 真的超過時那次呼叫以 `context_overflow` 停止、不會靜默截斷。
-      - `timeout_s` 是 3600（不變）。若 Pilot 上有呼叫逾時（`transport_error`、exit 2），或評分表的 dump-all `latency_s` max 接近 3600，回報使用者決定。
-      - exit 2（`error: …`）：`CallError`（例如 `context_overflow`、`context_unverified`：`/api/ps` 的 context 不是 262,144）、釘選不符、
-        GPU 狀態停止（不是 RTX 5070 Ti，或連續兩次讀不到）、不在 wrapper 之下。exit 75：GPU lock 被占用（之後再跑）。exit 3：wrapper 拒絕或 ssh 失敗
-        （gpu-server 離線 → LLM 步驟標記 blocked，繼續 Mac 上的工作）、或結束時無法確認遠端 server 已停止（照訊息在 gpu-server 上檢查、回報使用者，不刪 lock）。
-        Pilot 沒有嘗試紀錄，重跑時整個 Pilot 從頭執行；**中途停止的執行不要評分**（freeze 也會以 `power.jsonl` 的 `run_config_sha256` 拒絕，026 解讀 32）。
-        例外：021 修訂後的 dump-all / retrieval 重跑與原始執行的 `run_config.json` 相同，freeze 分不出來，改由「目前位置」第 3 步的版本確認擋下。
-        原因回報使用者，不自行改預算或設定。
-      - 評分表的「Budgets, usage and visible data」段寫推論主機與 GPU（名稱、驅動、功耗上限），並列出前後 GPU 狀態沒有都讀到的 incident（latency 照樣保留）。
-      - 之後：`uv run python -m eval gold-todo --set pilot` 產生 LLM 方法新引用的 evidence gold 工作表（只列新的；由使用者標註，decision 017）。
-   3. held-out：plan → freeze（freeze 之前再跑一次「目前位置」第 3 步的版本確認，decision 021「審查（2026-10-11）」；`collect heldout-freeze` 現在由程式要求：目前 lock 有通過的 soak（soak #6 已滿足）、三個 LLM 方法的 Pilot `run_config.json`
-      正好是 `llm_methods.json` 的設定（含 `host` = `gpu-server`）且分數是從那次執行算的，026 解讀 31、32；013 正式版要 LLM 結果）→ held-out 收集（`collect next --set heldout`，K = 5）
-      → held-out 評測與 Gate。
-   - 若使用者之後換回付費 API：另寫 decision、加 adapter，**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、token 量與預估成本並等批准**，
-     並在 freeze 之前用那個模型重跑 Pilot（029「對實驗的影響」）。模型選擇與 dump-all 的預算數值（decision 011「延後」第 2 項）屬於要由使用者決定的事項。
-
-## Blocked / 需要使用者（回來時一次處理）
-
-### A. 需要使用者決定或批准
-- **A1 LLM 方法（dump-all / retrieval / agent）**：付費 API 由使用者決定先延後（2026-10-09）；2026-10-10 使用者暫時同意先試本機模型
-  （decision 029；原話「先暫時兩個都同意，先關掉 grafana 下載再測本地模型，之後可以考慮再換回來原本的方案」，之後可能換回付費 API）。
-  - **已決定（2026-10-10，使用者「照建議」；029「使用者決定（2026-10-10）：照建議」）**：qwen3.5 9B（`qwen3.5:9b-q4_K_M`、digest `sha256:6488c96f…3ea7`）、
-    Ollama 0.35.0 **釘選**（held-out 結束前不升級 Ollama，含 Homebrew 自動更新）、`num_ctx` 262,144、think 關、`num_predict` 8192、預算不變；
-    LLM 執行要求高效能模式 + AC 並記錄（`power.jsonl`）；freeze 由程式檢查 soak 與 Pilot 的 LLM 設定（026 修訂 3）。`eval/llm_methods.json` = `approved`。
-    原本待確認的三項（版本釘選或只記錄、電力條件、freeze 是否強制）都已決定：釘選、套用並記錄、強制。
-  - **已決定（2026-10-11，使用者「同意」；decision 029 修訂 1）**：推論改在 RTX 5070 Ti 桌機（`ollama.host` = `gpu-server`，`./tools/with-remote-ollama`：
-    SSH tunnel、WSL Ubuntu-22.04 裡的 Ollama 0.35.0、共用 GPU lock `flock -n /tmp/ai-portfolio-gpu.lock`）；eval、snapshot 與 ground truth 留在 Mac。
-    這種執行不需要 Mac heavy lock，電力條件改為記錄 GPU 狀態（GPU 不是 RTX 5070 Ti 或連續兩次讀不到才停止）。三個方法都要在 GPU 上重跑 Pilot
-    （Mac 上的 retrieval / agent 結果被取代）；freeze 釘住 `host`。
-  - **下一步不需要使用者**：遠端檢查、探測、三個方法在 Pilot 上執行（下一步 8.2）。執行中被拒絕或停止（`CallError`、釘選、GPU 狀態、GPU lock、
-    gpu-server 離線 → blocked）時回報使用者，不自行改設定或預算，也不改回 Mac 推論。
-  - **之後需要使用者**：LLM 方法在 Pilot 上執行後，它們的引用要再補 evidence gold（decision 017；`gold-todo` 只會列出新的）。
-    若 Pilot 的 dump-all 有呼叫逾時或最長的呼叫接近 3600 秒：決定要不要加長 `ollama.timeout_s`（不在「照建議」八項之內，維持提案的 3600；freeze 之前決定，029）。
-  - 已完成並合併進 main（decision 029）：Ollama adapter（只連 loopback、拒絕 cloud 模型；`truncate` / `shift` 關閉、每個回覆檢查——包括不依賴
-    `truncate: false` 的送出量與計數下限——截斷或無法確認未截斷一律是不可重試的 `CallError`；解析不了的 tool call 參數照 020 §3 拒收）、
-    模型 digest 與 Ollama 版本釘選（每個 incident 的檢查在嘗試開始之前：server 不在或模型被換時執行停止、不用掉 held-out 嘗試）、整個執行只用開始時的設定、
-    執行前的 fit check（放不下就拒絕，不改預算）、heavy lock 與 `tools/with-local-ollama`（server 只在 lock 內存在、結束時卸載模型）、
-    `run_config.json` 的 `llm`、`eval local-probe`（防護自我測試要求 server 自己拒絕，否則 exit 3）。
-    scripted fake model 與合成範例探測都不產生方法結果。審查（2026-10-10，合併前）的修正見 029 開頭。
-  - **探測完成（2026-10-10）**：結果見 029「探測結果」；qwen3.5 9B 是唯一三個方法都能提交合格答案的模型（dump-all / retrieval 在修正 020 的更正訊息之後）。
-  - **Pilot 上的 LLM 方法沒有嘗試紀錄**（只跑一次與嘗試紀錄是 held-out 的規則，023 §5）：`eval run --set pilot` 被 `CallError`（API / transport 錯誤，
-    或 029 的 `context_overflow` 等）、釘選或電力中止時印 `error: …`、exit 2；重跑時整個 Pilot set 從頭執行，已經有 prediction 的 incident 也會再呼叫，
-    `run_config.json` 與所有 prediction 都重寫（中途停止的執行不要評分，026 解讀 32）。本機模型重跑只花時間；換回付費 API 時，估算 Pilot 成本要把這種重跑算進去。
-- **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 選**「沒有偏好」** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
-  freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
-  只用於 023 §6 允許的修正）；freeze 釘住所有程式，之後就無法加入。不影響其他工作。
-
-已處理（2026-10-10 使用者決定；023「使用者決定」的「追加（2026-10-10）」）：
-- 原 A6 系統的 git 壞了（2026-10-10 19:25 xcode-select 指向不相容的 Xcode）：使用者 23:00 已切回 Command Line Tools，`/usr/bin/git` 恢復正常；期間本 session 只在自己的指令前加 `DEVELOPER_DIR`，沒有改任何系統設定。
-- 原 A0 grafana 的 plugin 下載逾時：使用者決定暫時關掉（decision 028），**soak #6 PASSED**（`data/external/soak/20261010T053643Z/`，新 lock `sha256:1e749f67…`，
-  R1–R9 全過；收集的 preflight 與 freeze 的 soak 檢查（026 解讀 31）都接受它）。`grafana-opensearch-datasource` 沒有安裝、grafana 沒有重啟；
-  Grafana 13 的背景安裝器仍會在暖機時下載 4 個沒有固定版本的介面 app（非同步、grafana 不進 snapshot，028「結果」）。
-  **使用者 2026-10-10「照建議」第 8 項：背景安裝器維持現狀**（不加 overlay、不重算 lock、不再 soak）。換回原方案或再改，只能在 freeze 前另寫 decision
-  （逐 byte 還原 overlay 與 lock 就能沿用 soak #5，028「換回原本的方案」）。不重做校準（policy v1 已凍結、014 的門檻固定）。
-- 原 A3 gold 標註量：**照原規定**，不修訂 017（023「追加（2026-10-10，第二次）」第 5 項）。
-- 原 A5 Gate 的 Pilot 診斷讀法：**使用者確認**（Pilot 上 K < 2 的 fault 不評估條件 2；held-out 不變；023 第二次追加第 6 項、Gate 解讀 4）。
-- 原 A2 的 freeze 前事項：統計 baseline 在 Pilot 上的「最多修訂一次」（decision 014）**放棄**，stat-anomaly 維持 v2（014「補註（2026-10-10）」；
-  Pilot 的 8 個失敗 = rule_limit 4、mechanism 4，沒有發現設計缺陷；n = 10、每個 fault 1 個 incident）。
-- 原 A4.1 待人處理的 slot：**b，與 Pilot 相同**，`collect ack-failures --set heldout --slot <slot> --reason … --decided-by …`（已實作，026 修訂 2、解讀 11、12）。
-- 原 A4.3 held-out 撤回：**不允許**（維持預設，026 解讀 30）。
-- 原 A2：Pilot 的 label review 與 evidence gold 標註（human:jingwen，2026-10-10）。
-- 原 A0 前半：intlShippingSlowdown 連續 3 次無效（RG-011、RG-012 grafana；RG-013 fault 關閉沒生效）：使用者已 ack（`collect ack-failures`）；
-  flag 寫入改為同一個 inode、沒生效就重寫（decision 009 修訂 5，已在 main）。
-
-已處理（2026-10-09 使用者決定）：held-out K = 5（decision 023 Accepted，其餘依保守預設）；正式收集固定高效能模式 + AC 供電（decision 025 修訂 3；原本的自動模式由使用者改掉，RG-002 撤回重收）；
-真實 snapshot sample 不進 git（需要時用 synthetic fixture）；`/usr/bin/git` 已由使用者修好；電力模式限制解除。
-
-### B. LLM 方法的估算（第 A1 項用；付費 API 時的估算，保留給換回付費 API 時參考）
-
-目前用本機模型（沒有外部費用，`cost_usd` = 0）；時間估計見 029「探測結果」與「使用者決定（2026-10-10）」的 `timeout_s` 一節。
-建議值在 `eval/llm_methods.json`（2026-10-10 起 `approved`，預算不變）。每個 incident 的 token 量估算（proxy token ≈ UTF-8 bytes / 4；實際 tokenizer 的數字可能高 0–30%，未實測）：
-
-| 方法 | 呼叫數 / incident | input tokens / incident | output tokens / incident |
-|---|---|---|---|
-| dump-all（B = 120k） | 1（+ 最多 2 次更正） | 約 12–16 萬 | 約 1–2 千 |
-| retrieval（q = 8、k = 25） | 2 | 約 9 萬（概覽約 1.8 萬 × 2 + 檢索結果約 5 萬） | 約 2–3 千 |
-| agent（40 次工具、工具輸出 ≤ 120k、30 回合） | ≤ 31 | 典型約 40–60 萬，最壞約 180 萬（每回合重送整段對話；prompt caching 可大幅降低） | 約 1–3 萬 |
-
-- **實測（2026-10-09，soak #5 的 38 分鐘無 fault snapshot，用計量用的假模型，proxy tokens）**：dump-all 一次請求 131k；
-  retrieval 兩次請求 17k + 19k（無 fault 時查詢命中很少；有 fault 時第二次最多再加約 50k）；agent 模擬 25 次工具呼叫的探索：26 回合、input 累計 422k、
-  最後一回合 59k、工具輸出 51k（工具輸出用滿 120k 時累計約 0.8–1M）。實際 tokenizer 的數字尚未量（需要 API）。
-- Pilot（10 個 incident）× 3 個方法：input 約 0.6–2 千萬 tokens（agent 佔大部分）。held-out 的數量在其協定決定。
-- 成本 = tokens × 所選模型的單價（使用者確認目前價格）；建議先在 1–2 個 Pilot incident 上跑一次，量到實際 token 後再估全部。
-- 需要決定：模型、上面的預算數值、是否用 prompt caching、批准預估成本。
-
-### C. 暫時無法進行（不需要使用者，條件解除後自動繼續）
-- 目前沒有。heavy lock 被其他 Project 占用時，`collect pilot-loop` 每 5 分鐘重試（最多 4 小時），不搶、不刪。
-- 已解除：`/usr/bin/git` 失效（2026-10-08 17:05Z 起，使用者已處理）；Mac 自動電力模式下延後正式收集（2026-10-09 使用者解除；正式收集條件後來改為高效能模式 + AC，decision 025 修訂 3）。
-
-### D. 歷史紀錄與環境狀態
-- （歷史）soak #3 曾等 heavy lock（`llm-serving-lab` 11:14:59Z–12:04:19Z 持有），釋放後由本 Project 的 wrapper 取得。
-- 歷史紀錄（已解除）：Docker Desktop 在 2026-10-08 09:32:48Z 被另一個 Claude Code session（`rtu-maintenance-platform` 專案，
-  執行 `docker compose stop db && docker desktop stop`）停止。使用者回覆「可以再繼續用了」後，本 session 執行 `docker desktop start`
-  （理由：跑 decision 004 的 soak test；當時 daemon 是停止狀態，沒有其他 workload 在跑），接著先 `compose down --volumes` 清掉本 Project 被 restart policy 拉起的 container。
-- 遠端 RTX 5070 Ti：2026-10-11 起用於 LLM 方法的模型推論（使用者明確要求，decision 029 修訂 1、MACHINE_POLICY「遠端 GPU」）；只透過 `ssh gpu-server`
-  與 `./tools/with-remote-ollama`，GPU lock 共用、不搶不刪。其他 Core 工作仍只在 Mac。
-- Docker Desktop：依 `MACHINE_POLICY.md`，在 Core 階段是本 Project 專用。
-  機器上不屬於本 Project 的 Docker 資源都保持原狀：`pgvector/pgvector:pg17` image、`rtu-maintenance-platform-db-1`（停止中）container、它的 volume `rtu-maintenance-platform_rtu_db_data` 與 network `rtu-maintenance-platform_default`。
-- 本機已下載 28 個鎖定的 image（約 11.7 GB），保留給之後的收集使用。
-- Docker Desktop VM 的 kernel log（`~/Library/Containers/com.docker.docker/Data/log/vm/init.log*`）約 2.5 分鐘輪替一次，只保留約 25 分鐘；
-  OOM 證據要在 run 期間抓（soak 工具的 `docker-events.jsonl`）。

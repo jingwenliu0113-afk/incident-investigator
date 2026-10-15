@@ -66,3 +66,25 @@ existence、弱標籤（temporal / service / origin / weak）、gold precision�
 
 - `python -m eval score` 的表多列弱標籤與 gold precision；Pilot 的 gold 由使用者在 Gate 時標註（約 50 筆起）。
 - Agent 與 LLM baseline 加入後，各自的樣本要先標完，gold precision 才會出現在報告中（coverage 會顯示缺口）。
+
+## 補註（2026-10-16）：render 版本、使用者決定 1、2 與 gold precision 的算法（規則都不變）
+
+本補註只記錄事實與使用者的決定，**不是 017 在 Pilot 上的那一次修訂**：pool、弱標籤、抽樣（每個方法、每個 incident 最多 5 筆，種子 `<incident>:<method>`）、
+判準、標註者、分數與報告都不變。
+
+- **render 版本**：§3 寫「render v1」，那是寫定本文時的 renderer。`collect/snapshot.py` 的 `RENDER_VERSION` 從 commit `5ab5363`（2026-10-09，
+  decision 011「修訂：renderer v2」）起是 2：頂層欄位固定順序，時間、身分與訊息不會被 1024 bytes 的截斷切掉；其餘規則（相對時間、省略 null、≤ 1024 bytes）不變。
+  這發生在任何 gold 判定之前（第一批 28 筆在 2026-10-10，human:jingwen），所以 `gold-todo` 的工作表與所有判定看到的都是 v2 的 render。
+- **使用者決定（2026-10-16）**，原話（第 1、2 項）：
+  > 1. Gold 背景資訊選 a，依 decision 017 顯示，但必須保持方法盲標。
+  > 2. 重複證據維持原規則，不修改 91 筆工作表的標註單位；可以提醒我哪些是重複內容。
+  1. **背景資訊**：照 §3：工作表的 `context`（label 的 fault_type、origin_service、affected_services 與 fault 的相對時間）與每一項 record 的內容；
+     **不顯示是哪個方法引用的，也不顯示弱標籤**（方法盲標）。
+  2. **重複**：標註單位照 §1、§3 是 `(id, t0, t1)`：鍵不同就是不同的項目，各自判定、各自計入引用它的方法的分數；91 筆的工作表不合併、不刪項目。
+     主 session 顯示時提醒哪些項目的內容重複（例如同一筆 record 的不同時間範圍，或文字相同的不同紀錄）；只是提醒，不改變標註單位，也不替使用者判定。
+- **gold precision 的算法**（`eval/relevance.py` 的 `gold_score`、`eval/runner.py` 的 `EVIDENCE_LAYERS`；§3、§4 的字面意思）：
+  - 每個方法、每個 incident：relevant 的引用數 / 已有 gold 判定的引用數。引用以 `(id, t0, t1)` 去重；判定不分是誰的樣本抽到的（任何方法抽到、任何時候判定的都算）。
+  - 跨 incident：只算該方法至少有一筆已判定引用的 incident，**每個 incident 等權**平均，報 n 與 run-group cluster bootstrap 95% 區間（§4）。
+    例：stat-anomaly 的 0.906 = 8 個 incident 各自 precision 的平均（7 個 1.0、1 個 0.25）；把 28 筆合在一起算的 25 / 28 = 0.893 不是報告的數字。
+  - 工作表上「略」的項目（`relevant: null`）不寫入 `evidence_gold.json`、不進分母，只讓 coverage（已判定 / existence 成立的引用）變低；之後的 `gold-todo` 會再列出。
+  - 各方法的 n 不同（引用的 incident 不同），所以各方法的 gold precision 不是 paired 的，不能當成配對比較。

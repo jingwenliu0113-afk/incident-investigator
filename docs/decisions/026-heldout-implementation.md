@@ -291,6 +291,8 @@
 
 - 不改任何協定、門檻、指標、切分、預算或 Gate 定義；Pilot 的收集、run.json 形狀與評分路徑不變（回歸測試守住）。
 - **held-out 的 plan、freeze 與收集都被 NEXT A1（付費 LLM 方法延後）擋住**；在 freeze 紀錄存在之前，所有 held-out 收集與方法執行一律拒絕。
+  （寫定時的狀態。2026-10-16 註：A1 已處理——本機模型 qwen3.5 9B 在 2026-10-10 批准（decision 029），三個 LLM 方法已在 Pilot 上執行；
+  下面「模型 API adapter」是 029 的 Ollama adapter（已在 main）。plan 與 freeze 之前還剩的步驟見 NEXT「下一步（Core，依序）」；freeze 紀錄仍不存在。）
 - freeze 之前必須 commit 的項目：模型 API adapter、Gate 條件 2 / 3 的程式、各 fault 等權平均與缺格表、013 正式版、需要乾淨 checkout 的 review 說明，
   以及下面「待使用者決定」中使用者決定要有的機制（修訂 2：1 已實作；2 維持現況、freeze 之前仍可決定；3 不允許）。
 - 修訂 2 只改待人處理的 slot：原本永遠待人處理、held-out 清單寫不出來，現在由人確認後再收（與 Pilot 相同）。協定、門檻、指標、切分、預算、

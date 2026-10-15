@@ -81,6 +81,9 @@
   後兩句（gold 標註的審查流程、收尾）不屬於本修訂。
 - 提給使用者的三個方案：**(a)** 概覽的每分鐘列被當成證據引用 → 寫明它們不能引用、只能引用紀錄 id；(b) 三個 LLM 方法都只給一個 origin 候選
   （top3 = top1）；(c) Agent 到回合上限。**本修訂只做 (a)**；(b)、(c) 不改，留在失敗分析（decision 022 補註（2026-10-11））。
+  - （2026-10-16 補註：上面是 2026-10-11 提出方案時的原文，保留。(b) 描述的是當時那次 RTX 5070 Ti 執行：每個 incident 最多一個候選，dump-all 的 INC-009、
+    INC-010 沒有答案（0 個）。下面「重跑結果」之後，(b) 對 dump-all 不再完全成立：INC-007 給了 2 個候選（origin_top1 0.70、top3 0.80）；
+    retrieval 仍每個 incident 1 個（0.80 / 0.80）；Agent 沒有重跑，每個 1 個、INC-008 沒有答案（0.60 / 0.60）。(b) 仍是失敗分析的發現，不改。）
 - 時間：三個 LLM 方法在 RTX 5070 Ti 上的 Pilot 執行（029 修訂 1，commit `f001e94`）評分之後；任何 held-out 資料與 freeze 之前。
 
 ### 證據（Pilot transcript，主 session 讀過）
@@ -111,7 +114,7 @@
 4. **method 版本**：dump-all 與 retrieval 的 prediction 記 `method.version` = `"2"`（原始 Pilot 執行是 `"1"`），Agent 維持 `"1"`
    （`eval/runner.py` 的 `LLM_METHOD_VERSIONS`）。只是 provenance：分辨重跑與封存的原始結果；評分與 freeze 不讀它。
    重跑的 `run_config.json` 與原始執行相同，freeze 分不出兩次執行，所以評分之前由 `method_version_problems` 確認每一筆 prediction 都是目前的版本
-   （下面「審查（2026-10-11）」）。
+   （下面「審查（2026-10-11）」；2026-10-16 起的指令是 `uv run python -m eval version-check --set pilot`）。
 
 為什麼這樣改：
 - **列不改**：列的格式（`ad +012:00 …`）也是 decision 022 exposure（`stats:<service>:<分鐘>`）的解析依據；改列會同時改變模型讀到的內容，
@@ -159,7 +162,9 @@
    freeze 都不會發現，表會被當成「修訂後」報告。上面第 4 點原本說 `method.version` 用來分辨兩者，但沒有任何程式讀它；NEXT 只有「中途停止的執行不評分」
    這條人工規則。
    - **修正**：`eval/runner.py` 新增 `method_version_problems`（只讀、只回報）：列出 `results/<set>/<method>/` 裡 `method.version` 不是
-     `LLM_METHOD_VERSIONS` 的 prediction；讀不了的 prediction、目錄裡沒有任何 prediction 也列出。主 session 在**評分之前**執行（NEXT「下一步」3）：
+     `LLM_METHOD_VERSIONS` 的 prediction；讀不了的 prediction、目錄裡沒有任何 prediction 也列出。主 session 在**評分之前**執行
+     （2026-10-16 起：`uv run python -m eval version-check --set pilot [--method <m> ...]`，只讀，有任何一筆 exit 1、沒有 exit 0；
+     原本指向 NEXT「下一步」3，那一步已不存在，見文末「補註（2026-10-16）」）：
      有任何一筆就不評分，整個方法在 Pilot 上重跑到 exit 0 再確認；**freeze 之前再執行一次**。`eval score` 永遠從目前的 prediction 重算 `scores.json`，
      所以確認通過後立刻評分，表就只含修訂後的 prediction。
    - **不改**：評分與 freeze 的行為（`score_method`、`pilot_llm_problems`、`collect/freeze.py` 都不呼叫它）、`run_config.json` 的內容（不加版本欄位：
@@ -187,8 +192,8 @@
    （prediction、transcript、`run_config.json`、`power.jsonl`、`scores.json`、`table.md`）→
    `data/external/archive/pilot-llm-gpu-2026-10-11-before-021-revision/`。原始結果保留、照樣報告（標明是修訂前），不再評分。
 2. 合併本修訂進 main 之後，在 `./tools/with-remote-ollama` 之下用相同的模型、資料、預算與評測，在 Pilot 上**整個重跑** retrieval 與 dump-all。
-3. **評分之前確認版本**（`method_version_problems`，審查（2026-10-11））：dump-all 與 retrieval 的每一筆 Pilot prediction 都是 `method.version` "2"；
-   不是就不評分，整個方法重跑到 exit 0 再確認。freeze 之前再確認一次。
+3. **評分之前確認版本**（`method_version_problems`，審查（2026-10-11）；指令 `uv run python -m eval version-check --set pilot`）：dump-all 與 retrieval 的
+   每一筆 Pilot prediction 都是 `method.version` "2"；不是就不評分，整個方法重跑到 exit 0 再確認。freeze 之前再確認一次。
 4. 評分；修訂前後並列（不只報修訂後）；`eval compare` 與 `eval gate`（agent 對 stat-anomaly：Agent 與統計 baseline 都沒有重跑，Pilot 的 Gate 診斷預期不變，重跑只是確認）。
 5. Agent 不重跑（輸入不變）。
 6. 之後再產生 evidence gold 工作表（`eval gold-todo`）：重跑後 dump-all 與 retrieval 的引用會變，修訂前的引用不需要標。
@@ -204,8 +209,25 @@
   | dump-all | 0.50 → 0.60 [0.30, 0.90] | 0.70 → 0.70 [0.40, 1.00] | 0.70 → 0.80 [0.50, 1.00] | 0.66 → 0.74 [0.59, 0.88] | 0.40 → 0.50 [0.20, 0.80] | invalid_submission 2 → 0 |
   | retrieval | 0.50 → 0.60 [0.30, 0.90] | 0.80 → 0.80 [0.50, 1.00] | 0.80 → 0.80 [0.50, 1.00] | 0.83 → 0.73 [0.54, 0.89] | 0.50 → 0.50 [0.20, 0.80] | submitted 10 → 10 |
 
-- 引用：修訂後兩個方法的引用全部存在（existence 1.0），種類只有 `s-`、`l-`。**錯誤降低但沒有消除**：dump-all 有 3 個 incident（INC-007、008、010）的第一次提交
-  仍引用概覽列（例如 `m-ad-010:00`），被 `check_prediction` 拒收後在更正中改用紀錄 id；沒有 incident 因此放棄作答。最常見的更正是 evidence 寫成字串清單
-  （dump-all 10 次、retrieval 7 次），在一次更正後改成物件（decision 020「修正（2026-10-10）」）。retrieval 有 3 個 incident（INC-007、009、011）沒有附任何證據。
+- 引用：修訂後兩個方法的引用全部存在（existence 1.0），種類只有 `s-`、`l-`。**錯誤降低但沒有消除：最後一次允許的提交才改正**。dump-all 有 4 個 incident
+  （INC-007、008、009、010）的第一次提交（evidence 寫成字串，以格式被拒收）與第一次更正（改成物件，但 id 是概覽列，例如 `m-frontend+013:00`，以 id 格式被
+  `check_prediction` 拒收）**都引用概覽列**，第三次、也就是最後一次允許的提交（020 §3：最多更正 2 次）才改用紀錄 id；沒有 incident 因此放棄作答。
+  retrieval 修訂後沒有任何提交引用概覽列。最常見的更正是 evidence 寫成字串清單（dump-all 10 次、retrieval 7 次），在一次更正後改成物件（decision 020「修正（2026-10-10）」）。
+  retrieval 有 3 個 incident（INC-007、009、011）沒有附任何證據（它們的查詢沒有找到任何紀錄）。
+  （2026-10-16 更正：原本寫「3 個 incident（INC-007、008、010）的第一次提交仍引用概覽列，在更正中改用紀錄 id」。依 transcript 的 `submit_diagnosis`
+  重新數過——概覽列的 id 形如 `m-<服務>+NNN:NN` / `m-<服務>-NNN:NN`——是 4 個 incident、兩次都引用、到第三次才改正。）
+- origin 候選數：dump-all 的 INC-007 給了 2 個候選（origin_top3 0.80 高於 top1 0.70），其餘 incident 1 個；retrieval 每個 1 個。
 - 修訂改變了這兩個方法的輸入（概覽多一行），temperature 0 下輸出也跟著變；retrieval 的 affected_f1 下降、dump-all 多數指標上升，n = 10 的區間都很寬，
   不能把差異歸因於修訂本身以外的任何事。Agent 與 stat-anomaly 沒有重跑，Pilot 的 Gate 診斷不變（條件 1、3 不成立，條件 2 不評估）。
+
+## 補註（2026-10-16）：版本確認的指令、render 版本（規則都不變）
+
+- **版本確認的指令**：上面「審查（2026-10-11）」與「重跑計畫」第 3 步原本指向 NEXT「下一步」3，那一步在 NEXT 改版時已不存在。
+  現在是唯讀的 `uv run python -m eval version-check --set pilot [--method <m> ...]`（預設所有 LLM 方法；`eval/__main__.py`）：印出
+  `method_version_problems` 列出的問題，有任何一筆 exit 1，沒有 exit 0；不寫任何檔案；只接受 `--set pilot` 與 LLM 方法。
+  它仍是**流程上的檢查**：`eval score` 與 `collect heldout-freeze` 都不呼叫它（評分與 freeze 的行為不變）。主 session 在評分之前與 freeze 之前各跑一次（NEXT「下一步」2、7）。
+  測試（先寫、看它失敗）：`tests/test_local_llm.py` 的 `test_version_check_is_a_read_only_cli_over_every_llm_method_by_default`、
+  `test_version_check_refuses_what_it_cannot_check_and_creates_nothing`（目前版本 → 0、留下一筆版本 "1" → 1 且只列那一筆、沒有 prediction → 1、
+  非 LLM 方法 / held-out / 缺 `--set` → 2；每一次前後的檔案內容與 mtime 都相同，沒有建立任何目錄）。2026-10-16 以 `method_version_problems` 唯讀檢查 main checkout 的 Pilot 結果（三個 LLM 方法）：沒有問題。
+- **render 版本**：§2、§3 的「render v1」是寫定本文時的 renderer；任何方法執行之前（commit `5ab5363`，2026-10-09，decision 011「修訂：renderer v2」）
+  已是 v2，dump-all 的打包與 retrieval 的索引都用 v2（索引版本隨之提高，011 修訂）。規則不變。

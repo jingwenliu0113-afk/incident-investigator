@@ -49,3 +49,9 @@
 
 - Agent 與 retrieval baseline 的 usage 會報 tool_calls、proxy_tokens（工具輸出），以及實際 token / latency / cost。
 - exposure log 讓之後可以分析「答錯時是否看過正確的 evidence」（telemetry 不足 vs 推理錯誤，Gate 的判斷依據之一）。
+
+## 補註（2026-10-16）：render 版本（規則不變）
+
+- 本文的「render v1」是寫定本文時的 renderer。任何方法執行之前（commit `5ab5363`，2026-10-09，decision 011「修訂：renderer v2」）已是 v2
+  （`collect/snapshot.py` 的 `RENDER_VERSION = 2`：頂層欄位固定順序，時間、身分與訊息不會被 1024 bytes 的截斷切掉）；相對時間的基準與格式（`+MMM:SS.mmm`）不變。
+  Agent 的工具、任務說明與所有 Pilot 執行用的都是 v2。

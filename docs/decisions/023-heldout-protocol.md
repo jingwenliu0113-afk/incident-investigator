@@ -18,6 +18,7 @@
 
 > 產生方式：三個獨立設計（統計效力、洩漏與公平、可行性）× 三位評審，再綜合（2026-10-09）；文中的程式行號與數字已抽查。
 > 本文件是 Proposed：Pilot 完成後定稿一次；需要使用者決定的事項列在文末，也列在 NEXT.md「Blocked / 需要使用者」。
+> （產生時的狀態。2026-10-09 使用者決定之後是 Accepted，見最上面「狀態」與文末「使用者決定」；這句保留為紀錄。）
 
 ## 背景
 
@@ -341,7 +342,8 @@
 ### 解讀（理由見 026 §2 的同一編號）
 
 1. `PLANS["heldout"]` = 進 git 的 `docs/heldout/plan.json`，只從明確的專案目錄讀。
-2. plan 與 freeze 都要等 Pilot 收集、review、audit 與 LLM 方法試跑完成。（A1 已於 2026-10-10 決定：現在等三個 LLM 方法在 Pilot 上執行並評分，NEXT 下一步 8.2；
+2. plan 與 freeze 都要等 Pilot 收集、review、audit 與 LLM 方法試跑完成。（A1 已於 2026-10-10 決定：現在等三個 LLM 方法在 Pilot 上執行並評分，NEXT 下一步 8.2
+   ——2026-10-16 註：已完成，2026-10-11 執行、dump-all / retrieval 依 021 修訂在 2026-10-15 重跑並評分；freeze 之前其餘的步驟見 NEXT「下一步（Core，依序）」；
    freeze 另要求解讀 31、32。）
 3. 只吸收所有 exercised 且沒看過方法輸出的 review 一致發現、且與 a priori 不同的值；每項要理由；修正後仍符合 PILOT entry 規則。
 4. 進 git 的文字不得有 `INC-` / `RG-` id。
@@ -389,6 +391,8 @@
 
 本節只記錄 §7 Gate 判準與描述性報告的程式，**不改上面任何規則、門檻、指標、切分或預算**；有歧義的地方取保守的一側（讓 Gate 更難通過、缺東西就拒絕），每一項列在下面。
 這補上 026 解讀 27 列為 freeze 前必須 commit 的「Gate 條件 2 / 3 的程式」與「各 fault 等權平均與缺格表」。付費 LLM 方法延後（NEXT A1），所以目前還沒有任何 Agent 結果，也沒有算過任何 Gate。
+（寫定時的狀態。2026-10-16 註：Agent 用本機模型（decision 029）在 2026-10-11 有了 Pilot 結果，Pilot 的 Gate 診斷已計算（不是 Gate 判定，見 README）；
+held-out 的 Gate 還沒有計算。）
 
 ### 指令
 

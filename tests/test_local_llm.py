@@ -569,7 +569,7 @@ def test_a_pilot_run_stopped_midway_leaves_earlier_predictions_that_the_freeze_c
         run_method(layout, "agent", "pilot", out)
     assert (out / "pilot/agent/INC-002.json").read_text() == earlier  # produced with the other settings
     audit_set(layout, "pilot", out)
-    score_method(layout, "agent", "pilot", out)  # scored against NEXT 8.2 (a stopped run is not scored)
+    score_method(layout, "agent", "pilot", out)  # scored against NEXT's rule (a stopped run is not scored)
     problems, shas = pilot_llm_problems(out, new, ["agent"])
     assert len(problems) == 1 and "INC-002" in problems[0] and "INC-001" not in problems[0] and shas == {}
     assert "026 #32" in problems[0] and "to the end" in problems[0]
@@ -614,3 +614,68 @@ def test_a_rerun_after_021s_pilot_revision_that_stopped_midway_is_found_only_by_
     (out / "pilot/dump-all/INC-002.json").write_text("{")
     assert "INC-002" in method_version_problems(out, "pilot", ["dump-all"])[0]  # unreadable: reported, never skipped
     assert "no predictions" in method_version_problems(out, "pilot", ["retrieval"])[0]  # never run: reported
+
+
+def _tree(root):
+    """Every path under root with its bytes and mtime: what a read-only command must leave exactly as it was."""
+    return {p.relative_to(root).as_posix(): (p.read_bytes() if p.is_file() else None, p.stat().st_mtime_ns)
+            for p in sorted(root.rglob("*"))}
+
+
+def _predictions(results, versions):
+    for (method, inc), version in versions.items():
+        path = results / "pilot" / method / f"{inc}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"incident_id": inc, "method": {"name": method, "version": version}}) + "\n")
+    (results / "pilot/dump-all/INC-002.transcript.json").write_text("{}\n")  # not a prediction: never read
+
+
+def test_version_check_is_a_read_only_cli_over_every_llm_method_by_default(tmp_path, monkeypatch, capsys):
+    # decision 021's Pilot revision (review 2026-10-11): `python -m eval version-check --set pilot [--method m ...]` prints
+    # method_version_problems and exits 1 when there is any, 0 when there is none; it is a process check that neither
+    # `eval score` nor `collect heldout-freeze` runs, and it never writes anything
+    import eval.__main__ as cli
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)
+    results = tmp_path / "data/external/results"
+    current = {(m, inc): runner.LLM_METHOD_VERSIONS[m] for m in LLM_METHODS for inc in ("INC-002", "INC-003")}
+    _predictions(results, current)
+    before = _tree(tmp_path)
+    assert cli.main(["version-check", "--set", "pilot"]) == 0
+    printed = capsys.readouterr().out
+    assert all(m in printed for m in LLM_METHODS) and "current" in printed and "INC-" not in printed
+    assert _tree(tmp_path) == before
+
+    _predictions(results, {("dump-all", "INC-003"): "1"})  # one prediction of the original Pilot run is left
+    before = _tree(tmp_path)
+    assert cli.main(["version-check", "--set", "pilot"]) == 1
+    printed = capsys.readouterr().out
+    assert "dump-all: INC-003 was written by version '1', not the current '2'" in printed and "INC-002" not in printed
+    assert "retrieval" not in printed.split("\n", 1)[1] and "agent" not in printed.split("\n", 1)[1]
+    assert _tree(tmp_path) == before
+    assert cli.main(["version-check", "--set", "pilot", "--method", "retrieval", "--method", "agent"]) == 0  # only those
+    capsys.readouterr()
+
+    (results / "pilot/agent/INC-002.json").unlink()
+    (results / "pilot/agent/INC-003.json").unlink()
+    before = _tree(tmp_path)
+    assert cli.main(["version-check", "--set", "pilot", "--method", "agent"]) == 1  # never run: reported, never skipped
+    assert "agent: no predictions" in capsys.readouterr().out
+    assert _tree(tmp_path) == before
+
+
+def test_version_check_refuses_what_it_cannot_check_and_creates_nothing(tmp_path, monkeypatch, capsys):
+    import eval.__main__ as cli
+
+    monkeypatch.setattr(cli, "PROJECT_DIR", tmp_path)
+    assert cli.main(["version-check", "--set", "pilot"]) == 1  # no results at all: every LLM method has no predictions
+    assert capsys.readouterr().out.count("no predictions") == len(LLM_METHODS)
+    assert list(tmp_path.iterdir()) == []  # nothing created, not even the results directory
+    for argv in (["version-check", "--set", "pilot", "--method", "stat-anomaly"],  # not an LLM method: nothing to check
+                 ["version-check", "--set", "heldout"],  # the freeze pins the held-out code; its outputs show no ids
+                 ["version-check"],  # needs --set
+                 ["score", "--set", "pilot", "--method", "dump-all", "--method", "retrieval"]):  # one method only
+        with pytest.raises(SystemExit) as e:
+            cli.main(argv)
+        assert e.value.code == 2
+    assert list(tmp_path.iterdir()) == []

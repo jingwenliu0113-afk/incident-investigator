@@ -200,6 +200,7 @@ def frozen_repo(tmp_path):
     repo.mkdir()
     git(repo, "init", "-q")
     write(repo, "NEXT.md", "# NEXT\n")
+    write(repo, "README.md", "# Incident Investigator\n- final results: docs/decisions/100-heldout-final-results.md\n")
     write(repo, "collect/x.py", "X = 1\n")
     write(repo, D011, "011\n")
     write(repo, D013, "013\n")
@@ -247,6 +248,33 @@ def test_a_real_freeze_commit_passes_and_only_allowed_changes_keep_it_passing(tm
     problems = check_freeze(repo)[1]
     assert problems and all("collect/x.py" in p for p in problems)
     assert any("collect/x.py" in p for p in commit_problems(repo, record, git(repo, "rev-parse", "HEAD")))
+
+
+def test_the_final_results_are_a_new_decision_file_after_the_freeze_and_the_readme_stays_frozen(tmp_path):
+    # decision 030 (user decision 2026-10-16, option a): the held-out results are published as the reserved new file
+    # docs/decisions/100-heldout-final-results.md plus a decision record; the README frozen at the freeze is never edited
+    final = "docs/decisions/100-heldout-final-results.md"
+    repo, _ = frozen_repo(tmp_path)
+    assert not (repo / final).exists()
+    write(repo, final, "# 100 final held-out results\n")
+    write(repo, "docs/decisions/031-heldout-results-record.md", "# 031\n")
+    git(repo, "add", final, "docs/decisions/031-heldout-results-record.md")
+    git(repo, "commit", "-q", "-m", "held-out results")
+    record, problems = check_freeze(repo)
+    assert problems == []
+    assert commit_problems(repo, record, git(repo, "rev-parse", "HEAD")) == []
+
+    # the after-freeze check compares the frozen commit with HEAD, so a later edit of the file added after the freeze is
+    # still an addition (A) to it: that the file is written once is a process rule of decision 030, not a program check
+    write(repo, final, "# 100 final held-out results\n- edited\n")
+    git(repo, "commit", "-q", "-am", "edit the final results")
+    assert check_freeze(repo)[1] == []
+
+    write(repo, "README.md", "# Incident Investigator\n- final results: edited after the freeze\n")
+    git(repo, "commit", "-q", "-am", "edit the frozen README")
+    problems = check_freeze(repo)[1]
+    assert len(problems) == 1 and "README.md (M)" in problems[0], problems
+    assert any("README.md (M)" in p for p in commit_problems(repo, record, git(repo, "rev-parse", "HEAD")))
 
 
 def hide_an_edit(repo, flag):

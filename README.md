@@ -5,11 +5,17 @@
 在 OpenTelemetry Demo 3.1.0（鎖定 image digest）上以 flagd 注入故障，收集 traces / logs / metrics，凍結成 Agent 唯一可讀的 snapshot，
 再用分層指標比較 Agent 與三種 baseline。Ground truth 與 Agent 可讀資料在檔案系統上物理隔離。
 
-> 狀態（2026-10-10）：Core 的工具鏈完成並測試（900+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集並完成人工 label review**；
-> 第一張 baseline 表（統計 baseline、Pilot）在下方。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029）；2026-10-11 起模型改在使用者的 RTX 5070 Ti 桌機上推論（029 修訂 1，eval 仍在 Mac），三個 LLM 方法已在 Pilot 上執行（下表）；dump-all 與 retrieval 依 decision 021 的 Pilot 修訂（2026-10-11，使用者決定）待重跑；held-out 在 freeze 之後收集。
+> 狀態（2026-10-16）：Core 的工具鏈完成並測試（1,100+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集並完成人工 label review**；
+> 四個方法（統計 baseline 與三個 LLM 方法）都已在 Pilot 上執行並評分（下表；診斷用，不是 Gate 判定）。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029）；
+> 2026-10-11 起模型在使用者的 RTX 5070 Ti 桌機上推論（029 修訂 1，eval 仍在 Mac）；dump-all 與 retrieval 依 decision 021 的 Pilot 修訂（2026-10-11，使用者決定）在 2026-10-15 重跑。
+> 進行中：LLM 方法引用的 evidence gold 人工盲標（91 筆，使用者）。held-out 在 freeze 之後收集，Gate 只在 held-out 上判定；**Core 還沒完成，沒有進 Advanced**。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 
 ## 結果
+
+**Held-out 的最終結果**：[`docs/decisions/100-heldout-final-results.md`](docs/decisions/100-heldout-final-results.md)（decision 030 預留的固定檔名）。
+這個檔案在 held-out 評測完成後才新增，**在那之前這個連結打不開**。README 在 held-out freeze 時封存、之後不再修改，所以下面只有 Pilot 的結果；
+held-out 的數字只寫在那個檔案與同時新增的 decision 紀錄裡。
 
 **Pilot Set（10 個 incident，每個 fault 一個；用途是驗證 pipeline、label 與 baseline 難度，不是 test，不進 held-out）**。
 label 全部經人工 review（decision 018，review 時未看任何方法輸出）。區間：run-group cluster bootstrap 95%（n = 10，區間很寬）。
@@ -25,8 +31,10 @@ label 全部經人工 review（decision 018，review 時未看任何方法輸出
 
 - stat-anomaly 依難度（leakage audit）：easy 5 個、hard 5 個；origin_top1 兩者都是 0.60。
 - stat-anomaly 的失敗（origin 或 fault type 錯）8 個：`mechanism`（origin 對、機制錯）4、`rule_limit`（統計規則本身的限制）4。
-- stat-anomaly 的 Evidence：引用全部存在（existence 1.0）；弱標籤（時間窗內的 affected 服務）1.0，但人工盲標的 gold precision 是 0.91（28 筆中 25 筆 relevant）——弱標籤會把故障時間窗內看起來正常的紀錄也算進去，所以兩者分開報（decision 017）。
-- LLM 方法：本機模型 qwen3.5 9B（q4_K_M、`num_ctx` 262,144、think 關、temperature 0、Ollama 0.35.0 釘選；decision 029），推論在使用者的 RTX 5070 Ti 桌機（decision 029 修訂 1：snapshot、ground truth 與評分留在 Mac，只有模型呼叫經 SSH tunnel 送到桌機）。**結論只限於這個本機模型。** 三個方法的 origin 只給一個候選（top3 = top1；保留為失敗分析的發現，不改）；dump-all 修訂前有 2 個 incident 把概覽的每分鐘列當成證據（不是可引用的紀錄 id），更正兩次後放棄作答。使用者 2026-10-11 決定用 decision 021 在 Pilot 上的那一次修訂處理：概覽寫明它的列是彙總、沒有 id、不能引用（列本身、引用驗證、評分門檻、模型、資料、預算與推論主機都不變），dump-all 與 retrieval 在相同條件下重跑（2026-10-15），上表修訂前（封存）與修訂後並列；Agent 的輸入不變，不重跑。修訂後兩個方法的 20 個 incident 都提交了答案（沒有放棄作答），引用全部存在（existence 1.0）；但 dump-all 仍有 3 個 incident 的第一次提交引用概覽列（INC-007、008、010），被更正後才改用紀錄 id——說明降低、但沒有消除這種錯誤。retrieval 有 3 個 incident 沒有附任何證據（允許，不計入 evidence 分數）。Agent 的 existence 是 0.96（引用了不存在但格式正確的 id；020 的範圍，這次不改）。每個 incident 的平均 latency：retrieval 40 s、dump-all 139 s、Agent 188 s（中位數 76 s）。LLM 方法的新引用（91 筆）還沒有人工 gold 判定，所以這裡不報它們的 gold precision。
+- stat-anomaly 的 Evidence：引用全部存在（existence 1.0）；弱標籤（時間窗內的 affected 服務）1.0，但人工盲標的 gold precision 是 0.906（n = 8 個有引用的 incident，
+  coverage 1.0）——弱標籤會把故障時間窗內看起來正常的紀錄也算進去，所以兩者分開報（decision 017）。0.906 是 8 個 incident 各自 precision 的平均
+  （7 個 1.0、1 個 0.25）；28 筆合在一起算的 25 / 28 = 0.893 不是報告的數字（算法見「評分」）。
+- LLM 方法：本機模型 qwen3.5 9B（q4_K_M、`num_ctx` 262,144、think 關、temperature 0、Ollama 0.35.0 釘選；decision 029），推論在使用者的 RTX 5070 Ti 桌機（decision 029 修訂 1：snapshot、ground truth 與評分留在 Mac，只有模型呼叫經 SSH tunnel 送到桌機）。**結論只限於這個本機模型。** origin 的候選數（失敗分析的發現 (b)，不改）：提出方案時的那次執行，三個方法每個 incident 最多一個候選（top3 = top1）；021 修訂後重跑，dump-all 在 INC-007 給了 2 個（origin_top1 0.70、top3 0.80），retrieval 仍每個 1 個（0.80 / 0.80），Agent（未重跑）每個 1 個、INC-008 沒有答案（0.60 / 0.60）。dump-all 修訂前有 2 個 incident 把概覽的每分鐘列當成證據（不是可引用的紀錄 id），更正兩次後放棄作答。使用者 2026-10-11 決定用 decision 021 在 Pilot 上的那一次修訂處理：概覽寫明它的列是彙總、沒有 id、不能引用（列本身、引用驗證、評分門檻、模型、資料、預算與推論主機都不變），dump-all 與 retrieval 在相同條件下重跑（2026-10-15），上表修訂前（封存）與修訂後並列；Agent 的輸入不變，不重跑。修訂後兩個方法的 20 個 incident 都提交了答案（沒有放棄作答），引用全部存在（existence 1.0）；但 dump-all 仍有 4 個 incident（INC-007、008、009、010）的第一次提交與第一次更正都引用概覽列，第三次、也就是最後一次允許的提交才改用紀錄 id——錯誤降低但沒有消除：最後一次允許的提交才改正。retrieval 修訂後沒有引用概覽列；它有 3 個 incident 的查詢沒有找到任何紀錄、沒有附證據（允許，不計入 evidence 分數）。Agent 的 existence 是 0.96（引用了不存在但格式正確的 id；020 的範圍，這次不改）。每個 incident 的平均 latency：retrieval 40 s、dump-all 139 s、Agent 188 s（中位數 76 s）。LLM 方法的引用依 decision 017 抽出、還沒有人工判定的 91 筆，使用者 2026-10-16 起盲標中；91 筆標完、重新評分之前，這裡不報 LLM 方法的 gold precision。
 - Gate 條件在 Pilot 上的診斷（不是 Gate 判定）：條件 1（Agent 的 origin_top1 顯著高於統計 baseline）不成立（差 0.00，95% [-0.50, 0.50]）；條件 2 在 Pilot 上不評估（每個 fault 只有 1 個 incident）；條件 3 不成立（3/6 = 0.50，未超過一半）。held-out（每個 fault 5 個）在 freeze 之後收集，Gate 只在 held-out 上判定。
 
 ## Pipeline
@@ -77,6 +85,9 @@ uv run python -m eval demo
 - 分層、不合成一個數字：**fault_type、origin_top1、affected_f1、symptom_exact**（主要），加上 family、top-3、RR、precision / recall（decision 013）。
 - 區間：run-group cluster bootstrap（10,000 次、seed 0）；兩個方法比較用同一組重抽的 paired 差異（decision 023）。
 - Evidence：existence（引用的 id 是否存在）與 relevance（弱標籤 temporal / service，加上人工盲標的 gold subset）分開報（decision 017）。
+  **gold precision**：每個方法、每個 incident = relevant 的引用數 / 已有 gold 判定的引用數（引用以 `(id, t0, t1)` 去重；判定不分是哪個方法的樣本抽到的）；
+  跨 incident 是該方法至少有一筆已判定引用的 incident 的**等權平均**（報 n 與區間），不是把所有引用合在一起算。標註時「略」的項目不寫入、不進分母，只讓
+  coverage（已判定 / 存在的引用）變低。各方法的 n 不同，所以不是 paired 的比較。
 - 每個方法的表也列出可見資料範圍、預算、usage（tokens、工具呼叫、retrieval、latency、cost）與實際看過多少資料；只報告、不計分（decision 024）。
 - Gate（SPEC Gate，decision 023 §7）：`python -m eval gate` 只讀已寫好的 scores.json 與 `eval compare` 的輸出（不跑任何方法），寫 `results/<set>/agent/gate.json` 與 `gate.md`。
   **held-out 上才是 Gate 判定**（pass / not passed，只用第一次執行的結果）；Pilot 上只是診斷，**不是 Gate 判定**。
@@ -134,11 +145,13 @@ uv run python -m eval score --method stat-anomaly --set pilot
 
 ### Held-out（decision 023、026）
 
-Pilot 收完、review、leakage audit 完成，而且 LLM 方法已批准並在 Pilot 上跑過之後才能開始（LLM 方法 2026-10-10 已批准，等 Pilot 上的執行）。
+Pilot 收完、review、leakage audit 完成，而且 LLM 方法已批准並在 Pilot 上跑過之後才能開始（LLM 方法 2026-10-10 已批准，2026-10-11 在 Pilot 上執行，
+dump-all 與 retrieval 依 021 的修訂在 2026-10-15 重跑；freeze 之前還剩的步驟見 [`NEXT.md`](NEXT.md)「下一步」）。
 freeze 另要求目前 env lock 有通過的 soak，以及每個 LLM 方法的 Pilot 結果用的正好是要凍結的設定（decision 026 修訂 3）。
 沒有 freeze 紀錄時，所有 `--set heldout` 的收集與方法執行一律拒絕。
 
 ```bash
+uv run python -m eval version-check --set pilot                            # 只讀：每筆 Pilot prediction 都是方法目前的版本（021）；exit 1 = 有問題
 uv run python -m collect heldout-plan --amendments <amendments.json>       # 寫一次 docs/heldout/plan.json，之後 commit
 uv run python -m collect heldout-freeze --pilot-revisions <revisions.json> # 寫一次 slots.json 與 freeze.json，只把這兩個檔案 commit 成一個 commit
 uv run python -m collect next --set heldout                                # 下一個 slot（stderr 是 slot 與待人處理的 slot）
@@ -153,6 +166,7 @@ uv run python -m eval run --method stat-anomaly --set heldout              # 每
 uv run python -m eval score --method stat-anomaly --set heldout
 uv run python -m eval compare --method agent --against stat-anomaly --set heldout   # Gate 條件 1 的 paired 差異
 uv run python -m eval gate --method agent --against stat-anomaly --set heldout      # SPEC Gate 判定：gate.json / gate.md
+uv run python -m eval gold-todo --set heldout                              # evidence gold 工作表（017，人盲標）；gold-add 之後重新 score → compare → gate（gold 不影響 Gate 條件）
 uv run python -m collect status --set heldout
 ```
 
@@ -162,10 +176,13 @@ uv run python -m collect status --set heldout
   `heldout-list` 寫出之後拒絕（使用者決定 2026-10-10，decision 026 解讀 11）。held-out run group 不能撤回（decision 026 解讀 30）。
 - review 判定 `fault_exercised = false` 的 slot 會回到 open：再 `collect next --set heldout` → `run` → `process` → `eval leakage --set heldout` → review 一次；
   再次未觸發就關閉並列出（decision 023 §5.3）。全部 slot 都是 filled 或 closed 之後才寫 `heldout-list`。
-- `eval run` / `score` 對每個方法都要做（統計 baseline 與 Agent）；`compare` 對每個統計 baseline 各做一次；`gate` 做一次，讀全部統計 baseline 的 compare（缺任何一個就拒絕、不寫檔）。
-- freeze 之後 README 不能再改（只允許 NEXT.md 與新的 decision 檔），所以這段在 freeze 之前定稿。
+- `eval run` / `score` 對每個方法都要做（統計 baseline 與三個 LLM 方法；LLM 方法的 `eval run` 要在 `./tools/with-remote-ollama` 之下，每個方法一次，decision 029 修訂 1）；`compare` 對每個統計 baseline 各做一次；`gate` 做一次，讀全部統計 baseline 的 compare（缺任何一個就拒絕、不寫檔）。
+- `version-check` 是流程上的檢查：`eval score` 與 `heldout-freeze` 都不呼叫它（freeze 分不出 021 修訂前後的 Pilot 執行，decision 021「審查（2026-10-11）」），
+  所以在 Pilot 評分之前與 freeze 之前各跑一次。
+- freeze 之後 README 不能再改（只允許 NEXT.md 與新的 decision 檔），所以這段在 freeze 之前定稿。held-out 的結果只寫在
+  `docs/decisions/100-heldout-final-results.md` 與同時新增的 decision 紀錄（decision 030）。
 
 ## Repo
 
 `env/`（版本鎖定、soak）、`collect/`（收集、normalize、label、review）、`eval/`（評分、leakage、relevance、失敗分類、比較）、
-`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`data/samples/`（只有合成範例）、`docs/decisions/`（001–027）、`docs/heldout/`（held-out 的 plan、slot 清單、freeze 紀錄；Pilot 後才產生）、`tests/`。
+`baselines/`（統計、dump-all、retrieval）、`agent/`（工具、執行框架）、`schemas/`、`data/samples/`（只有合成範例）、`docs/decisions/`（001–030；100 保留給 held-out 最終結果，decision 030）、`docs/heldout/`（held-out 的 plan、slot 清單、freeze 紀錄；Pilot 後才產生）、`tests/`。

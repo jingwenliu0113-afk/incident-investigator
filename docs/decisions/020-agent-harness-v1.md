@@ -50,3 +50,9 @@
   其他欄位的檢查（`check_prediction`）原本就會指出欄位，不變。
 - 這不是本文件「在 Pilot 上修訂一次」的那一次：發現於合成範例，在任何 LLM 方法在 Pilot 或 held-out 上執行之前，沒有看過任何方法結果。
 - 測試：`tests/test_agent_harness.py`（先寫、看到 6 個失敗才改）。
+
+## 補註（2026-10-16）：render 版本（規則不變）
+
+- 本文的「render v1」是寫定本文時的 renderer。任何方法執行之前（commit `5ab5363`，2026-10-09，decision 011「修訂：renderer v2」）已是 v2
+  （`collect/snapshot.py` 的 `RENDER_VERSION = 2`：頂層欄位固定順序，時間、身分與訊息不會被 1024 bytes 的截斷切掉）；相對時間的基準與格式（`+MMM:SS.mmm`）不變。
+  Agent 的工具、任務說明與所有 Pilot 執行用的都是 v2。

@@ -55,6 +55,10 @@ Gate 的判斷用 `coverage` 與 `not_seen + seen_misread` 的比例；`seen_mis
 
 - 使用者原話（節錄；全文見 decision 021「Pilot 上的修訂（2026-10-11，使用者決定）」）：「選方案 (a)。」……「方案 (b)、(c) 暫時不修改，保留在 failure analysis。」
 - **(b)** 三個 LLM 方法都只給一個 origin 候選（top3 = top1；stat-anomaly 的 origin_top3 是 0.90）。
+  （2026-10-16 更正：這句描述的是寫本補註時的 RTX 5070 Ti 執行——每個 incident 最多一個候選，dump-all 的 INC-009、INC-010 沒有答案。
+  decision 021 修訂後的重跑（2026-10-15）之後，dump-all 的 INC-007 給了 2 個候選（origin_top1 0.70、top3 0.80），其餘 1 個；retrieval 每個 1 個
+  （0.80 / 0.80）；Agent 沒有重跑，每個 1 個、INC-008 沒有答案（0.60 / 0.60）。所以現在的說法是：LLM 方法在多數 incident 只給一個 origin 候選；
+  (b) 仍是失敗分析的發現，不改。）
 - **(c)** Agent 到回合上限：RTX 5070 Ti 的執行 INC-009、INC-010 以 `submitted_after_limit` 結束（在 accounting 的長 span 上打轉）；被取代的 Mac 執行
   INC-006 重複呼叫查無資料的工具。
 - 兩者都**不改**：020 的任務說明與 harness、019 的工具、所有預算照舊（021 只為 (a) 加了一行說明）；它們是 Pilot 失敗分析的發現，報告中照實列出。

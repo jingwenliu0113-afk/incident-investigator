@@ -9,6 +9,9 @@
 002-xxxx.md
 ```
 
+編號 **100 保留**給 held-out 的最終結果 `100-heldout-final-results.md`（decision 030：held-out 評測完成後才新增、寫一次；README 在 freeze 封存）。
+一般的 decision 從 031 依序用到 099。
+
 每篇至少包含：
 
 - 背景
