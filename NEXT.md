@@ -46,8 +46,8 @@
     Agent 的 existence 0.96（020 的範圍，這次不改）。詳見 021「重跑結果」（2026-10-16 更正：原本寫成 3 個 incident、只有第一次提交）。
   - **origin 候選數（(b)）**：提出方案時（2026-10-11 的執行）每個 incident 最多一個候選；修訂後重跑，dump-all 的 INC-007 給了 2 個（origin_top1 0.70、top3 0.80），
     retrieval 每個 1 個（0.80 / 0.80）；Agent 沒有重跑，每個 1 個、INC-008 沒有答案（0.60 / 0.60）。(b) 仍是失敗分析的發現（022 補註，2026-10-16 更正）。
-  - **evidence gold**：stat-anomaly 0.906（n = 8 個有引用的 incident，coverage 1.0）；LLM 方法引用中依 017 抽出的 91 筆還沒有判定，
-    標完並重新評分之前不報 LLM 方法的 gold precision（算法見「下一步」2）。
+  - **evidence gold**：stat-anomaly 0.906（n = 8 個有引用的 incident，coverage 1.0）；LLM 方法引用中依 017 抽出的 91 筆由使用者盲標中
+    （INC-002、003、004 已寫入，進度見「下一步」1），標完並重新評分之前不報 LLM 方法的 gold precision（算法見「下一步」2）。
 - **Gate（Pilot 診斷，不是判定）**：條件 1 不成立（agent − stat-anomaly 的 origin_top1 差 0.00，95% [-0.50, 0.50]）；條件 2 不評估（每個 fault 只有 1 個 incident）；
   條件 3 不成立（3/6 = 0.50）。**依 SPEC Gate，進 Advanced 要「Agent 在 held-out 明顯勝過最強統計 baseline」**：held-out 還沒收集，Gate 無法判定，**不進 Advanced**；
   Pilot 的診斷也沒有顯示 Agent 勝過統計 baseline。gold 不進任何 Gate 條件，「下一步」3 的重算預期不變，照實記錄。
@@ -99,8 +99,11 @@
    - 每個 incident 答完：主 session 把這個 incident 的問答紀錄（每一項的編號與使用者的回答）列給使用者確認；**確認之後**才填工作表並
      `uv run python -m eval gold-add --incident <INC> --file <filled> --annotator human:jingwen`（使用者不編輯 JSON；寫入後不能改，017 §3）。
      主 session 永不自己判定、永不以 `human:` 冒充人工標註。
-   - **INC-002 第 10 項**：使用者回答之前看到了助理的一段說明；寫入時在該項的 `note` 記錄這件事（判定仍是使用者的；`gold-add` 保留 `note`）。
-   - 進度以各 incident 的 `evidence_gold.json` 為準（開始時共 28 筆，都是 2026-10-10 判定的 stat-anomaly 樣本）。
+   - **INC-002 第 10 項**：使用者回答之前看到了助理的一段說明；寫入時已在該項的 `note` 記錄這件事（判定仍是使用者的；`gold-add` 保留 `note`）。**已完成**。
+   - **進度**以各 incident 的 `evidence_gold.json` 為準（開始時共 28 筆，都是 2026-10-10 判定的 stat-anomaly 樣本）。
+     2026-10-16 01:03（本地時間）時：**INC-002、003、004 已寫入**（`gold-add`，human:jingwen，2026-10-16 00:25–00:41）：新增 28 筆判定
+     （INC-002 10、003 11、004 7）；工作表上其餘 3 筆（INC-003 1、INC-004 2）沒有寫入（「略」，`relevant: null`，之後的 `gold-todo` 會再列出）。
+     **剩下 INC-005 到 011 共 7 個 incident、60 筆**（005 9、006 11、007 7、008 10、009 7、010 9、011 7）。這裡只記筆數，不記判定內容。
 2. **重新評分三個 LLM 方法（Pilot）**：10 個 incident 都處理完之後（`uv run python -m eval gold-todo --set pilot` 的 `to_judge` 只剩「略」的項目）：
    ```bash
    uv run python -m eval version-check --set pilot   # 021：評分之前（只讀；exit 1 = 有不是目前版本的 prediction → 不評分）
@@ -118,8 +121,9 @@
    uv run python -m eval compare --method agent --against stat-anomaly --set pilot
    uv run python -m eval gate --method agent --against stat-anomaly --set pilot
    ```
-4. **README 結果更新（gold 數字）**：三個 LLM 方法的 gold precision（n、平均、區間）與 coverage；修訂前（封存）的 dump-all / retrieval 沒有 gold（封存目錄不被
-   `gold-todo` 讀）。README 在 freeze 時封存，這一步之後定稿；確認 decision 030 的預留連結還在。
+4. **README 結果更新（gold 數字）**：三個 LLM 方法的 gold precision（n、平均、區間）與 coverage。修訂前（封存）的 dump-all / retrieval **不補標、不重新評分**
+   （封存目錄不被 `gold-todo` 讀；封存的 `scores.json` 只含評分當時與既有判定重疊的 gold：dump-all n = 1、coverage 0.025，retrieval n = 0），
+   README 不報它們的 gold precision。README 在 freeze 時封存，這一步之後定稿；確認 decision 030 的預留連結還在。
 5. **013 正式版**（decision 013、023 §7：§7 的 paired 比較與 Gate 判準寫進 013 正式版，用掉 013 唯一的一次修訂；其他由 Pilot 引起的 013 修改必須和它併在一起）。
    **程式不檢查它的內容**：`collect/freeze.py` 只檢查 Pilot 修訂宣告的 013 是 `used`、而且指名 frozen commit 裡存在的 decision 檔。內容是流程上的檢查。
    主 session 依 023 §7 起草；要併入其他 013 修改時先問使用者（A11）。
@@ -155,7 +159,8 @@
 
 （編號接在之前用過的 A0–A7 之後，避免和 decision 裡的「NEXT A1」等舊編號混淆；舊的項目見下面「已處理」。）
 
-- **A8 evidence gold 盲標（91 筆）**：「下一步」1，2026-10-16 起進行中；主 session 一次帶一個 incident 詢問，使用者確認之後才寫入。
+- **A8 evidence gold 盲標（91 筆）**：「下一步」1，2026-10-16 起進行中（INC-002、003、004 已寫入；剩 INC-005 到 011）；主 session 一次帶一個 incident 詢問，
+  使用者確認之後才寫入。
 - **A9 Pilot 修訂宣告的五項**（015、017、019、020、022 寫 `used` 或 `waived`；「下一步」6）：推導的建議是五個都 `waived`，由使用者決定。
 - **A10 heldout-plan 是否吸收 label review 的 notes**（「下一步」8）。
 - **A11（需要時）013 正式版**：主 session 依 023 §7 起草；若要併入其他由 Pilot 引起的 013 修改，那是設計決定，先問使用者（「下一步」5）。
