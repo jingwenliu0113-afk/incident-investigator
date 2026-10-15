@@ -192,3 +192,20 @@
 4. 評分；修訂前後並列（不只報修訂後）；`eval compare` 與 `eval gate`（agent 對 stat-anomaly：Agent 與統計 baseline 都沒有重跑，Pilot 的 Gate 診斷預期不變，重跑只是確認）。
 5. Agent 不重跑（輸入不變）。
 6. 之後再產生 evidence gold 工作表（`eval gold-todo`）：重跑後 dump-all 與 retrieval 的引用會變，修訂前的引用不需要標。
+
+### 重跑結果（2026-10-15，修訂後；在相同模型、資料、預算、推論主機與評測下）
+
+- 封存：修訂前的 Pilot 輸出 → `data/external/archive/pilot-llm-gpu-2026-10-11-before-021-revision/`（只複製；評分、`gold-todo`、freeze 都不讀）。
+- 重跑：`./tools/with-remote-ollama`，commit `292e125`；retrieval 431 s、dump-all 1,437 s，都 exit 0。版本確認：每一筆 prediction 都是 `method.version` "2"。
+- 分數（Pilot，n = 10，run-group cluster bootstrap 95%；修訂前 → 修訂後）：
+
+  | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 停止原因 |
+  |---|---|---|---|---|---|---|
+  | dump-all | 0.50 → 0.60 [0.30, 0.90] | 0.70 → 0.70 [0.40, 1.00] | 0.70 → 0.80 [0.50, 1.00] | 0.66 → 0.74 [0.59, 0.88] | 0.40 → 0.50 [0.20, 0.80] | invalid_submission 2 → 0 |
+  | retrieval | 0.50 → 0.60 [0.30, 0.90] | 0.80 → 0.80 [0.50, 1.00] | 0.80 → 0.80 [0.50, 1.00] | 0.83 → 0.73 [0.54, 0.89] | 0.50 → 0.50 [0.20, 0.80] | submitted 10 → 10 |
+
+- 引用：修訂後兩個方法的引用全部存在（existence 1.0），種類只有 `s-`、`l-`。**錯誤降低但沒有消除**：dump-all 有 3 個 incident（INC-007、008、010）的第一次提交
+  仍引用概覽列（例如 `m-ad-010:00`），被 `check_prediction` 拒收後在更正中改用紀錄 id；沒有 incident 因此放棄作答。最常見的更正是 evidence 寫成字串清單
+  （dump-all 10 次、retrieval 7 次），在一次更正後改成物件（decision 020「修正（2026-10-10）」）。retrieval 有 3 個 incident（INC-007、009、011）沒有附任何證據。
+- 修訂改變了這兩個方法的輸入（概覽多一行），temperature 0 下輸出也跟著變；retrieval 的 affected_f1 下降、dump-all 多數指標上升，n = 10 的區間都很寬，
+  不能把差異歸因於修訂本身以外的任何事。Agent 與 stat-anomaly 沒有重跑，Pilot 的 Gate 診斷不變（條件 1、3 不成立，條件 2 不評估）。
