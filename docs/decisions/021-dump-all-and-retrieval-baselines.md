@@ -109,7 +109,9 @@
    不算進 exposure 的 `stats:` 格子（decision 022）。打包順序、error 群組、時間分層樣本與截斷規則不變。
 3. **retrieval**（§3）：第一次呼叫的概覽區塊同樣帶這一行；查詢、BM25、q、k 不變。
 4. **method 版本**：dump-all 與 retrieval 的 prediction 記 `method.version` = `"2"`（原始 Pilot 執行是 `"1"`），Agent 維持 `"1"`
-   （`eval/runner.py` 的 `LLM_METHOD_VERSIONS`）。只是 provenance：分辨重跑與封存的原始結果，評分不讀它。
+   （`eval/runner.py` 的 `LLM_METHOD_VERSIONS`）。只是 provenance：分辨重跑與封存的原始結果；評分與 freeze 不讀它。
+   重跑的 `run_config.json` 與原始執行相同，freeze 分不出兩次執行，所以評分之前由 `method_version_problems` 確認每一筆 prediction 都是目前的版本
+   （下面「審查（2026-10-11）」）。
 
 為什麼這樣改：
 - **列不改**：列的格式（`ad +012:00 …`）也是 decision 022 exposure（`stats:<service>:<分鐘>`）的解析依據；改列會同時改變模型讀到的內容，
@@ -125,7 +127,7 @@
   格式不合的 id 照樣在提交時拒收，格式合但不存在的 id 照樣在評分時計為未解析（existence）。
 - harness 的更正訊息與更正次數上限（020 §3）、020 的任務說明（`agent/prompt.py`）。
 - 指標、評分門檻、切分、Gate 條件。
-- 預算：B = 120,000、q = 8、k = 25、Agent 40 次工具 / 120,000 proxy tokens / 30 回合（`eval/llm_methods.json` 不變，所以重跑的 `run_config.json` 與原始執行相同）。
+- 預算：B = 120,000、q = 8、k = 25、Agent 40 次工具 / 120,000 proxy tokens / 30 回合（`eval/llm_methods.json` 不變，所以重跑的 `run_config.json` 與原始執行逐位元組相同；後果見「審查（2026-10-11）」）。
 - 模型與設定：qwen3.5 9B（digest `sha256:6488c96f…3ea7`）、Ollama 0.35.0、`num_ctx` 262,144、`num_predict` 8192、temperature 0、seed 42、think 關、`timeout_s` 3600；
   推論主機 gpu-server（029 修訂 1）。
 - **Agent**：工具、任務說明、system 文字都不變（測試釘住 Agent 輸入的 sha256，並確認 `agent/` 不使用概覽），所以 Agent **不重跑**。
@@ -148,13 +150,34 @@
 - freeze 的 Pilot 修訂宣告寫 `"021": {"status": "used", "decision": "docs/decisions/021-dump-all-and-retrieval-baselines.md"}`
   （`collect/freeze.py` 的規則不變；測試確認這個宣告通過檢查）。之後 021 不能再在 Pilot 上修訂。
 
-### 測試（先寫測試、看它失敗，再實作；1111 passed，`-m "not network and not docker_daemon"`）
+### 審查（2026-10-11，合併前、任何重跑之前；只增加一個確認，評分與 freeze 的行為不變）
+
+1. **freeze 分不出修訂前與修訂後的執行**（中）：重跑用相同的模型、預算與 runtime（本修訂的要求），所以 `run_config.json` 與原始執行逐位元組相同，
+   `power.jsonl` 每一行的 `run_config_sha256` 也相同。freeze 的檢查（026 解讀 32：`run_config.json` 是否等於要凍結的設定、`scores.json` 是否從它算出、
+   每個 incident 最後一行 `power.jsonl` 是否指名它）因此分不出兩次執行：重跑中途停止（例如 `CallError` exit 2、GPU 狀態停止執行）時，沒跑到的 incident
+   留著修訂前的 prediction 與 transcript（例如 INC-009、INC-010 引用概覽列的 `invalid_submission`）；完全沒重跑時全部是修訂前的。兩種情況評分與
+   freeze 都不會發現，表會被當成「修訂後」報告。上面第 4 點原本說 `method.version` 用來分辨兩者，但沒有任何程式讀它；NEXT 只有「中途停止的執行不評分」
+   這條人工規則。
+   - **修正**：`eval/runner.py` 新增 `method_version_problems`（只讀、只回報）：列出 `results/<set>/<method>/` 裡 `method.version` 不是
+     `LLM_METHOD_VERSIONS` 的 prediction；讀不了的 prediction、目錄裡沒有任何 prediction 也列出。主 session 在**評分之前**執行（NEXT「下一步」3）：
+     有任何一筆就不評分，整個方法在 Pilot 上重跑到 exit 0 再確認；**freeze 之前再執行一次**。`eval score` 永遠從目前的 prediction 重算 `scores.json`，
+     所以確認通過後立刻評分，表就只含修訂後的 prediction。
+   - **不改**：評分與 freeze 的行為（`score_method`、`pilot_llm_problems`、`collect/freeze.py` 都不呼叫它）、`run_config.json` 的內容（不加版本欄位：
+     那會改 decision 024 的 run_config 與 freeze 比較的內容）。由程式強制（例如評分拒絕不是目前版本的 prediction、freeze 檢查版本）會改評分或
+     freeze 的行為，要另寫 decision，不在本修訂。
+   - 所以 Pilot 上分辨修訂前後結果的唯一防線是這個確認（流程上執行，不是程式強制）；封存目錄的修訂前結果不受影響（在 `results/` 之外）。
+
+### 測試（先寫測試、看它失敗，再實作；修訂時 1111 passed，審查之後 1112 passed，`-m "not network and not docker_daemon"`）
 
 - `tests/test_llm_baselines.py`：說明在概覽中、標題與每一列和修訂前的程式（逐字複製在測試裡）逐行相同（測試用 snapshot 與合成範例）、說明不提任何故障也不含 id；
   dump-all 與 retrieval 送給模型的第一則訊息都帶說明且在列之前；dump-all 在各種截斷預算下，標題從不在沒有說明時出現、說明不算概覽列；
   Agent 的 system、任務說明與工具的 sha256 與修訂前相同、`agent/` 不使用概覽、Agent 的 transcript 沒有說明；dump-all / retrieval 的 method 版本 "2"、Agent "1"。
   既有的「截斷的概覽只 claim 打包進去的列」測試：預算 60 在標題變長之後一列都放不下、測試會變成空的，改為 200（期望的 exposure 寫明）。
 - `tests/test_local_llm.py`：Pilot 執行的 prediction 依方法期望版本（dump-all / retrieval "2"、Agent "1"）。
+  審查（2026-10-11）新增（先寫、看它失敗）：原始執行（版本 "1"）之後，同樣設定的重跑（版本 "2"）在 INC-002 之前停止——`run_config.json` 與原始執行相同、
+  沒跑到的 INC-002 留著原始的 prediction、評分之後 freeze 的檢查（`pilot_llm_problems`）回報沒有問題；`method_version_problems` 只列出 INC-002
+  （版本 "1"，不是 "2"）、不列 INC-001、略過非 LLM 方法；重跑到結束後沒有問題；讀不了的 prediction 與沒有 prediction 的方法都回報。
+  Pilot 執行（三個方法）之後 `method_version_problems` 沒有問題。
 - `tests/test_heldout_freeze.py`：021 宣告 used 並指名本文件時通過 freeze 的 Pilot 修訂檢查；used 不指名文件、waived 卻指名文件仍被拒絕。
 - 沒有執行任何模型、server、ssh 或 Docker，也沒有讀 `data/external`。
 
@@ -164,6 +187,8 @@
    （prediction、transcript、`run_config.json`、`power.jsonl`、`scores.json`、`table.md`）→
    `data/external/archive/pilot-llm-gpu-2026-10-11-before-021-revision/`。原始結果保留、照樣報告（標明是修訂前），不再評分。
 2. 合併本修訂進 main 之後，在 `./tools/with-remote-ollama` 之下用相同的模型、資料、預算與評測，在 Pilot 上**整個重跑** retrieval 與 dump-all。
-3. 評分；修訂前後並列（不只報修訂後）；`eval compare` 與 `eval gate`（agent 對 stat-anomaly：Agent 與統計 baseline 都沒有重跑，Pilot 的 Gate 診斷預期不變，重跑只是確認）。
-4. Agent 不重跑（輸入不變）。
-5. 之後再產生 evidence gold 工作表（`eval gold-todo`）：重跑後 dump-all 與 retrieval 的引用會變，修訂前的引用不需要標。
+3. **評分之前確認版本**（`method_version_problems`，審查（2026-10-11））：dump-all 與 retrieval 的每一筆 Pilot prediction 都是 `method.version` "2"；
+   不是就不評分，整個方法重跑到 exit 0 再確認。freeze 之前再確認一次。
+4. 評分；修訂前後並列（不只報修訂後）；`eval compare` 與 `eval gate`（agent 對 stat-anomaly：Agent 與統計 baseline 都沒有重跑，Pilot 的 Gate 診斷預期不變，重跑只是確認）。
+5. Agent 不重跑（輸入不變）。
+6. 之後再產生 evidence gold 工作表（`eval gold-todo`）：重跑後 dump-all 與 retrieval 的引用會變，修訂前的引用不需要標。

@@ -393,6 +393,29 @@ def pilot_llm_problems(results_root: Path, config: dict | None, methods) -> tupl
     return problems, shas
 
 
+def method_version_problems(results_root: Path, split: str, methods) -> list[str]:
+    """decision 021's Pilot revision (review 2026-10-11): the predictions in results_root/<split>/<method>/ of each LLM
+    method that a run of its current version (LLM_METHOD_VERSIONS) did not write. The rerun of dump-all / retrieval has
+    the original run's model, budgets and runtime, so its run_config.json is the same file and the freeze check
+    (pilot_llm_problems, decision 026 #32) cannot tell a rerun that stopped midway, or no rerun at all, from a complete
+    one; this check can. The main session runs it before `eval score` (NEXT); scoring and the freeze never call it."""
+    problems = []
+    for m in [m for m in methods if m in LLM_METHODS]:
+        want, out_dir = LLM_METHOD_VERSIONS[m], Path(results_root) / split / m
+        paths = sorted(p for p in out_dir.glob("INC-*.json") if re.fullmatch(r"INC-\d+\.json", p.name))
+        if not paths:
+            problems.append(f"{m}: no predictions in {out_dir}: run it on the {split} to the end (exit 0) first")
+        for path in paths:
+            try:
+                got = json.loads(path.read_text())["method"]["version"]
+            except (ValueError, KeyError, TypeError) as e:
+                got = f"unreadable ({type(e).__name__})"
+            if got != want:
+                problems.append(f"{m}: {path.stem} was written by version {got!r}, not the current {want!r} (decision "
+                                f"021's Pilot revision): run {m} on the {split} again to the end (exit 0) before scoring")
+    return problems
+
+
 MAIN_METRICS = ("fault_type", "origin_top1", "affected_f1", "symptom_exact")  # decision 013: one per layer
 DIFFICULTIES = ("easy", "medium", "hard")  # decision 015
 

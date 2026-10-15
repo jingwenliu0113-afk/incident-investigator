@@ -191,6 +191,7 @@ def test_a_pilot_run_on_the_local_model_pins_it_and_records_the_runtime(tmp_path
                                                "incidents_timed": 1, "not_formal": []}
     assert "latency of all 1 timed incidents was measured on AC power in the high power mode" in table
     assert pilot_llm_problems(out, approved_config(), LLM_METHODS)[0] == []  # what the freeze check reads (026 #32)
+    assert runner.method_version_problems(out, "pilot", LLM_METHODS) == []  # and the version check (021 Pilot revision)
 
 
 def test_a_pin_mismatch_or_a_missing_lock_refuses_before_anything_is_written(tmp_path, monkeypatch):
@@ -579,3 +580,37 @@ def test_a_pilot_run_stopped_midway_leaves_earlier_predictions_that_the_freeze_c
     sha = sha256_path(out / "pilot/agent/run_config.json")
     assert [(e["incident_id"], e["run_config_sha256"] == sha) for e in power_lines(out, "pilot", "agent")] == [
         ("INC-001", False), ("INC-002", False), ("INC-001", True), ("INC-001", True), ("INC-002", True)]
+
+
+def test_a_rerun_after_021s_pilot_revision_that_stopped_midway_is_found_only_by_the_method_version(tmp_path, monkeypatch):
+    # review 2026-10-11 (decision 021's Pilot revision): the rerun of dump-all / retrieval uses the same model, budgets and
+    # runtime, so its run_config.json is byte-for-byte the original run's and the freeze check (026 #32: run_config,
+    # power.jsonl's run_config_sha256) cannot tell the two runs apart; only the predictions' method.version can
+    from eval.runner import method_version_problems
+
+    layout = stored(tmp_path / "data")
+    stored(tmp_path / "data", inc="INC-002", rg="RG-002")
+    out = tmp_path / "results"
+    local(monkeypatch, tmp_path, FakeOllama(chat=answering))
+    monkeypatch.setitem(runner.LLM_METHOD_VERSIONS, "dump-all", "1")
+    run_method(layout, "dump-all", "pilot", out)  # the original Pilot run, before the revision
+    original = (out / "pilot/dump-all/run_config.json").read_text()
+    earlier = (out / "pilot/dump-all/INC-002.json").read_text()
+    monkeypatch.setitem(runner.LLM_METHOD_VERSIONS, "dump-all", "2")
+    power(monkeypatch, FORMAL, FORMAL, FORMAL, BATTERY)  # start, before INC-001, after INC-001, before INC-002
+    with pytest.raises(ValueError, match="before INC-002"):
+        run_method(layout, "dump-all", "pilot", out)  # the rerun stops midway
+    assert (out / "pilot/dump-all/run_config.json").read_text() == original
+    assert (out / "pilot/dump-all/INC-002.json").read_text() == earlier
+    audit_set(layout, "pilot", out)
+    score_method(layout, "dump-all", "pilot", out)  # scored against NEXT (a stopped run is not scored)
+    assert pilot_llm_problems(out, approved_config(), ["dump-all"])[0] == []  # the freeze check does not see it
+    problems = method_version_problems(out, "pilot", ["dump-all", "stat-anomaly"])
+    assert len(problems) == 1 and "dump-all" in problems[0] and "INC-002" in problems[0] and "INC-001" not in problems[0]
+    assert "'1'" in problems[0] and "'2'" in problems[0] and "021" in problems[0] and "to the end" in problems[0]
+    power(monkeypatch, FORMAL)
+    run_method(layout, "dump-all", "pilot", out)  # run again to the end (exit 0)
+    assert method_version_problems(out, "pilot", ["dump-all"]) == []
+    (out / "pilot/dump-all/INC-002.json").write_text("{")
+    assert "INC-002" in method_version_problems(out, "pilot", ["dump-all"])[0]  # unreadable: reported, never skipped
+    assert "no predictions" in method_version_problems(out, "pilot", ["retrieval"])[0]  # never run: reported

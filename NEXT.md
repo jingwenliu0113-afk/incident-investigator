@@ -11,11 +11,14 @@
     evidence 只能是看到的 span / log 紀錄的 id（`s-`、`l-`）或看到的 span 的 `t-<trace_id>`；這份資料沒有 `m-` / `p-` id。標題與每一列的內容、順序不變。
   - 原因：020 的共用任務說明列出 `m-` / `p-` id（對 Agent 正確），但 dump-all 與 retrieval 看不到任何 `m-` / `p-` id，模型把 `m-` 和概覽列拼成 id。
   - dump-all / retrieval 的 prediction 記 `method.version` "2"（原始 Pilot 執行 "1"）；Agent "1"。
+    **審查（2026-10-11）**：重跑的 `run_config.json` 與原始執行逐位元組相同，freeze 的 run_config / `power.jsonl` 檢查（026 解讀 32）分不出兩次執行，
+    中途停止或沒重跑都不會被評分或 freeze 發現；所以評分之前（與 freeze 之前）用 `eval.runner.method_version_problems` 確認每一筆 prediction 都是 "2"
+    （只讀、只回報；評分與 freeze 的行為不變，decision 021「審查（2026-10-11）」）。這個確認是唯一的防線。
   - **不變**：引用驗證（`check_prediction`、id pattern、`resolve`、existence）、指標與門檻、切分、預算、模型與設定、推論主機、020 的任務說明與更正訊息、
     Agent 的工具與輸入（測試釘住 sha256）→ **Agent 不重跑**。概覽多 96 proxy tokens（dump-all 的 B 固定，Pilot 上每個 incident 的樣本約少一筆）。
   - dump-all 與 retrieval 依設計仍不能引用 metric series（021 §3），是已知的 coverage 限制，不改。說明不是驗證：格式不合的 id 照樣拒收，存在與否照樣在評分時量。
   - freeze 的 Pilot 修訂宣告：`"021": {"status": "used", "decision": "docs/decisions/021-dump-all-and-retrieval-baselines.md"}`（freeze 規則不變，測試確認通過）。
-  - 測試：1111 passed（`-m "not network and not docker_daemon"`）；沒有執行任何模型、server、ssh 或 Docker，也沒有讀 `data/external`。
+  - 測試：1112 passed（`-m "not network and not docker_daemon"`）；沒有執行任何模型、server、ssh 或 Docker，也沒有讀 `data/external`。
 - **下一步（主 session，不需要使用者）**，依序：
   0. 合併 `overview-rev` 進 main（`git merge --ff-only overview-rev`，測試通過後 push）；執行中 main checkout 保持乾淨。
   1. **封存原始結果**（只複製；封存目錄必須還不存在，不覆寫既有封存；在 `results/` 之外，不被評分、`gold-todo` 或 freeze 讀到）：
@@ -30,9 +33,12 @@
      ./tools/with-remote-ollama uv run python -m eval run --method retrieval --set pilot
      ./tools/with-remote-ollama uv run python -m eval run --method dump-all --set pilot
      ```
-     exit 75 = GPU lock 被占用（之後再跑，不搶不刪）；exit 3 / ssh 失敗 = blocked，回報使用者；exit 2 = 原因回報使用者，不改設定或預算；中途停止的執行不評分。
-  3. **評分、比較、Gate**（不需要 wrapper）：
+     exit 75 = GPU lock 被占用（之後再跑，不搶不刪）；exit 3 / ssh 失敗 = blocked，回報使用者；exit 2 = 原因回報使用者，不改設定或預算；中途停止的執行不評分
+     （freeze 分不出這次重跑與原始執行：兩者的 `run_config.json` 相同；由第 3 步的版本確認擋下）。
+  3. **確認版本，再評分、比較、Gate**（不需要 wrapper）。第一行是版本確認（decision 021「審查（2026-10-11）」）：dump-all 與 retrieval 的每一筆
+     Pilot prediction 都必須是 `method.version` "2"；exit 1（印出不是 "2" 的 incident）→ **不評分**，該方法在 Pilot 上整個重跑到 exit 0 再確認：
      ```bash
+     uv run python -c "import sys; from eval.runner import method_version_problems as check; p = check('data/external/results', 'pilot', ['dump-all', 'retrieval']); print('\n'.join(p) or 'ok: every dump-all / retrieval prediction is the current version'); sys.exit(1 if p else 0)"
      uv run python -m eval score --method retrieval --set pilot
      uv run python -m eval score --method dump-all --set pilot
      uv run python -m eval compare --method agent --against stat-anomaly --set pilot   # Agent 與 stat-anomaly 沒有重跑：預期不變
@@ -42,7 +48,7 @@
      ```
      README 與下表：dump-all、retrieval 的修訂前（封存）與修訂後**並列**，不只報修訂後；檢查修訂後還有沒有引用概覽列或不存在的 id（照實記錄，021 不再修）。
      Gate 只看 agent 對 stat-anomaly，所以重跑不改變 Pilot 的 Gate 診斷；正式 Gate 只在 held-out 上判定，Advanced 仍要等那時的 Gate。
-  4. **之後**：`uv run python -m eval gold-todo --set pilot`（重跑之後才產生：修訂前的 dump-all / retrieval 引用已封存、不需要標；Agent 的引用照樣要標）。
+  4. **之後**：`uv run python -m eval gold-todo --set pilot`（重跑、版本確認與評分之後才產生：修訂前的 dump-all / retrieval 引用已封存、不需要標；Agent 的引用照樣要標）。
      使用者要求的**互動式 gold 審查流程**（一次帶一個 incident、不要求使用者自己編輯 JSON）不在 `overview-rev` 這個分支，還沒做。
 
 **Pilot 上四個方法都有結果（診斷用，不是 Gate 判定；dump-all 與 retrieval 的列是 021 修訂前的執行）；剩下的 Core 需要使用者：LLM 引用的 gold 盲標。**
@@ -425,10 +431,11 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
         GPU 狀態停止（不是 RTX 5070 Ti，或連續兩次讀不到）、不在 wrapper 之下。exit 75：GPU lock 被占用（之後再跑）。exit 3：wrapper 拒絕或 ssh 失敗
         （gpu-server 離線 → LLM 步驟標記 blocked，繼續 Mac 上的工作）、或結束時無法確認遠端 server 已停止（照訊息在 gpu-server 上檢查、回報使用者，不刪 lock）。
         Pilot 沒有嘗試紀錄，重跑時整個 Pilot 從頭執行；**中途停止的執行不要評分**（freeze 也會以 `power.jsonl` 的 `run_config_sha256` 拒絕，026 解讀 32）。
+        例外：021 修訂後的 dump-all / retrieval 重跑與原始執行的 `run_config.json` 相同，freeze 分不出來，改由「目前位置」第 3 步的版本確認擋下。
         原因回報使用者，不自行改預算或設定。
       - 評分表的「Budgets, usage and visible data」段寫推論主機與 GPU（名稱、驅動、功耗上限），並列出前後 GPU 狀態沒有都讀到的 incident（latency 照樣保留）。
       - 之後：`uv run python -m eval gold-todo --set pilot` 產生 LLM 方法新引用的 evidence gold 工作表（只列新的；由使用者標註，decision 017）。
-   3. held-out：plan → freeze（`collect heldout-freeze` 現在由程式要求：目前 lock 有通過的 soak（soak #6 已滿足）、三個 LLM 方法的 Pilot `run_config.json`
+   3. held-out：plan → freeze（freeze 之前再跑一次「目前位置」第 3 步的版本確認，decision 021「審查（2026-10-11）」；`collect heldout-freeze` 現在由程式要求：目前 lock 有通過的 soak（soak #6 已滿足）、三個 LLM 方法的 Pilot `run_config.json`
       正好是 `llm_methods.json` 的設定（含 `host` = `gpu-server`）且分數是從那次執行算的，026 解讀 31、32；013 正式版要 LLM 結果）→ held-out 收集（`collect next --set heldout`，K = 5）
       → held-out 評測與 Gate。
    - 若使用者之後換回付費 API：另寫 decision、加 adapter，**第一次呼叫付費 API 前依 MACHINE_POLICY 報告用途、請求數、token 量與預估成本並等批准**，
