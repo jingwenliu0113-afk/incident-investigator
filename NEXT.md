@@ -1,6 +1,20 @@
 # NEXT
 
-## 目前位置（2026-10-16：freeze 前的使用者決策都已記錄（含 013 F13 第 1、3、7 項選 (i)）；下一步是 freeze 前的最後檢查）
+## 目前位置（2026-10-16 21:50，held-out freeze 完成；收集進行中）
+
+- **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
+  slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
+  Pilot 修訂宣告：013、021 used，011、014、015、017、019、020、022 waived）。`git diff --name-status 4b42a4a..HEAD` 只有兩個 `A`；
+  `collect status --set heldout`：freeze_problems `[]`、open 50。之後只能改 NEXT.md 或新增 decision 檔（100 保留給最終結果，decision 030）。
+- **收集**：主 session 的驅動腳本（不在 repo；`collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`），
+  每次 run 前等：heavy lock 空、高效能 + AC、checkout 乾淨、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（使用者 2026-10-16：其他工作可能沒用 lock 在跑；
+  只等、不碰）；run 期間每分鐘記錄負載。待人處理的 slot 只回報、不代為確認（ack-failures 由使用者決定）。
+- **之後需要使用者**：每個 held-out incident 的 label review（不自動代替）；held-out gold 盲標；LLM 方法執行前，Mac 的 127.0.0.1:11434 不能被占用
+  （目前有一個不屬於本專案的 Homebrew Ollama 0.40.3 在聽，tools/with-remote-ollama 會拒絕）。
+
+### 之前的「目前位置」
+
+#### （freeze 前）目前位置（2026-10-16：freeze 前的使用者決策都已記錄（含 013 F13 第 1、3、7 項選 (i)）；下一步是 freeze 前的最後檢查）
 
 **Core 還沒完成，Gate 還沒判定，不進 Advanced。** Pilot 上四個方法都已執行並評分（診斷用，不是 Gate 判定）；使用者的 evidence gold 盲標（91 筆）2026-10-16 完成
 （87 筆寫入、4 筆略），重新評分、compare、gate 與 README 都已更新（「下一步」1–4）；013 正式版已完成（「下一步」5）。使用者 2026-10-16 回答了 freeze 前的決策
