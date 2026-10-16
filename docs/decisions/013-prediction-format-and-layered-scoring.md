@@ -94,7 +94,7 @@
   |---|---|---|
   | `prediction_version` | 常數 1 | :20-22 |
   | `incident_id` | `INC-` 加至少 3 位數字 | :23-26 |
-  | `method` | `name`、`version`（非空字串；只是 provenance，評分與 freeze 不讀它，Pilot 上由 `eval version-check` 流程上檢查，021「修訂」第 4 點與「審查（2026-10-11）」） | :27-44 |
+  | `method` | `name`、`version`（非空字串）。評分（方法取自指令的 `--method`）與 freeze 不讀它。`name` 是 gold 抽樣種子 `<incident>:<method>` 的 method 部分：`eval gold-todo` 以 prediction 的 `method.name` 分組（`eval/runner.py:1155`、`eval/relevance.py:97`；F4），所以它決定哪些引用被抽去盲標。`version` 只是 provenance，Pilot 上由 `eval version-check` 流程上檢查（`eval/runner.py:412`；021「修訂」第 4 點與「審查（2026-10-11）」） | :27-44 |
   | `fault.fault_type` | decision 006 的 9 種之一或 null | :53-66 |
   | `fault.fault_family` | 6 種 family 之一或 null（可以只給 family；null 時評分由 fault_type 推得，F2） | :67-77 |
   | `origin_candidates` | 排序過、最可能的在前、最多 5 個、不重複；空清單 = 放棄作答 | :80-88 |
@@ -154,7 +154,7 @@
     service = record 的服務（`t-` 是 trace 中所有 span 的服務）在 label 的 affected 裡；origin = 含 origin；weak = temporal 且 service。
 - **gold**（017 §3 與兩則補註）：
   - 抽樣（`gold_sample`，`eval/relevance.py:91-100`）：每個 incident、每個方法，existence 成立的不同引用排序後以 `random.Random("<incident>:<method>")` 打亂，
-    取前 `GOLD_PER_METHOD` = 5 個（:17）；已判定的不再列出，一個方法的樣本不因其他方法加入而改變。
+    取前 `GOLD_PER_METHOD` = 5 個（:17）；`<method>` 是 prediction 的 `method.name`，不是結果目錄名（`eval/runner.py:1155`；F1）；已判定的不再列出，一個方法的樣本不因其他方法加入而改變。
   - 盲標工作表（`eval gold-todo`，`eval/runner.py:1139-1178`）：record 內容與 label 的背景（fault_type、origin、affected、fault 的相對時間），不列是哪個方法引用的，也不列弱標籤。
   - 判定（`eval gold-add`，`eval/runner.py:1196-1213`；`merge_gold`，`eval/relevance.py:123-148`）：只接受 `human:<name>`；只附加，已判定的鍵不能改；「略」（null）不寫入。
   - 分數（`gold_score`，`eval/relevance.py:103-109`）：gold precision = relevant 數 / 已判定數（該方法 existence 成立的不同引用中有判定的，不分是誰的樣本抽到的）；
@@ -170,8 +170,14 @@
 - **放棄作答** = `origin_candidates` 是空清單（schema :81）。方法可以自己提交空的清單；LLM 方法沒有合格的提交時，harness 寫 `agent/harness.py:69-72` 的 `_abstain`
   （fault 兩個 null、三個集合都空、沒有 evidence），出現在：更正 2 次仍不合格（`invalid_submission`）、沒有提交（`no_submission`）、預算或回合到上限、
   最後一次提示後仍沒有提交（`turn_limit`、`tool_budget`）（`agent/harness.py:175-191`、`:203-243`；decision 020 §2、§3）。
-- **一律算錯、留在分母**（v1 §2）：依 F2 的定義，放棄作答的每一個指標都是 0（label 的 affected 與 user symptom kinds 都至少 1 個，
-  `schemas/incident_label.schema.json:87`、`:103`）。失敗類別是 `no_answer`（022；`eval/failures.py:54-55`）。沒有引用，所以 evidence 各層是 null、不進 n（F4）。
+- **一律算錯、留在分母**（v1 §2「放棄作答（null / 空清單）一律算錯，不排除在分母之外」）：放棄作答的 incident 照常計分、留在每個指標的分母。
+  程式沒有另外的放棄作答分支，照 F2 逐欄計分（`eval/score.py:45-63`）：
+  - harness 或 runner 補上的 `_abstain`（fault 兩個 null；`origin_candidates`、`affected_services`、`user_symptom.kinds` 都是空的；沒有 evidence）：F2 的 11 個指標都是 0
+    （label 的 affected 與 user symptom kinds 都至少 1 個，`schemas/incident_label.schema.json:87`、`:103`）；沒有引用，所以 evidence 各層是 null、不進 n（F4）。
+  - 方法自己提交、`origin_candidates` 是空清單、其他欄位有值的 prediction：origin 的 3 個指標是 0，其他欄位照 F2 逐欄計分、可能得分；有引用時 evidence 照 F4 計分。
+    例：Pilot 的 Agent INC-008（F12 第 2 項）fault 兩個 null、affected 是空的，但 `user_symptom.kinds` 是 `["none"]`，所以 `symptom_exact` = 1、`symptom_jaccard` = 1.0。
+    v1 §2 的措辭與逐欄計分的出入見 F13 第 7 項。
+  - 兩種都是失敗（origin_top1 = 0），失敗類別都是 `no_answer`（022；`eval/failures.py:54-55`）。
 - **held-out 的嘗試**（`eval/runner.py:507-606`）：
   - 每個（方法, 列表內 incident）只跑一次：有 prediction 或嘗試已關閉就不再跑（:551）；prediction 與 transcript 原子寫入、永不覆寫，transcript 先寫、prediction 最後寫（:589-594）；
     每個方法一個 O_EXCL 的 `run.lock`（:524-532）。
@@ -202,10 +208,12 @@
 - **差異**（`eval.compare.paired`，`eval/compare.py:13-34`）：兩個方法都計分的 incident 上，每個 incident 的 a − b；依 run group（取 a 的列）分組；
   與 F3 相同的 bootstrap（`random.Random(0)`、10,000 次、有放回地抽 run group、percentile 取 249 / 9,750）重抽**差異**，所以兩個方法用同一組重抽的 run group。
   估計量 = 共同 incident 的平均差異（`mean_diff`）。只有一個方法計分的 incident 列在 `only_in_one`（held-out 的 Gate 不允許有，F8）。
-- 比較的指標：四個主要指標（`metrics = MAIN_METRICS`，`eval/runner.py:1273`）。
+- 比較的指標：四個主要指標（`metrics = MAIN_METRICS`，`eval/runner.py:1272`）。
 - **LOFO**（`eval/compare.py:37-46`；只描述）：每次拿掉一個 fault（兩個方法的列中出現的 fault）重算 paired 差異；拿掉後沒有共同 incident 時 n = 0、沒有區間。
 - 輸出 `results/<set>/compare-<a>-vs-<b>.json` / `.md`，記錄讀到的兩份 scores.json 的 sha256（:1296、:1303-1317）。held-out：第一個陳述是 `heldout_guard`、兩份分數都必須屬於目前的
-  freeze 與清單（:1278-1294），輸出不列 incident 或 run group id（:1299-1302，F11）。
+  freeze 與清單（:1278-1294），輸出不列 incident 或 run group id（:1299-1302，F11）。**唯一的例外**（023「實作說明：Gate 計算」的「輸出」）：
+  `paired` 的 `only_in_one` 列出只有一個方法計分的 incident id（`eval/compare.py:34`；寫進 compare 的 JSON，:1297；`eval compare` 也把 `paired` 印到 stdout，
+  `eval/__main__.py:120-121`）。held-out 上兩份 scores.json 屬於同一份清單、每個列表內 incident 都計分（放棄作答也算），所以正常情況下它是空的；不是空的時 gate 拒絕（F8）。
 - 不是 paired 的：各方法自己的區間（F3）、gold precision（F4）。
 
 ### F8. Gate 判準（023 §7；023「實作說明：Gate 計算」解讀 1–14；「追加（2026-10-10，第二次）」第 6 項）
@@ -275,6 +283,7 @@
   關閉的 slot、不在清單的 incident（附原因）、放棄作答與每次嘗試的結果、失敗嘗試的次數與用量、latency 不是正式條件的失敗嘗試。
 - **compare 與 gate 的輸出不列 incident id 或 valid run group id**（023「實作說明：Gate 計算」的「輸出」；026 解讀 23）：關閉的 slot 只列 slot、fault 與原因，
   排除的 incident 只列 slot 與原因（`eval/runner.py:1263-1269`、`:1299-1302`、`:1399-1402`）；incident id 只在清單與各方法自己的結果（prediction、`attempts.jsonl`、scores.json、table.md）裡。
+  唯一的例外照 023：compare 的 `paired` 的 `only_in_one`（F7）；held-out 上正常情況下它是空的，不是空的時 gate 拒絕（F8）。
 - **只用第一次執行的結果**；方法 bug 的修正版只能另列為探索性結果；評分或稽核的 bug 依 023 §6 修正後所有方法重新評分、Gate 用修正後的數字、前後都報告——
   但 freeze 之後沒有修正路徑：使用者 2026-10-10 對 026「待使用者決定」2 選「沒有偏好」，維持現況，freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定（NEXT A4）。
 - 門檻、prompt、預算、指標、incident 清單永不因 held-out 結果修改（023 §6）；看到 held-out 結果之後本文件永不修改。
@@ -291,8 +300,9 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
 1. **格式**：LLM 方法把 evidence 寫成 id 字串的清單、或把概覽的每分鐘列拼成 `m-` id（例如 `m-ad+012:00`），都在提交時被 schema 拒收。處理都在方法側
    （decision 020「修正（2026-10-10）」的更正訊息、decision 021 在 Pilot 上的修訂），**格式、id pattern 與引用驗證都沒有放寬**（021「不變的」）。
    修訂前 dump-all 的 INC-009、INC-010 因此以 `invalid_submission` 放棄作答，照 v1 §2 算錯、留在分母（修訂前的結果封存、照樣報告）。
-2. **放棄作答**：Agent 在 INC-008 提交了空的答案（origin 候選與 fault 都空，停止原因 `submitted`；失敗類別 `no_answer`），照 v1 §2 留在 n = 10 的分母
-   （Agent origin_top1 0.600）；它沒有引用，所以 Agent 的 evidence 各層 n = 9。
+2. **放棄作答**：Agent 在 INC-008 自己提交了 origin 候選、fault 與 affected 都空的答案（`user_symptom.kinds` 是 `["none"]`；停止原因 `submitted`；失敗類別 `no_answer`），
+   照 v1 §2 留在 n = 10 的分母（Agent origin_top1 0.600）。程式照 F2 逐欄計分：origin、fault、affected 的指標都是 0，`symptom_exact` = 1、`symptom_jaccard` = 1.0
+   （計入 Agent 的 symptom_exact 0.60；F5、F13 第 7 項）。它沒有引用，所以 Agent 的 evidence 各層 n = 9。
 3. **origin 候選數**：LLM 方法多半只給一個候選（dump-all 只有 INC-007 給了 2 個；retrieval 每個 incident 1 個；Agent 除了 INC-008 的 0 個，每個 1 個），它們的 origin_top3 / RR 幾乎等於 top-1
    （stat-anomaly 的 origin_top3 是 0.900）。保留為失敗分析的發現（022 補註 (b)、021），不改 top-3 / RR 的定義或輔助指標的地位。
 4. **existence**：Agent 0.956（n = 9，[0.867, 1.000]）；未解析的引用照 v1 §4 留在 existence 的分母，沒有移除。dump-all 與 retrieval 修訂後都是 1.000。
@@ -321,8 +331,12 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
 5. **過期的錯誤訊息**：`eval/runner.py:1349-1350` 在 LLM 方法沒有分數時提示「once the paid LLM methods are approved, NEXT A1」；原 A1 已處理（本機模型，decision 029；
    NEXT「已處理」）。只是訊息文字，Gate 的行為不變。
 6. **gold precision 的報告時機**：017「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」，030 §4 第 8 項照字面用於 held-out；
-   Pilot 的 README 報出樣本有 4 筆略的 dump-all 的數字（標明略與 coverage）。這個差異已記在 017「補註（2026-10-16，第二則）」與 NEXT A12，由使用者確認；
-   held-out 照 030 的字面，不變。
+   freeze 之前的 Pilot README 草稿目前報出樣本有 4 筆略的 dump-all 的數字（標明略與 coverage）。這個差異記在 017「補註（2026-10-16，第二則）」；
+   Pilot README 要不要這樣報**待使用者決定**（NEXT A12，freeze 的前置條件；回答在 freeze 之前補記在 017 第二則補註）。held-out 照 030 的字面，不變。
+7. **放棄作答「一律算錯」的範圍**：v1 §2 寫「放棄作答（null / 空清單）一律算錯」，026 解讀 19 對重試之後仍沒有 prediction 的補位寫「每一層都算錯」；
+   程式沒有放棄作答的分支，照 F2 逐欄計分（`eval/score.py:45-63`）。補位的 `_abstain`（`agent/harness.py:69-72`；held-out 評分時的補位 `eval/runner.py:877-880`）
+   每個欄位都是空的，所以每一層都是 0，與兩處文字一致；方法自己提交、`origin_candidates` 是空清單但其他欄位有值的 prediction，其他欄位照常得分
+   （Pilot Agent INC-008 的 `symptom_exact` = 1；F5、F12 第 2 項）。兩種讀法下 origin 的各指標都是 0、失敗類別都是 `no_answer`；差別只在其他欄位。
 
 ### 為什麼
 

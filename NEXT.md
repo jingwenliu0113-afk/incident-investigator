@@ -3,8 +3,8 @@
 ## 目前位置（2026-10-16：Pilot 的 evidence gold 標完並重新評分；Freeze 前稽核進行中）
 
 **Core 還沒完成，Gate 還沒判定，不進 Advanced。** Pilot 上四個方法都已執行並評分（診斷用，不是 Gate 判定）。使用者的 evidence gold 盲標（91 筆）
-2026-10-16 完成（87 筆寫入、4 筆略），重新評分、compare、gate 與 README 的結果都已更新（「下一步」1–4 完成）。剩下的 Core 依序見「下一步（Core，依序）」5–9：
-013 正式版（**已完成**，2026-10-16）、Pilot 修訂宣告、version-check、heldout-plan、freeze。沒有技術上的 blocker；需要使用者的事項見「Blocked / 需要使用者」A。
+2026-10-16 完成（87 筆寫入、4 筆略），重新評分、compare、gate 與 README 的結果都已更新（「下一步」1–4 完成）。013 正式版（「下一步」5）也已完成（2026-10-16）。剩下的 Core 依序見「下一步（Core，依序）」6–9：
+Pilot 修訂宣告、version-check、heldout-plan、freeze。沒有技術上的 blocker；需要使用者的事項見「Blocked / 需要使用者」A（A9、A10、A12 在 freeze 之前必須由使用者回覆）。
 
 - **使用者決定（2026-10-16）**，原話：
   > 我的決定：
@@ -24,14 +24,15 @@
   - 3 是本次的文件同步（下面「文件同步（2026-10-16）」）。
   - 4 是 decision 030：held-out 最終結果的固定檔名 `docs/decisions/100-heldout-final-results.md`（100 保留，一般 decision 用 031–099）；README 已加預留連結
     （held-out 評測完成前打不開）。README 在 freeze 時封存，之後不改；held-out 的結果只寫在 100 與同時新增的 decision 紀錄。
-  - 「重新計算 Pilot 的分數、比較與診斷性 Gate」是「下一步」2、3（**已完成**）；「Freeze 前稽核」是「下一步」4–8（README 定稿——**已完成**、013 正式版——**已完成**、
+  - 「重新計算 Pilot 的分數、比較與診斷性 Gate」是「下一步」2、3（**已完成**）；「Freeze 前稽核」是「下一步」4–8（README 定稿——**已完成**，但 dump-all 的 gold precision 要不要報待使用者確認（A12）、013 正式版——**已完成**、
     Pilot 修訂宣告、version-check、plan），freeze 本身再由程式檢查（「下一步」9）。門檻、Gate、指標、切分、預算、評分、引用驗證都不改。
 - **使用者（2026-10-16，回答 INC-011 時）**，原話（標註的部分記在 017「補註（2026-10-16，第二則）」）：
   > 請依 decision 017 寫入人工標註，保持方法盲標，不修改既有判定標準。
   > 10 個 Incident 全部完成後，請重新計算 Gold Evidence Precision、Coverage 與 Pilot 比較結果，進行 Freeze 前稽核。
   > 若沒有其他需要我決定的問題，請依既定 SPEC 繼續推進 Held-out 正式評測。
 
-  依序是「下一步」1（完成）、2–4（完成）、5（完成）、6–9（進行中）；需要使用者決定的事項列在「Blocked / 需要使用者」A，不自行決定。
+  依序是「下一步」1（完成）、2–4（完成）、5（完成）；6、8 等使用者（A9、A10），7、9 在其後，9（freeze）另外要等 A12 的回覆；
+  需要使用者決定的事項列在「Blocked / 需要使用者」A，不自行決定。
 - **Pilot 結果**（n = 10，診斷用；2026-10-16 gold 標完後重新評分，評分程式沒有改：主要指標與 2026-10-15 的評分相同，只有 evidence 的 gold 欄位改變，見「下一步」2）：
 
   | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 失敗（022） | 平均 latency |
@@ -135,13 +136,16 @@
    （n、等權平均、區間），寫明各方法的 n 不同、不是 paired 的比較，以及 017 每個方法、每個 incident 最多抽 5 筆、略不計入；狀態列與「還在盲標中」的說法已改。
    修訂前（封存）的 dump-all / retrieval **不補標、不重新評分**（封存目錄不被 `gold-todo` 讀；封存的 `scores.json` 只含評分當時與既有判定重疊的 gold：
    dump-all n = 1、coverage 0.025，retrieval n = 0），README 不報它們的 gold precision。decision 030 的預留連結還在。README 在 freeze 時封存；
-   dump-all 的 gold precision 照使用者 2026-10-16 的要求報出，並標明它的樣本沒有全部判定；使用者若要改（A12），只能在 freeze 之前。
+   使用者 2026-10-16 要求重新計算 gold precision 與 coverage；README 草稿目前報出 dump-all 的 gold precision，並標明它的樣本沒有全部判定——
+   **要不要這樣報待使用者確認（A12）**，使用者回覆之前不 freeze（「下一步」9）。
 5. **013 正式版——已完成（2026-10-16）**（decision 013、023 §7：§7 的 paired 比較與 Gate 判準寫進 013 正式版，用掉 013 唯一的一次修訂；其他由 Pilot 引起的 013 修改必須和它併在一起）。
    **程式不檢查它的內容**：`collect/freeze.py` 只檢查 Pilot 修訂宣告的 013 是 `used`、而且指名 frozen commit 裡存在的 decision 檔。內容是流程上的檢查。
    寫在 013 文末「正式版（2026-10-16，held-out 之前凍結；013 唯一的一次修訂）」（F1–F13）：只轉述已決定、已實作的規則（v1 §1–§4、023 §2–§7 與 Gate 計算的解讀、
    026、017、022、024、030）並標出程式行號，**沒有新增任何指標、門檻、規則或解讀**，也沒有其他由 Pilot 引起的 013 修改（F12 列出 Pilot 的觀察，都不改 013）。
-   文件與程式的 6 項出入只記錄、不改（F13：非 `m-` 引用的時間範圍、usage 缺鍵 = null、022 的分鐘窗、Pilot 缺 prediction 檔、`eval/runner.py:1349` 過期的 A1 訊息、
-   gold precision 的報告時機 = A12）。程式、schema、測試都沒有改，Pilot 分數不需要重算。freeze 宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`。
+   文件與程式的 7 項出入只記錄、不改（F13：非 `m-` 引用的時間範圍、usage 缺鍵 = null、022 的分鐘窗、Pilot 缺 prediction 檔、`eval/runner.py:1349` 過期的 A1 訊息、
+   gold precision 的報告時機 = A12、放棄作答「一律算錯」的範圍——程式照 F2 逐欄計分，方法自己提交、origin 空的 prediction 其他欄位照常得分，例如 Pilot Agent INC-008 的 symptom_exact = 1）。
+   審查（2026-10-16）的更正：F5 改成照程式逐欄計分的寫法（原本寫「放棄作答的每一個指標都是 0」，只對補位的 `_abstain` 成立）；F7、F11 補回 023 的唯一例外
+   （compare 的 `only_in_one` 列 incident id，held-out 上不是空的時 gate 拒絕）；F1、F4 寫明 prediction 的 `method.name` 是 gold 抽樣種子的 method 部分；一個行號。都只是轉述，規則與程式不變。程式、schema、測試都沒有改，Pilot 分數不需要重算。freeze 宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`。
 6. **Pilot 修訂宣告**（`collect heldout-freeze --pilot-revisions <file>` 的輸入，023 §6「用掉或明確放棄」）：
 
    | decision | 宣告 | 根據 |
@@ -150,7 +154,7 @@
    | 013 | `used`，指名 013 正式版所在的 decision 檔 | 程式強制 `used`（023 §7） |
    | 014 | `waived` | 使用者 2026-10-10 放棄；程式強制 |
    | 021 | `used`，`docs/decisions/021-dump-all-and-retrieval-baselines.md` | 使用者 2026-10-11 選 (a) |
-   | 015、017、019、020、022 | **使用者決定** `used` / `waived`（A9） | 推導的建議：五個都 `waived`（015：Pilot 稽核後沒有修訂——修訂 1 在 Pilot 之前、只用無 fault 資料，不占額度；Pilot 的詞彙命中都是 0。017：2026-10-16 的兩則補註都不改規則。019、020：021 的修訂刻意不改它們；020 的 2026-10-10 修正自己寫明不是 Pilot 修訂。022：2026-10-11 補註寫明沒有使用） |
+   | 015、017、019、020、022 | **使用者決定** `used` / `waived`（A9） | 推導的建議：五個都 `waived`（015：Pilot 稽核後沒有修訂——修訂 1 在 Pilot 之前、只用無 fault 資料，不占額度；Pilot 的詞彙命中都是 0。017：2026-10-16 的兩則補註都不改規則；這一項以 A12 的回答為前提——若 A12 決定 Pilot README 照目前報出 dump-all 的 gold precision，是否把它算成 017 在 Pilot 上的修訂也由使用者一併決定。019、020：021 的修訂刻意不改它們；020 的 2026-10-10 修正自己寫明不是 Pilot 修訂。022：2026-10-11 補註寫明沒有使用） |
 
    程式只檢查格式與 011 / 013 / 014 三個強制項目；五個由使用者決定的項目，程式兩者都接受。
 7. **version-check（freeze 之前再一次）**：`uv run python -m eval version-check --set pilot` → exit 0 才繼續。`collect heldout-freeze` 不呼叫它
@@ -159,7 +163,8 @@
    label review 的 affected 與 user symptom 全部維持 a priori；7 個 incident 有 notes——要不要把 notes 當成 amendments 吸收（`field: notes`，每項要理由，
    023 解讀 3）由使用者決定（A10）。移除 fault 只依 023 §1 的證據（觸發、無效率、詞彙命中），永不依任何方法的分數。
 9. **heldout-freeze → held-out 收集 → held-out 方法執行 → Gate**：
-   - freeze 之前：README 已定稿（第 4 步）、A4 若要改也在這之前、checkout 乾淨。
+   - freeze 之前：README 已定稿（第 4 步）、**A12 已由使用者回覆**（照回覆處理 README，回答補記在 017「補註（2026-10-16，第二則）」；沒有回覆就不 freeze）、
+     A9、A10 已回覆（第 6、8 步）、A4 若要改也在這之前、checkout 乾淨。
      `uv run python -m collect heldout-freeze --pilot-revisions <revisions.json>` → 只把 `docs/heldout/slots.json` 與 `freeze.json` commit 成一個 commit。
      程式另檢查：目前 env lock 有通過的 soak（soak #6）、三個 LLM 方法的 Pilot `run_config.json` 正好是 `llm_methods.json`（含 host `gpu-server`）且分數是從那次執行算的（026 解讀 31、32）。
    - held-out 收集（Mac、Docker、高效能 + AC、Mac heavy lock；K = 5，約 50 個 slot）：README「Held-out」段的指令依序；沒有 loop，每個 run 一次 `./tools/with-mac-lock`。
@@ -178,11 +183,13 @@
 - **A10 heldout-plan 是否吸收 label review 的 notes**（「下一步」8）。
 - **A11（需要時）013 正式版**：已寫好（2026-10-16，「下一步」5），只併入 023 §7、沒有其他修改；若使用者要併入其他由 Pilot 引起的 013 修改或處理 F13 的出入，
   那是設計決定，必須在 freeze 之前（freeze 之後 013 不能改）。沒有要改就不需要回覆。
-- **A12 Pilot README 的 dump-all gold precision（確認即可；要改只能在 freeze 之前）**：017「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」，
-  decision 030 §8 照這句寫 held-out 的 100「一個方法的樣本全部判定之前不報它的 gold precision」。Pilot 上 91 筆都已呈現並作答，但 4 筆略都在 dump-all 的樣本裡，
-  所以 dump-all 的樣本沒有全部判定（stat-anomaly、retrieval、agent 的樣本全部判定）。README 照使用者 2026-10-16 的要求（重新計算 Gold Evidence Precision、Coverage）
-  報出 dump-all 的 0.540（n = 10，coverage 0.840），並標明 4 筆略與「樣本沒有全部判定」；**預設維持這樣**。若使用者要依字面不報，或要再判定那 4 筆
-  （之後的 `gold-todo` 會再列出），都必須在 freeze 之前（README 在 freeze 時封存）。held-out 照 030 §8 的字面，不變；規則都不改（017「補註（2026-10-16，第二則）」）。
+- **A12 Pilot README 的 dump-all gold precision（freeze 的前置條件：使用者回覆之前不 freeze，「下一步」9）**：017「對實驗的影響」寫「各自的樣本要先標完，
+  gold precision 才會出現在報告中」，decision 030 §4 第 8 項照這句寫 held-out 的 100「一個方法的樣本全部判定之前不報它的 gold precision」。Pilot 上 91 筆都已呈現並作答，
+  但 4 筆略都在 dump-all 的樣本裡，所以 dump-all 的樣本沒有全部判定（stat-anomaly、retrieval、agent 的樣本全部判定）。使用者 2026-10-16 要求重新計算
+  Gold Evidence Precision、Coverage（已完成）；**沒有決定 Pilot README 要不要在樣本沒有全部判定時報出 dump-all 的數字**。README 草稿目前報出 dump-all 的 0.540
+  （n = 10，coverage 0.840），並標明 4 筆略與「樣本沒有全部判定」。請使用者選一個：(a) 照目前報出；(b) 依字面不報，只報 coverage 並寫明原因；
+  (c) 再判定那 4 筆（之後的 `gold-todo` 會再列出）後照常報。都必須在 freeze 之前（README 在 freeze 時封存）；回答補記在 017「補註（2026-10-16，第二則）」。
+  held-out 照 030 §4 第 8 項的字面，不變；規則都不改。A9 的 017 宣告以這一項的回答為前提。
 - **A4 freeze 之後的修正路徑（026「待使用者決定」2）**：使用者 2026-10-10 選**「沒有偏好」** → 不實作，維持現況：freeze 預設拒絕任何程式、env lock 或 policy 的變動，
   freeze 之後發現 bug 時 held-out 評測停止，由使用者當時決定。**freeze 之前仍可決定**（例如一條窄的修訂路徑：新 decision + 接續的 freeze 紀錄，
   只用於 023 §6 允許的修正）；freeze 釘住所有程式，之後就無法加入。不影響其他工作。
@@ -206,7 +213,7 @@
     （Mac 上的 retrieval / agent 結果被取代）；freeze 釘住 `host`。
   - （當時）下一步不需要使用者：遠端檢查、探測、三個方法在 Pilot 上執行（原下一步 8.2）——**已完成**（2026-10-11；021 修訂後的重跑 2026-10-15）。
     執行中被拒絕或停止（`CallError`、釘選、GPU 狀態、GPU lock、gpu-server 離線 → blocked）時回報使用者，不自行改設定或預算，也不改回 Mac 推論（held-out 照樣適用）。
-  - （當時）之後需要使用者：LLM 方法的引用要再補 evidence gold——**現在是 A8 /「下一步」1**。`ollama.timeout_s` 要不要加長——**沒有觸發，維持 3600**（「目前位置」）。
+  - （當時）之後需要使用者：LLM 方法的引用要再補 evidence gold——原 A8，**已完成**（2026-10-16，「下一步」1）。`ollama.timeout_s` 要不要加長——**沒有觸發，維持 3600**（「目前位置」）。
   - 已完成並合併進 main（decision 029）：Ollama adapter（只連 loopback、拒絕 cloud 模型；`truncate` / `shift` 關閉、每個回覆檢查——包括不依賴
     `truncate: false` 的送出量與計數下限——截斷或無法確認未截斷一律是不可重試的 `CallError`；解析不了的 tool call 參數照 020 §3 拒收）、
     模型 digest 與 Ollama 版本釘選（每個 incident 的檢查在嘗試開始之前：server 不在或模型被換時執行停止、不用掉 held-out 嘗試）、整個執行只用開始時的設定、

@@ -8,7 +8,8 @@
 > 狀態（2026-10-16）：Core 的工具鏈完成並測試（1,100+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集並完成人工 label review**；
 > 四個方法（統計 baseline 與三個 LLM 方法）都已在 Pilot 上執行並評分（下表；診斷用，不是 Gate 判定）。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029）；
 > 2026-10-11 起模型在使用者的 RTX 5070 Ti 桌機上推論（029 修訂 1，eval 仍在 Mac）；dump-all 與 retrieval 依 decision 021 的 Pilot 修訂（2026-10-11，使用者決定）在 2026-10-15 重跑。
-> 四個方法引用的 evidence 依 decision 017 抽出的樣本都已由使用者人工盲標（2026-10-10 統計 baseline 的 28 筆；2026-10-16 三個 LLM 方法的 91 筆，87 筆寫入、4 筆略），
+> 四個方法引用的 evidence 依 decision 017 抽出的樣本都已呈現給使用者人工盲標（2026-10-10 統計 baseline 的 28 筆；2026-10-16 三個 LLM 方法的 91 筆，87 筆寫入、4 筆略；
+> 4 筆略都在 dump-all 的樣本裡，所以除了 dump-all 的這 4 筆之外都已判定），
 > 並在 gold 之後重新評分（下面「Evidence」）。held-out 在 freeze 之後收集，Gate 只在 held-out 上判定；**Core 還沒完成，沒有進 Advanced**。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 

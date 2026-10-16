@@ -140,7 +140,9 @@ existence、弱標籤（temporal / service / origin / weak）、gold precision�
 
   coverage 低於 1 有兩個來源：§3 每個方法、每個 incident 最多只抽 5 筆（retrieval 在 INC-002、005、006 各引用 45、22、25 筆），以及上述 4 筆略（dump-all）。
   各方法的 n 不同，不是 paired 的比較（上一則補註）。修訂前（封存）的 dump-all / retrieval 不補標、不重新評分。
-- **與「對實驗的影響」字面的差異（只記錄，不改規則）**：「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」；decision 030 §8 照這句寫
+- **與「對實驗的影響」字面的差異（只記錄，不改規則）**：「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」；decision 030 §4 第 8 項照這句寫
   held-out 的 100「一個方法的樣本全部判定之前不報它的 gold precision」。Pilot 上 91 筆都已呈現並作答（「略」也是使用者的回答），但 dump-all 的樣本有 4 筆沒有判定。
-  Pilot 的 README 照使用者 2026-10-16 的要求（重新計算 gold precision 與 coverage）報出 dump-all 的數字，並標明這 4 筆略與 coverage；held-out 照 030 §8 的字面，不變。
-  Pilot README 的這個讀法由使用者確認（NEXT「Blocked / 需要使用者」A12）；README 在 freeze 時封存，要改只能在 freeze 之前。
+  使用者 2026-10-16 要求重新計算 gold precision 與 coverage（已完成，上表）；**Pilot README 要不要報出 dump-all 的 gold precision，使用者還沒有決定**。
+  freeze 之前的 README 草稿目前報出 dump-all 的數字，並標明這 4 筆略、「樣本沒有全部判定」與 coverage；held-out 照 030 §4 第 8 項的字面，不變。
+  這一點**待使用者確認**（NEXT「Blocked / 需要使用者」A12），是 freeze 的前置條件（NEXT「下一步」9）：README 在 freeze 時封存，要改只能在 freeze 之前；
+  使用者的回答在 freeze 之前補記在本補註。
