@@ -6,7 +6,7 @@
   這是 013 在 Pilot 上**唯一的一次修訂**（decision 023 第 16 行：§7 的 paired 比較與 Gate 判準寫進 013 正式版），沒有其他由 Pilot 引起的 013 修改；
   只轉述已決定、已實作的規則並標出程式行號，**不新增任何指標、門檻、規則或解讀**，文件與程式的出入記錄在正式版 F13。
   F13 的 7 項依使用者 2026-10-16 的決定（NEXT A11：純文件的直接修正，涉及評分邏輯或研究協定的先問）：第 2、4、5、6 項已處理（只改文字，第 5 項是程式的錯誤訊息文字；
-  計分與規則都不變），第 1、3、7 項**等使用者決定（freeze 之前）**。
+  計分與規則都不變），第 1、3、7 項**等使用者決定（freeze 之前）**（第 1、3 項選 (ii) 是 017 / 022 的 Pilot 修訂、不是 013 的修改，見 F13 開頭）。
   freeze 的 Pilot 修訂宣告寫 `"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`
   （`collect/freeze.py:161-162` 強制 013 是 used）。正式版在 frozen commit 裡，freeze 之後本文件不再修改（026 解讀 7）。
   下面 §1–§4 是 Pilot v1 的原文，保留為歷史；其他文件引用的「013 §1–§4」仍指這四段，它們的規則在正式版不變（對應正式版 F1–F4）。
@@ -85,7 +85,8 @@
 - **與 v1 的關係**：v1 §1–§4 的規則都不變（正式版 F1–F4 是同一份規則加上程式行號）；正式版多出來的只有兩類：
   併入 023 §7 的 paired 比較與 Gate 判準（F7、F8，原本只寫在 023）；把 017、022、024、026、030 已決定、與評分和報告有關的規則在這裡列出出處（F4–F6、F9–F11）。
 - **其他由 Pilot 引起的 013 修改：沒有**。F12 列出 Pilot 上與 013 有關的觀察，都不改 013。若使用者要併入其他修改，那是設計決定（NEXT A11），
-  依 023 第 16 行必須和本修訂併在一起，也就是在 freeze 之前寫進本節。F13 第 1、3、7 項若使用者選 (ii)（改程式或規則），就是這種修改。
+  依 023 第 16 行必須和本修訂併在一起，也就是在 freeze 之前寫進本節。F13 第 7 項若使用者選 (ii)（改 013 的計分），就是這種修改；
+  第 1、3 項的 (ii) 改的是 017（evidence 的鍵）與 022（失敗分類）的規則，不是 013 的修改，而是 017 / 022 在 Pilot 上的那一次修訂（見 F13 開頭）。
 
 ### F1. Prediction 格式（v1 §1）
 
@@ -330,14 +331,29 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
 - **結果**：第 2、4、5、6 項是純文件，**已處理（2026-10-16）**——只改文字（第 5 項是程式的錯誤訊息文字，行為不變），Pilot 的分數不需要重算。
   第 1、3、7 項是評分邏輯或研究協定，**等使用者決定（freeze 之前）**，程式與規則都沒有改。每一項兩個選項：(i) 維持程式現在的行為，把它寫成規則（只改文字，Pilot 數字不變）；
   (ii) 改程式或規則（下面寫明改什麼、哪些 Pilot 數字會變——以 `data/external/results/pilot/` 的 prediction、transcript 與 gold 唯讀重算，**沒有重新評分**）。
-  選 (ii) 的項目是由 Pilot 引起的 013 修改，依 023 第 16 行要和本修訂併在一起：freeze 之前改程式、測試與本節，重新評分 Pilot（主要指標以外的 Pilot 數字照實更新）；
-  freeze 之後 013 不能改（026 解讀 7）。
+  選 (ii) 改的是哪一份 decision 的規則，依項目不同（2026-10-16 審查補正；原本把三項都寫成 013 的修改）：
+  - **第 7 項**改 013 的計分（v1 §2），是由 Pilot 引起的 013 修改，依 023 第 16 行要和本修訂併在一起（013 已宣告 used，宣告不變）。
+  - **第 1 項**改 017 §1 的鍵 `(id, t0, t1)`（`eval/relevance.py:21-22` 的 `key`），**第 3 項**改 022 §2 第 3 項的分鐘窗（`eval/failures.py:25-27`、`:34`）。
+    017 與 022 各自「可在 Pilot 上修訂一次」（017 開頭、022 開頭）。在看過 Pilot 結果（2026-10-16 的 gold 與失敗分類）之後改它們，依 A9 確認前提時用的同一個標準
+    （decision 023「追加（2026-10-16）」第 1 項：看過 Pilot 結果之後改了該 decision 的規則 = 用掉額度）就是 **017 / 022 在 Pilot 上的那一次修訂**：
+    freeze 的宣告要改成 `"017": {"status": "used", "decision": <寫下這次修訂的 decision 檔>}`（第 3 項則是 `"022": …`），
+    使用者 A9 的 waived（原話「前提是確認沒有使用任何 Pilot 修訂額度」）對該項就不再成立。第 3 項若使用者認為 (ii) 只是讓程式符合 022 的原文、不算修訂，
+    也要使用者明確決定；沒有決定時照上面的標準算 used。
+  - **只有第 1、3 項都選 (i)**，A9 的五項 waived（NEXT「下一步」6 與 023 追加的 JSON）才維持不變。
+  - 不論哪一項選 (ii)：freeze 之前改程式、測試與本節（以及 017 / 022 的修訂紀錄），重新評分 Pilot（主要指標以外的 Pilot 數字照實更新）；
+    freeze 之後 013、017、022 都不能改（026 解讀 7）。
 
 1. **非 `m-` 引用的時間範圍**（評分邏輯：evidence 的鍵；**等使用者決定**）：v1 §1 只寫 `m-` 可加 `t0` / `t1`；schema 允許每一種 id 帶範圍（`schemas/prediction.schema.json:117-138`），
    Pilot 上確實出現（F12 第 5 項）。程式：`Snapshot.resolve` 只對 `m-` 檢查範圍，其他種類的範圍不影響 existence（`collect/snapshot.py:93-96`）；弱標籤的時間對 `s-` / `l-` / `p-`
    不看範圍（`eval/relevance.py:58-63`）；但弱標籤與 gold 的去重鍵 `(id, t0, t1)` 包含範圍（`eval/relevance.py:21-22`），所以同一個非 `m-` id 帶不同範圍是不同的項目、各自進分母、各自盲標。
-   - (i) 維持：把上面的行為寫成規則（非 `m-` 的範圍不影響 existence 與時間，但是鍵的一部分）。Pilot 數字都不變。
+   這個鍵本身是 017 的規則，不是只寫在程式裡：017 §1「以 `(id, t0, t1)` 去重」（不分 id 的種類），017「補註（2026-10-16）」的 gold precision 算法同樣以 `(id, t0, t1)` 去重；
+   使用者 2026-10-16 較早的決定 2（原話「重複證據維持原規則，不修改 91 筆工作表的標註單位」）也已確認標註單位是 `(id, t0, t1)`，鍵不同就是不同的項目、
+   各自判定（017「補註（2026-10-16）」第 2 點；INC-003、INC-004 的重複項目就是照這樣分開標註）。真正沒寫到的只有 013 v1 §1（只說 `m-` 可帶範圍）與 F1、F4。
+   所以依 F13 開頭的嚴格分類，第 1 項的 (i) 其實接近純文件；但它涉及 evidence 的鍵，寫定時列為評分邏輯，仍請使用者確認（2026-10-16 審查補正）。
+   - (i) 維持：就是 017 §1 與使用者決定 2 已決定的現狀；只在 F1、F4 補寫「每一種 id 都可帶 `t0` / `t1`；非 `m-` 的範圍不影響 existence 與時間，但是 017 的鍵的一部分」。
+     Pilot 數字都不變，A9 的 `"017": waived` 不變。
    - (ii) 改：非 `m-` 引用的鍵只用 id（範圍忽略；`m-` 不變），弱標籤、gold 的判定、`gold_score` 與 `gold-todo` 的抽樣都用這個鍵（`eval/relevance.py` 的 `key`）。
+     這會推翻使用者決定 2，而且是 017 在 Pilot 上的那一次修訂（`"017"` 要改宣告為 used，見 F13 開頭）。
      Pilot 上：每個方法自己的引用都沒有同一個非 `m-` id 帶不同範圍，所以 existence 與弱標籤（含 n）不變，`gold-todo` 的樣本也不變；
      gold 的 115 筆判定中有 4 個 id 各以兩個鍵判定、兩次都是 relevant（INC-003 `l-183383e77b3fcbbb`、`s-f104de301de60d25`；INC-004 `l-eb65d558d1e75819`、
      `s-51f116ed17bcc2ec`，後者一次在 2026-10-10），合併後是 111 個鍵、71 個 relevant，沒有互相衝突的判定（gold 是只附加的檔案，合併的寫法另外要決定）；
@@ -349,8 +365,9 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
    都不計入 n，cost 總和遇到缺值寫 `-`）；v1 §1 是保留的原文，以 F1 為準。usage 只報告、不計分（F10），沒有任何結果改變。
 3. **022 的「fault 期間的分鐘」**（研究協定：失敗分類；**等使用者決定**）：022 §2 第 1 項的窗是 `[fault_start, fault_end + 60 s]`，第 3 項寫「涵蓋至少一個 fault 期間的分鐘」；
    程式第 3 項用同一個含 60 s 的窗算分鐘範圍（`eval/failures.py:25-27`、`:34`）。
-   - (i) 維持：把「fault 期間」在 022 §2 的三種證據都定為第 1 項的窗 `[fault_start, fault_end + 60 s]`（寫進 022 的對應與 F9）。Pilot 數字都不變。
+   - (i) 維持：把「fault 期間」在 022 §2 的三種證據都定為第 1 項的窗 `[fault_start, fault_end + 60 s]`（寫進 022 的對應與 F9）。Pilot 數字都不變，A9 的 `"022": waived` 不變。
    - (ii) 改：第 3 項的分鐘範圍只算 `[fault_start, fault_end]`（`eval/failures.py:27` 的 `last_minute` 用不含 60 s 的 end；span / log / point 的窗不變）。
+     這是在看過 Pilot 的失敗分類之後改 022 的分類程式，照 F13 開頭的標準是 022 在 Pilot 上的那一次修訂（`"022"` 要改宣告為 used；若使用者認為不算修訂，要明確決定）。
      Pilot 上**沒有任何失敗的類別改變**：dump-all（INC-006、007、010）與 retrieval（INC-006、010）的 seen_misread 都來自 exposure 的 `stats:*`；Agent 的 3 次 seen_misread
      （INC-004、009、010）在不含 60 s 的分鐘範圍下仍然成立；stat-anomaly 沒有 exposure（rule_limit）。失敗表、Gate 條件 2、條件 3（3 / 6）都不變。
      只會在 held-out 上有差別（某個 Agent 失敗唯一的 origin 證據是 fault 結束後那一分鐘的每分鐘統計時，會從 seen_misread 變成 not_seen）。
@@ -374,7 +391,11 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
      Pilot 上只有 Agent 的 INC-008 是這種 prediction（stat-anomaly、dump-all、retrieval 的計分 prediction 都有 origin 候選；修訂前封存的 dump-all INC-009、010 是 `_abstain`，
      已經都是 0，也不重新評分）：它的 `symptom_exact` 1 → 0、`symptom_jaccard` 1.0 → 0。Agent 的 symptom_exact 0.60 [0.30, 0.90] → 0.50 [0.20, 0.80]（README 的 Pilot 表要改）、
      symptom_jaccard 0.70 [0.45, 0.95] → 0.60 [0.35, 0.85]；依難度（hard）與各 fault（adHighCpu）的表中 INC-008 所在的格；compare agent − stat-anomaly 的 symptom_exact
-     （只描述）0.10 [−0.30, 0.50] → 0.00 [−0.50, 0.50]。origin、fault、affected 的指標、失敗類別、evidence 與 Gate 的三個條件都不變。
+     （只描述）0.10 [−0.30, 0.50] → 0.00 [−0.50, 0.50]；compare 的 LOFO symptom_exact 列（只描述）：拿掉 adHighCpu 的那一列不變（INC-008 不在裡面），
+     其他 9 列的平均差各少 0.111（例如拿掉 adManualGc：0.000 → −0.111），下界變成 −0.333（拿掉 cartFailure、emailMemoryLeak）或 −0.556（其他 7 列；原本 −0.222 到 −0.444）；
+     Pilot `gate.md` 的描述段：「other main metrics」的 symptom_exact 0.100 [−0.300, 0.500] → 0.000 [−0.500, 0.500]，Agent 的各 fault 表 adHighCpu 的 symptom_exact
+     1.000 → 0.000、equal weight 與 incidents 列 0.600 → 0.500（`gate.md` 的 LOFO 只有 origin_top1，不變）。以上用 `eval/compare.py` 的 `paired`、`lofo` 對記憶體裡的分數唯讀重算
+     （現在的值與 `compare-agent-vs-stat-anomaly.md` 逐列相同），沒有寫任何檔。origin、fault、affected 的指標、失敗類別、evidence 與 Gate 的三個條件都不變。
 
 ### 為什麼
 
@@ -392,7 +413,7 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
 
 ### 對實驗的影響
 
-- 寫定時程式、schema、測試都沒有改。2026-10-16（F13 第 5 項）只改了 `eval/runner.py:1349` 的錯誤訊息文字並新增一個測試；評分程式、schema 不變，Pilot 的分數、compare、gate 都不需要重算。F13 第 1、3、7 項若使用者選 (ii)，就要在 freeze 之前改程式並重新評分 Pilot（F13 列出會變的數字）。
+- 寫定時程式、schema、測試都沒有改。2026-10-16（F13 第 5 項）只改了 `eval/runner.py:1349` 的錯誤訊息文字並新增一個測試；評分程式、schema 不變，Pilot 的分數、compare、gate 都不需要重算。F13 第 1、3、7 項若使用者選 (ii)，就要在 freeze 之前改程式並重新評分 Pilot（F13 列出會變的數字）；第 1、3 項的 (ii) 另外是 017 / 022 在 Pilot 上的那一次修訂，freeze 宣告的 017 / 022 要改成 used（F13 開頭）。
 - freeze 的 Pilot 修訂宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`（NEXT「下一步」6）。
 - 正式版在 frozen commit 裡；freeze 之後本文件不能改（026 解讀 7），之後的紀錄只能寫進 NEXT 或新的 decision。
 - held-out 的評分、compare、gate 與 100 的報告都照本節（也就是照上面列出的出處與程式）。

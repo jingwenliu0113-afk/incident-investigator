@@ -153,4 +153,5 @@ existence、弱標籤（temporal / service / origin / weak）、gold precision�
     （原本列出數字，依這個回答改成「不報」）、NEXT「目前位置」的表。stat-anomaly、retrieval、Agent 的樣本全部判定，照常報（數字不變）。
   - **不改的**：評分程式、`scores.json` 與 `table.md`（`eval score` 照 §3、§4 對每個有已判定引用的 incident 算出 gold precision，dump-all 的欄位仍在檔案裡；
     報告依本文不引用它）、4 筆略的處理（不寫入、不進分母，之後的 `gold-todo` 會再列出；使用者沒有選 (c) 再判定）、pool、弱標籤、抽樣、判準、標註者與 held-out 的規則
-    （030 §4 第 8 項不變）。這是照 017 現行規則的報告方式，**不是 017 在 Pilot 上的那一次修訂**（freeze 宣告 `"017": waived`，見 decision 023「追加（2026-10-16）」）。
+    （030 §4 第 8 項不變）。這是照 017 現行規則的報告方式，**不是 017 在 Pilot 上的那一次修訂**（freeze 宣告 `"017": waived`，見 decision 023「追加（2026-10-16）」；
+    013 正式版 F13 第 1 項若選 (ii)——改 §1 的鍵——那就是 017 的那一次修訂，宣告改成 used）。

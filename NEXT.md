@@ -29,6 +29,8 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
     報告依 017「對實驗的影響」不引用。held-out 照 030 §4 第 8 項，同一條規則。
   - **A9——已處理（前提已確認）**：015、017、019、020、022 的 decision 檔 `git log --follow -p`、實作程式的歷史與所有提到 Pilot 修訂的地方都看過：沒有任何一項在看過 Pilot
     結果之後改了規則（逐項證據在 decision 023「追加（2026-10-16）」第 1 項；摘要在「下一步」6）。五項都宣告 `waived`；宣告檔的內容在「下一步」6。
+    **連動**（2026-10-16 審查補正）：013 F13 第 1、3 項的 (ii) 改的是 017、022 的規則，選了就是它們在 Pilot 上的那一次修訂（宣告改成 used），所以 017、022 的 waived
+    只在第 1、3 項都選 (i) 時成立（A11）。
   - **A10——已處理**：不吸收 6 則 notes，`heldout-plan` 的 amendments 是 `{"amend": [], "remove": []}`（023「追加（2026-10-16）」第 2 項）。
   - **A4——已處理（維持現狀）**：不實作 freeze 之後的修正路徑；freeze 之後發現影響正確性的 bug 時，held-out 評測先停止並保留紀錄，不自行修改程式或研究規則，由使用者決定
     （023「追加（2026-10-16）」第 3 項）。
@@ -40,6 +42,11 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
     README「Held-out」段與「下一步」9，每次 run 之前看 Mac 的負載（使用者的說明）；label review 由使用者確認，不自動代替。
   - 本次的程式改動只有 F13 第 5 項的訊息文字與一個測試；Gate、模型、評測預算、指標、門檻、切分、評分、引用驗證、已封存的 Pilot 結果都沒有改，Pilot 不需要重新評分。
     測試：1116 passed（`-m "not network and not docker_daemon"`；新增 1 個）。F13 第 1、3、7 項 (ii) 的影響是唯讀重算（只讀 `data/external`，沒有執行任何評分、收集或模型）。
+  - **審查（2026-10-16）的補正（只改文字）**：(1) F13 第 1、3 項的 (ii) 原本寫成「013 修改」，實際改的是 017 的鍵與 022 的分類，選了就是 017 / 022 的 Pilot 修訂、
+    A9 的 waived 對該項不再成立——013 F13 開頭、A11、「下一步」6、023「追加（2026-10-16）」第 1 項的「連動」、017 第二則補註都已寫明；(2) F13 第 1 項補上 017 §1 與
+    使用者較早的決定 2 已定下 `(id, t0, t1)`，(ii) 會推翻決定 2；(3) 023 追加第 1 項兩句事實更正（`d7576d2` 的讀法：看過的是合成範例探測的 LLM 輸出；`eval/runner.py` 與
+    `eval/__main__.py` 在第一個 Pilot 結果之後沒有涉及 gold 計算或抽樣的改動）；(4) F13 第 7 項 (ii) 補上 compare 的 LOFO symptom_exact 列與 Pilot `gate.md` 描述段的變化
+    （唯讀重算，Gate 三個條件不變）。程式、規則與 Pilot 結果都沒有改。
 - **使用者決定（2026-10-16，較早）**，原話：
   > 我的決定：
   >
@@ -217,6 +224,8 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
    ```
 
    2026-10-16 以 `collect.freeze.pilot_revision_problems`（policy v1、目前的 decision 檔清單）唯讀檢查這個內容，沒有問題。
+   **這份 JSON 假設 013 F13 第 1、3 項都選 (i)**（2026-10-16 審查補正）：第 1 項選 (ii) 時 `"017"`、第 3 項選 (ii) 時 `"022"` 要改成
+   `{"status": "used", "decision": <寫下修訂的 decision 檔>}`（那是 017 / 022 在 Pilot 上的那一次修訂；A11、023「追加（2026-10-16）」第 1 項的「連動」）。
 7. **version-check（freeze 之前再一次）**：`uv run python -m eval version-check --set pilot` → exit 0 才繼續。`collect heldout-freeze` 不呼叫它
    （freeze 的 `pilot_llm_problems` 分不出 021 修訂前後的執行，decision 021「審查（2026-10-11）」），所以這是流程上的檢查。
 8. **heldout-plan——amendments 使用者已決定（2026-10-16，A10）**：不吸收 label review 的 6 則 notes（paymentUnreachable、cartFailure、adHighCpu、adManualGc、emailMemoryLeak、
@@ -226,7 +235,7 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
    移除 fault 只依 023 §1 的證據（觸發、無效率、詞彙命中），由 `heldout-plan` 檢查，永不依任何方法的分數。
 9. **heldout-freeze → held-out 收集 → label review → held-out 方法執行 → Gate**：
    - **freeze 之前（全部成立才 freeze）**：013 F13 第 1、3、7 項**已由使用者回答**（A11；選 (ii) 的項目要先改程式、測試、013 F13，重新評分 Pilot 並同步 README、NEXT，
-     沒有回答就不 freeze）；README 已定稿（第 4 步，A12 已套用）；A9、A10 已回覆（第 6、8 步）；A4 維持現狀；全部測試通過；version-check exit 0（第 7 步）；
+     第 1、3 項選 (ii) 時另寫 017 / 022 的修訂紀錄、第 6 步的宣告改成 used；沒有回答就不 freeze）；README 已定稿（第 4 步，A12 已套用）；A9、A10 已回覆（第 6、8 步）；A4 維持現狀；全部測試通過；version-check exit 0（第 7 步）；
      plan.json 已 commit；checkout 乾淨、已 push。
      `uv run python -m collect heldout-freeze --pilot-revisions <revisions.json>`（第 6 步的內容）→ 只把 `docs/heldout/slots.json` 與 `freeze.json` commit 成一個 commit → push。
      程式另檢查：目前 env lock 有通過的 soak（soak #6）、三個 LLM 方法的 Pilot `run_config.json` 正好是 `llm_methods.json`（含 host `gpu-server`）且分數是從那次執行算的（026 解讀 31、32）。
@@ -252,27 +261,39 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
 
 - **A11（剩下的部分）013 F13 第 1、3、7 項——freeze 的前置條件，使用者回覆之前不 freeze（「下一步」9）**。使用者 2026-10-16 說「涉及評分邏輯或研究協定的問題先詢問我」，
   這三項是評分邏輯或研究協定，程式與規則都沒有改。每一項請選 (i) 或 (ii)。(i) = 維持程式現在的行為、把它寫成規則（只改文字，Pilot 數字都不變）；
-  (ii) = 改程式或規則（freeze 之前改程式、測試與 013 F13，重新評分 Pilot，下面的 Pilot 數字會變；是由 Pilot 引起的 013 修改，依 023 第 16 行併進 013 正式版）。
+  (ii) = 改程式或規則（freeze 之前改程式、測試與 013 F13，重新評分 Pilot，下面的 Pilot 數字會變）。**(ii) 改的是哪一份 decision**（2026-10-16 審查補正）：
+  第 7 項改 013 的計分，是由 Pilot 引起的 013 修改，依 023 第 16 行併進 013 正式版（013 已是 used）；**第 1 項改 017 §1 的鍵、第 3 項改 022 §2 的分類程式**——
+  看過 Pilot 結果之後改它們，照 A9 確認前提時用的同一個標準就是 **017 / 022 在 Pilot 上的那一次修訂**：「下一步」6 的宣告要把該項改成
+  `{"status": "used", "decision": <寫下修訂的 decision 檔>}`，你對 A9 的 waived（「前提是確認沒有使用任何 Pilot 修訂額度」）對該項就不再成立。
+  **只有第 1、3 項都選 (i)，A9 的五項 waived 才維持不變。**第 3 項若你認為 (ii) 只是讓程式符合 022 原文、不算修訂，也請明確說明。
   影響以 `data/external/results/pilot/` 的 prediction、transcript 與 gold 唯讀重算（沒有重新評分）：
   1. **非 `m-` 引用（`s-` / `l-` / `p-` / `t-`）帶的 `t0` / `t1`**：現在 existence 與弱標籤的時間不看這個範圍，但它是弱標籤與 gold 的鍵 `(id, t0, t1)` 的一部分
      （同一筆紀錄的不同範圍是不同的項目、各自盲標）。
-     - (i) 維持。
-     - (ii) 非 `m-` 的鍵只用 id（`m-` 不變）。Pilot 上：existence、弱標籤（含 n）與 `gold-todo` 的樣本都不變；gold 有 4 個 id 各以兩個鍵判定、兩次都是 relevant
-       （INC-003 2 個、INC-004 2 個），合併後 115 → 111 個鍵、relevant 75 → 71，沒有衝突（合併的寫法要另外決定，gold 是只附加的檔案）；2026-10-15 的工作表會是 87 筆、不是 91 筆；
+     這個鍵是 017 §1 的規則（「以 `(id, t0, t1)` 去重」，不分 id 種類），而且你 2026-10-16 較早的決定 2（「重複證據維持原規則，不修改 91 筆工作表的標註單位」）
+     已確認標註單位是 `(id, t0, t1)`（017「補註（2026-10-16）」第 2 點；INC-003、INC-004 的重複項目就是照這樣分開標註）；程式與 017 一致，沒寫到的只有 013 v1 §1 / F1、F4。
+     依嚴格分類 (i) 其實接近純文件，但涉及 evidence 的鍵，仍請你確認。
+     - (i) 維持：就是 017 §1 與決定 2 的現狀；只在 013 F1、F4 補寫「每一種 id 都可帶 `t0` / `t1`，非 `m-` 的範圍不影響 existence 與時間，但是 017 的鍵的一部分」。
+       Pilot 數字不變，`"017": waived` 不變。
+     - (ii) 非 `m-` 的鍵只用 id（`m-` 不變）。**會推翻決定 2，而且是 017 的 Pilot 修訂（`"017"` 改成 used）**。
+       Pilot 上：existence、弱標籤（含 n）與 `gold-todo` 的樣本都不變；gold 有 4 個 id 各以兩個鍵判定、兩次都是 relevant（INC-003 2 個、INC-004 2 個），合併後 115 → 111 個鍵、relevant 75 → 71，沒有衝突（合併的寫法要另外決定，gold 是只附加的檔案）；2026-10-15 的工作表會是 87 筆、不是 91 筆；
        retrieval 的 gold coverage 0.667 [0.345, 0.892] → 0.680 [0.384, 0.903]（INC-005 的 5 / 22 → 7 / 22）；所有 gold precision、其他 coverage、主要指標、compare、gate 都不變。
   3. **022 第 3 項「涵蓋至少一個 fault 期間的分鐘」**：程式用與第 1 項相同的 `[fault_start, fault_end + 60 s]` 算分鐘範圍。
-     - (i) 維持（「fault 期間」在 022 §2 都是含 60 s 的窗）。
-     - (ii) 第 3 項只算 `[fault_start, fault_end]` 的分鐘（span / log / point 的窗不變）。Pilot 上**沒有任何失敗的類別改變**（dump-all、retrieval 的 seen_misread 來自 `stats:*`；
-       Agent 的 3 次 seen_misread 不含 60 s 也成立）；失敗表與 Gate 條件 2、3 都不變；只可能影響 held-out。
+     - (i) 維持（「fault 期間」在 022 §2 都是含 60 s 的窗）。`"022": waived` 不變。
+     - (ii) 第 3 項只算 `[fault_start, fault_end]` 的分鐘（span / log / point 的窗不變）。**是 022 的 Pilot 修訂（`"022"` 改成 used；除非你明確決定不算）**。
+       Pilot 上**沒有任何失敗的類別改變**（dump-all、retrieval 的 seen_misread 來自 `stats:*`；Agent 的 3 次 seen_misread 不含 60 s 也成立）；失敗表與 Gate 條件 2、3 都不變；只可能影響 held-out。
   7. **放棄作答「一律算錯」**：程式沒有放棄作答的分支、照欄位計分；方法自己提交、origin 空但其他欄位有值的 prediction，其他欄位照常得分（補位的 `_abstain` 每一層都是 0）。
      - (i) 維持（「一律算錯」指 origin：各指標 0、`no_answer`、留在分母；其他欄位照逐欄計分）。
      - (ii) origin 空的 prediction 11 個指標都算 0。Pilot 上只有 Agent INC-008：symptom_exact 1 → 0、symptom_jaccard 1.0 → 0；Agent 的 symptom_exact 0.60 [0.30, 0.90] → 0.50 [0.20, 0.80]
        （README 的 Pilot 表要改）、symptom_jaccard 0.70 → 0.60；compare agent − stat-anomaly 的 symptom_exact（只描述）0.10 [−0.30, 0.50] → 0.00 [−0.50, 0.50]；
-       origin、fault、affected、失敗類別、evidence 與 Gate 三個條件都不變。
+       compare 的 LOFO symptom_exact 列：拿掉 adHighCpu 的不變，其他 9 列平均差各少 0.111、下界變成 −0.333（cartFailure、emailMemoryLeak）或 −0.556（其他 7 列）；
+       Pilot `gate.md` 的描述段 symptom_exact 0.100 [−0.300, 0.500] → 0.000 [−0.500, 0.500]、Agent 各 fault 表 adHighCpu 1.000 → 0.000、equal weight / incidents 0.600 → 0.500
+       （以 `eval/compare.py` 的 `paired`、`lofo` 對記憶體裡的分數唯讀重算，沒有寫檔）；origin、fault、affected、失敗類別、evidence 與 Gate 三個條件都不變。
+       013 已是 used，A9 的宣告不受影響。
 
 已處理（2026-10-16，使用者「Freeze 前決策確認」，原話見「目前位置」）：
 - 原 A12 Pilot README 的 dump-all gold precision：**選 (b)**——不報，只報 coverage 0.840，保留 4 筆略與理由（README、017「補註（2026-10-16，第二則）」、本文件；「下一步」4）。
 - 原 A9 Pilot 修訂宣告的五項：**015、017、019、020、022 都 waived**；使用者的前提（沒有使用任何 Pilot 修訂額度）已唯讀確認（「下一步」6、decision 023「追加（2026-10-16）」第 1 項）。
+  017、022 的 waived 另以上面 A11 第 1、3 項選 (i) 為前提（選 (ii) 就是它們的 Pilot 修訂，宣告改成 used）。
 - 原 A10 heldout-plan 是否吸收 label review 的 notes：**不吸收**，amendments 是空的（「下一步」8、023「追加（2026-10-16）」第 2 項）。
 - 原 A4 freeze 之後的修正路徑：**維持現狀**——freeze 之後發現影響正確性的 bug，先停止並保留紀錄，不自行修改研究規則（023「追加（2026-10-16）」第 3 項；2026-10-10 的「沒有偏好」同樣不實作）。
 - 原 A11 的處理方式：純文件的直接修正（F13 第 2、4、5、6 項已處理），評分邏輯或研究協定的先問（第 1、3、7 項 → 上面的 A11）。

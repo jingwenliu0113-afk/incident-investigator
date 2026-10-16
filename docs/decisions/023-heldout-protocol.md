@@ -7,8 +7,8 @@
   freeze 之後的修正路徑使用者選「沒有偏好」（不實作、維持現況，freeze 之前仍可決定）。同樣在任何 held-out 資料與 freeze 之前；
   見文末「使用者決定」的「追加（2026-10-10）」。同日另確認兩項（gold 標註量照 017 現行規定；Gate 解讀 4 的 Pilot 讀法），
   見「追加（2026-10-10，第二次）」。同日使用者批准 LLM 設定（本機模型，decision 029），freeze 多兩項檢查，見「追加（2026-10-10，第三次）」。
-  2026-10-16 使用者回答 Pilot 修訂宣告（015、017、019、020、022 都 waived，前提已確認）、heldout-plan 不吸收 label review 的 notes、freeze 之後的 bug 維持現況，
-  見「追加（2026-10-16）」。
+  2026-10-16 使用者回答 Pilot 修訂宣告（015、017、019、020、022 都 waived，前提已確認；017、022 另以 013 F13 第 1、3 項選 (i) 為前提）、
+  heldout-plan 不吸收 label review 的 notes、freeze 之後的 bug 維持現況，見「追加（2026-10-16）」。
   - 標「Pilot 後定稿」的項目，要等 Pilot 的收集、review、leakage audit 與 LLM 方法試跑都完成，並在第一個 held-out run group 之前定稿一次。
   - 定稿之後，每次修改都另寫 decision log。
   - 看到 held-out 方法結果之後，永不修改。
@@ -315,19 +315,25 @@
      - **017**：v1（`1daa1ef`）之後只有 2026-10-16 的兩則補註（`54232fa`、`12d0c9a`、`4fc290d`）與這次對 A12 的回答，每一則都寫明「不是 017 在 Pilot 上的那一次修訂」：
        render v2 的事實、使用者決定 1、2（照 §3 呈現、照 §1 的鍵）、gold precision 算法的字面說明、這一輪標註的紀錄、照「對實驗的影響」的字面不報 dump-all 的
        gold precision；pool、弱標籤、抽樣、判準、標註者、分數與報告的規則都不變。`eval/relevance.py`、`eval/evidence.py`、`schemas/evidence_gold.schema.json`
-       在 Pilot 之後沒有改；`eval/runner.py` 與 `eval/__main__.py` 在第一個 Pilot 結果之後涉及 gold 的改動只有 `77b6a25` 在 CLI 的指令清單加上 `local-probe`。
+       在 Pilot 之後沒有改；`eval/runner.py` 與 `eval/__main__.py` 在第一個 Pilot 結果之後**沒有任何涉及 gold 計算或抽樣的改動**（之後的改動是 029 的 adapter 與設定、
+       電力與推論主機的紀錄、Pilot LLM 執行的 run_config 檢查、`local-probe`、021 修訂的方法版本號與版本檢查、`version-check` 指令，以及 013 F13 第 5 項的錯誤訊息文字）。
+       （2026-10-16 審查更正：原本寫成「涉及 gold 的改動只有 `77b6a25` 在 CLI 的指令清單加上 `local-probe`」，但加 `local-probe` 與 gold 無關。）
      - **019**：v1（`3d59882`）之後是 `5ab5363`（2026-10-08T17:04Z，decision 011 的 renderer v2 改了「render v1」的字樣，在 Pilot 之前）與 `54232fa`（2026-10-16 補註：
        render 版本，規則不變）。`agent/tools.py` 最後一次改動是 `0fd72d7`（2026-10-08T17:05Z）。021 的修訂與 022 的補註都寫明不改 019 的工具。
      - **020**：v1（`8b67db4`）之後：`0fd72d7`（2026-10-08T17:05Z，時鐘稽核，Pilot 之前）；`77b6a25`、`b18c8a0`（2026-10-10T04:24Z、04:59Z，decision 029 adapter 的補註：
        介面不變；adapter 讀不成 JSON 物件的 tool call 參數照 §3 要求更正、不當成空的答案——只會拒絕更多，來自合併前的程式審查）；`d7576d2`（2026-10-10T08:24Z，「修正」：
        更正訊息指出哪一個 evidence 項目錯並附上預期的形狀，答案格式與更正次數不變；發現於 029 的合成範例探測，本文寫明不是 Pilot 上的那一次）；`54232fa`（2026-10-16 補註：
        render 版本）。這些改動都在任何 LLM 方法於 Pilot 執行之前。當時已經有 stat-anomaly 的 Pilot 結果，但改動只涉及 LLM 的 harness，來源是合成範例與程式審查，
-       不是 Pilot 的結果（`d7576d2` 寫的「沒有看過任何方法結果」應讀成沒有看過任何 LLM 方法的結果）。之後 `agent/harness.py`、`agent/prompt.py` 沒有再改；
-       021 的修訂寫明不改 020 的任務說明；029 修訂 1（2026-10-11，推論主機）改的是 adapter 的 host，屬於 029，不是 020 的規則。
+       不是 Pilot 的結果（`d7576d2` 寫的「沒有看過任何方法結果」應讀成沒有看過任何 LLM 方法在 Pilot 或 held-out 上的結果：這個修正正是看了 qwen3.5 9B 在
+       029 合成範例探測上的輸出才發現的，而當時已經存在的 stat-anomaly Pilot 結果與 harness 無關；2026-10-16 審查更正，原本寫成「沒有看過任何 LLM 方法的結果」）。
+       之後 `agent/harness.py`、`agent/prompt.py` 沒有再改；021 的修訂寫明不改 020 的任務說明；029 修訂 1（2026-10-11，推論主機）改的是 adapter 的 host，屬於 029，不是 020 的規則。
      - **022**：v1（`e74b6ba`）之後是 `09cc96f`（2026-10-11 補註：(b)、(c) 保留為失敗分析的發現，寫明「022 在 Pilot 上的那一次修訂沒有使用」）與 `54232fa`（2026-10-16 更正 (b)
        的事實敘述）。`eval/failures.py` 最後一次改動是時鐘稽核（2026-10-08T17:03Z，Pilot 之前）。
 
      結論：五項都**沒有**用掉 Pilot 修訂額度，使用者的前提成立，五項都宣告 `waived`。
+     **連動（2026-10-16 審查補正）**：013 正式版 F13 第 1、3 項（等使用者決定）的選項 (ii) 改的是 017 §1 的鍵與 022 §2 的分類程式；在 freeze 之前、看過 Pilot 結果之後
+     這樣改，照上面同一個標準就是 017 / 022 在 Pilot 上的那一次修訂，宣告要改成 `used`（指名寫下修訂的 decision 檔），使用者對該項的 waived 前提不再成立。
+     所以下面的宣告**只在第 1、3 項都選 (i) 時成立**；第 7 項改的是 013（已是 used），不影響這五項。
    - **宣告**（`collect heldout-freeze --pilot-revisions <file>` 的檔案內容；檔案由主 session 寫在 repo 之外）：
 
      ```json
