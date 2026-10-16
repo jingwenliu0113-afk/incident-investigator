@@ -1,6 +1,6 @@
 # 030 — Held-out 最終結果的發布方式：README 在 freeze 封存，結果寫在固定的新文件
 
-- 狀態：Accepted（2026-10-16，使用者決定 4 選 a）；在 freeze、任何 held-out 資料與任何 held-out 方法結果之前寫定。
+- 狀態：Accepted（2026-10-16，使用者決定 4 選 a；同日確認解讀並要求寫明唯一允許寫入範圍，見 §5）；在 freeze、任何 held-out 資料與任何 held-out 方法結果之前寫定。
   只決定結果寫在哪裡、寫什麼；**不改任何指標、門檻、Gate、切分、預算、評分、引用驗證或 freeze 的程式**（`collect/freeze.py` 不變）。
 - 影響範圍：`README.md`（現在加一個預留連結）、held-out 評測之後的結果報告、`docs/decisions/` 的編號（100 保留）。
 
@@ -65,6 +65,32 @@
 12. **不列任何 held-out incident id 或 run group id**（023 解讀 23 與「實作說明：Gate 計算」的「輸出」；理由見 026 解讀 23）：只用 slot 與 fault。也寫出 bootstrap 能說明與不能說明的範圍（023 §7「其他」）。
 13. **下一步**：依 SPEC「Gate」——判定 `pass` 才可能進 Advanced（使用者 2026-10-16：不自行進入 Advanced，要使用者確認）；不通過時依 SPEC「收尾或改題」。
     100 只記錄判定與數字；下一步的決定寫在同一個 commit 的 decision 紀錄裡，由使用者決定。
+
+### 5. 唯一允許寫入範圍（使用者 2026-10-16 確認；在 freeze 之前寫定）
+
+使用者原話：「同意你的解讀。正式 Held-out 評測完成後，新增固定名稱的結果文件及一份 Decision Log，README 保持封存不變。
+請事先明確記錄結果文件的唯一允許寫入範圍，不得因此修改已凍結的程式、資料、評測門檻或 Gate。」
+
+- **發布 commit 只能包含這三項，沒有別的**：
+  1. 新增（`A`）`docs/decisions/100-heldout-final-results.md`；
+  2. 新增（`A`）一份 decision 紀錄，編號是當時 031–099 中下一個空號；
+  3. 修改（`M`）`NEXT.md`。
+- **一律不得因發布而變動**：
+  - README、SPEC、`MACHINE_POLICY.md`、`docs/EXPERIMENT_RULES.md`、任何既有的 decision 檔；
+  - 程式、測試、schema、`env/` 與 env lock、normalize policy、`eval/llm_methods.json`；
+  - `docs/heldout/` 的 plan / slots / freeze；
+  - `data/external/` 裡的任何資料：snapshot、label、review、gold、prediction、transcript、嘗試紀錄、`scores.json` / `table.md` / `compare-*` / `gate.*`。
+    這些只能由凍結的工具自己寫出（held-out 的 `eval run` / `score` / `compare` / `gate` 與 held-out 的 `gold-add`），**不得手改**。
+  - 指標、門檻、Gate 條件、切分、預算、prompt 與 incident 清單（023 §6「永不因 held-out 結果修改」）。
+- **100 的內容只能轉寫**：§4 列出的數字，只從凍結工具寫出的檔案轉寫，不手算、不改寫、不新增指標或分析。
+  方法 bug 的修正版只依 023 §6 另列為探索性結果，並標明不是正式結果。
+- **時機**：所有 held-out 步驟（收集、`heldout-list`、四個方法的 `eval run`、held-out gold、`eval score`、`compare`、`gate`）都完成之後，才做發布 commit。
+- **確認**（唯讀）：發布 commit 前後各執行一次，兩次結果都要符合下面三點，否則不發布，回報使用者。
+  - `git diff --name-status <freeze.json 的 frozen_from_commit>..HEAD` 只能出現上面三項，以及 freeze 時就有的 `A docs/heldout/slots.json`、`A docs/heldout/freeze.json`；
+  - `uv run python -m collect status --set heldout` 的 `freeze_problems` 必須是 `[]`；
+  - `uv run python -m eval version-check --set pilot` 必須 exit 0。
+- 「100 只寫一次」與以上範圍是流程規則：freeze 的程式檢查只會拒絕修改既有檔案，管不到新增檔案的內容。
+  所以範圍由發布前後的確認與 decision 紀錄保證；違反時，那次發布作廢，另寫 decision 說明。
 
 ## 為什麼
 
