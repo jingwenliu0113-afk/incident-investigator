@@ -443,7 +443,7 @@ LLM_FIELDS_ = ("status", "model", "model_version", "temperature")
 
 @pytest.mark.parametrize("breaks, needle", [
     (no_scores, "agent"), (unreviewed, "INC-003"), (unaudited, "INC-004"), (heldout_run, "held-out run groups"),
-    (staging, "staging"), (llm_proposed, "approved"), (llm_no_version, "approved")],
+    (staging, "staging"), (llm_proposed, r"not approved with model, model_version and temperature \(the user approves the model and its settings: decision 029\)"), (llm_no_version, "approved")],
     ids=["no-scores", "unreviewed", "unaudited", "heldout-run", "staging", "llm-proposed", "llm-no-version"])
 def test_both_writers_wait_for_the_whole_pilot_and_the_llm_trial_runs(tmp_path, breaks, needle):
     # 023 line 6: "Pilot 後定稿" waits for Pilot collection, review, leakage audit and the LLM trial runs (NEXT A1)

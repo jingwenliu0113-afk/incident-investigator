@@ -325,8 +325,8 @@ def post_pilot_problems(project_dir: Path, layout, removed: set, *, methods, res
                  "(decision 023 前置條件)" for m in methods if not (Path(results_root) / "pilot" / m / "scores.json").exists()]
     llm = _read(Path(project_dir) / "eval" / "llm_methods.json") or {}
     if llm.get("status") != "approved" or any(llm.get(k) is None for k in ("model", "model_version", "temperature")):
-        problems.append("eval/llm_methods.json is not approved with model, model_version and temperature (NEXT A1: paid "
-                        "LLM methods are deferred)")
+        problems.append("eval/llm_methods.json is not approved with model, model_version and temperature (the user approves "
+                        "the model and its settings: decision 029)")
     return problems
 
 
