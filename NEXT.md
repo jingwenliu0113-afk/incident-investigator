@@ -9,6 +9,7 @@
 - **收集**：主 session 的驅動腳本（不在 repo；`collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`），
   每次 run 前等：heavy lock 空、高效能 + AC、checkout 乾淨、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（使用者 2026-10-16：其他工作可能沒用 lock 在跑；
   只等、不碰）；run 期間每分鐘記錄負載。待人處理的 slot 只回報、不代為確認（ack-failures 由使用者決定）。
+- **目前被擋（需要使用者）**：2026-10-16 13:48Z 第一個 run（H01）的 preflight 拒絕：另一個專案的 container `rtu-clean-db`、`rtu-maintenance-platform-db-1` 正在執行（decision 008 §4），沒有產生任何 run group。不屬於本專案，主 session 不停止、不移除；驅動腳本改為等它們停掉後自動開始。
 - **之後需要使用者**：每個 held-out incident 的 label review（不自動代替）；held-out gold 盲標；LLM 方法執行前，Mac 的 127.0.0.1:11434 不能被占用
   （目前有一個不屬於本專案的 Homebrew Ollama 0.40.3 在聽，tools/with-remote-ollama 會拒絕）。
 
