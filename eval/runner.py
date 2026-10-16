@@ -1346,7 +1346,7 @@ def gate_methods(split: str, method: str, against: str, out_root: Path, *, layou
     for m in [method] + baselines:
         found = _json_with_sha(root / m / "scores.json")
         if found is None:
-            why = (f"`python -m eval run|score --method {m} --set {split}` once the paid LLM methods are approved, NEXT A1"
+            why = (f"`python -m eval run|score --method {m} --set {split}` first: the LLM method's results must exist on the {split} set"
                    if m in LLM_METHODS else
                    f"`python -m eval score --method {m} --set {split}`; every statistical baseline is compared (decision 023 §7)")
             raise LookupError(f"the Gate cannot be evaluated yet: {m} has no scores on the {split} set ({why}); "

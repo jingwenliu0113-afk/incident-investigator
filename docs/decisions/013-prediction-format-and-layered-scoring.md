@@ -4,7 +4,9 @@
   **held-out 資料收集之前**要依 Pilot 的經驗凍結成正式版（最多改一次，寫 decision log）；看到 held-out 結果後永遠不改。
   **正式版（2026-10-16）**：見文末「正式版（2026-10-16，held-out 之前凍結；013 唯一的一次修訂）」，在任何 held-out 資料、`heldout-plan` 與 freeze 之前寫定。
   這是 013 在 Pilot 上**唯一的一次修訂**（decision 023 第 16 行：§7 的 paired 比較與 Gate 判準寫進 013 正式版），沒有其他由 Pilot 引起的 013 修改；
-  只轉述已決定、已實作的規則並標出程式行號，**不新增任何指標、門檻、規則或解讀**，文件與程式的出入只記錄（正式版 F13）。
+  只轉述已決定、已實作的規則並標出程式行號，**不新增任何指標、門檻、規則或解讀**，文件與程式的出入記錄在正式版 F13。
+  F13 的 7 項依使用者 2026-10-16 的決定（NEXT A11：純文件的直接修正，涉及評分邏輯或研究協定的先問）：第 2、4、5、6 項已處理（只改文字，第 5 項是程式的錯誤訊息文字；
+  計分與規則都不變），第 1、3、7 項**等使用者決定（freeze 之前）**。
   freeze 的 Pilot 修訂宣告寫 `"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`
   （`collect/freeze.py:161-162` 強制 013 是 used）。正式版在 frozen commit 裡，freeze 之後本文件不再修改（026 解讀 7）。
   下面 §1–§4 是 Pilot v1 的原文，保留為歷史；其他文件引用的「013 §1–§4」仍指這四段，它們的規則在正式版不變（對應正式版 F1–F4）。
@@ -78,11 +80,12 @@
 - **性質**：這是 013 在 Pilot 上的那一次修訂（023 第 16 行：§7 的 paired 比較與 Gate 判準寫進 013 正式版，用掉 013 唯一的一次修訂）。
   內容只轉述**已決定、已實作**的規則，每一項列出出處與程式行號（以本 commit 的程式為準；freeze 釘住 commit 與所有程式，026 解讀 7）：
   上面的 v1 §1–§4、023 §2–§7 與「使用者決定」及其追加、023「實作說明：Gate 計算」與解讀 1–14、026 解讀 17–20、23、24、30、017（含兩則補註）、
-  022（含補註）、024、030。**沒有新增任何指標、門檻、規則或解讀**；文件與程式的出入列在 F13，只記錄、不選邊、不改程式。
+  022（含補註）、024、030。**沒有新增任何指標、門檻、規則或解讀**；文件與程式的出入列在 F13（寫定時只記錄、不選邊、不改程式；2026-10-16 依使用者決定處理純文件的項目，
+  評分邏輯或研究協定的項目等使用者決定，見 F13）。
 - **與 v1 的關係**：v1 §1–§4 的規則都不變（正式版 F1–F4 是同一份規則加上程式行號）；正式版多出來的只有兩類：
   併入 023 §7 的 paired 比較與 Gate 判準（F7、F8，原本只寫在 023）；把 017、022、024、026、030 已決定、與評分和報告有關的規則在這裡列出出處（F4–F6、F9–F11）。
 - **其他由 Pilot 引起的 013 修改：沒有**。F12 列出 Pilot 上與 013 有關的觀察，都不改 013。若使用者要併入其他修改，那是設計決定（NEXT A11），
-  依 023 第 16 行必須和本修訂併在一起，也就是在 freeze 之前寫進本節。
+  依 023 第 16 行必須和本修訂併在一起，也就是在 freeze 之前寫進本節。F13 第 1、3、7 項若使用者選 (ii)（改程式或規則），就是這種修改。
 
 ### F1. Prediction 格式（v1 §1）
 
@@ -101,7 +104,7 @@
   | `affected_services` | 不重複的服務集合 | :89-95 |
   | `user_symptom.kinds` | `errors` / `latency` / `degraded_feature` / `none` 的不重複集合 | :96-116 |
   | `evidence` | `{id, t0?, t1?}` 的清單；id 符合 `^[slmpt]-[0-9a-f]{16,32}$`；`t0` / `t1` 是整數（資料時鐘的 ns） | :117-138 |
-  | `usage` | `tokens_in`、`tokens_out`、`proxy_tokens`、`tool_calls`、`retrievals`、`latency_s`、`cost_usd`：≥ 0 的數字或 null | :139-193 |
+  | `usage` | `tokens_in`、`tokens_out`、`proxy_tokens`、`tool_calls`、`retrievals`、`latency_s`、`cost_usd`：≥ 0 的數字或 null。每個鍵都可以省略（schema 沒有 `required`）：報告以 `.get` 讀，缺鍵與 null 相同，都不計入 n（`eval/runner.py:741`）；cost 總和遇到任何一個缺值就寫 `-`；held-out 補位的放棄作答 usage 是 `{}`（`eval/runner.py:879`）。usage 只報告、不計分（F10）（F13 第 2 項） | :139-193 |
 
 - 不合格的 prediction：Pilot 的 `eval run` 停止（`eval/runner.py:646-647`）；held-out 的嘗試以 `invalid_prediction` 結束、該 incident 關閉、
   計分時是放棄作答（`eval/runner.py:585-588`；026 解讀 17、19；F5）。LLM 方法在 harness 內先把問題回給模型、最多更正 2 次，之後是 `invalid_submission`
@@ -163,7 +166,9 @@
   gold coverage 各自報 n（該值不是 null 的 incident 數）、平均（每個 incident 等權）與 F3 的同一種 bootstrap 區間（只用這些 incident 的 run group）。
 - **永不合成**：各層不合成一個數字，也不與 F2 的主要指標合併（v1 §4、017 §4）；evidence 不進任何 Gate 條件（F8）。
   各方法的 n 不同，gold precision 不是 paired 的比較（017「補註（2026-10-16）」）。
-- held-out：一個方法的 gold 樣本全部判定之前，100 不報它的 gold precision，寫明原因與 coverage（030 §4 第 8 項、017「對實驗的影響」；與 Pilot README 的差異見 F13 第 6 項）。
+- 報告時機（017「對實驗的影響」）：一個方法的 gold 樣本全部判定之前，不報它的 gold precision，只報 coverage 並寫明原因。held-out 的 100 照這一條（030 §4 第 8 項）；
+  Pilot README 也照這一條（使用者 2026-10-16 回答 NEXT A12 選 (b)：dump-all 的樣本有 4 筆略，只報它的 coverage 0.840；017「補註（2026-10-16，第二則）」；F13 第 6 項）。
+  `scores.json` 照程式仍有每個 incident 與彙總的 gold precision 欄位（評分程式不變），報告不引用樣本沒有全部判定的方法的這個欄位。
 
 ### F5. 放棄作答與嘗試（v1 §2；023 §5、§6；026 解讀 17–19）
 
@@ -186,7 +191,9 @@
   - **重試規則之後仍沒有 prediction → 放棄作答**（026 解讀 19）：評分時補上 `_abstain`（method version `none`、usage `{}`），留在分母、算 `no_answer`，
     列在 scores.json 的 `heldout.unanswered` 並附每次嘗試的結果（`eval/runner.py:877-880`）；不讀未完成的嘗試留下的 transcript（:885）。所有方法（包括 stat-anomaly）都一樣。
   - 還有列表內 incident 的嘗試可能繼續、或該方法的 `run.lock` 存在時，拒絕評分（:816-818、:827-829）。失敗嘗試的次數與用量另外加總報告（:830-834、:841）。
-- Pilot 的執行沒有嘗試紀錄，也沒有放棄作答的補位（F13 第 4 項）。
+- **Pilot 沒有嘗試紀錄，也沒有放棄作答的補位**（F13 第 4 項）：Pilot 的評分要求每個計分的 incident（F6）都有該方法的 prediction 檔；缺檔時讀檔失敗
+  （`eval/runner.py:882`），`eval score` 印 `error: …`、exit 2（`eval/__main__.py:134-136`），不寫 scores.json 與 table.md（之前的檔案不變），也不補 `_abstain`
+  （補位只用於 held-out，026 解讀 19）。Pilot 上方法自己提交的放棄作答照常計分（上面）。
 - 不付費重跑 Agent（023「使用者決定」4）；Gate 只用第一次執行的結果（023 §6）。
 
 ### F6. 計分的 incident（分母與排除）
@@ -311,50 +318,81 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
 6. **Gate 的 Pilot 診斷**（F8 的程式）：條件 1 不成立（agent − stat-anomaly 的 origin_top1 差 0.000，95% [−0.500, 0.500]，n = 10）；條件 2 不評估（每個 fault K = 1 < 2）；
    條件 3 不成立（3 / 6 = 0.50，不是嚴格大於 0.5）。2026-10-16 gold 之後重算，結果不變（gold 不進任何條件）。
 7. **gold**：coverage 低於 1（017 每個方法、每個 incident 最多抽 5 筆；dump-all 的樣本有 4 筆略）；各方法的 n 不同（stat-anomaly 8、dump-all 10、retrieval 7、agent 9），
-   不是 paired 的比較（017 兩則補註）。
+   不是 paired 的比較（017 兩則補註）。dump-all 的樣本沒有全部判定，Pilot 的報告只報它的 coverage、不報 gold precision（使用者 2026-10-16，F4、F13 第 6 項）。
 
 以上都**沒有**改變 013 的格式、指標、彙總、bootstrap、比較或 Gate 判準。
 
-### F13. 文件與程式的差異（只記錄；規則與程式都不改）
+### F13. 文件與程式的差異（寫定時只記錄；2026-10-16 依使用者決定處理）
 
-依 CLAUDE.md「發現 SPEC 與程式現況不一致，先記錄差異」：以下照實記錄，本修訂不選邊、不改任何程式或規則；要改是使用者的決定，而且只能在 freeze 之前。
+依 CLAUDE.md「發現 SPEC 與程式現況不一致，先記錄差異」：寫定時照實記錄、不選邊、不改任何程式或規則。同日使用者決定（NEXT A11，原話「A11：Freeze 前檢查七處差異；
+純文件問題直接修正，涉及評分邏輯或研究協定的問題先詢問我。」）：
+- **分類**（嚴格）：**純文件** = 文件寫錯或沒寫程式已有的行為，改文字不改變任何計分、分類、evidence 的鍵、驗證或協定的結果；其他都是**評分邏輯或研究協定**，先問使用者。
+- **結果**：第 2、4、5、6 項是純文件，**已處理（2026-10-16）**——只改文字（第 5 項是程式的錯誤訊息文字，行為不變），Pilot 的分數不需要重算。
+  第 1、3、7 項是評分邏輯或研究協定，**等使用者決定（freeze 之前）**，程式與規則都沒有改。每一項兩個選項：(i) 維持程式現在的行為，把它寫成規則（只改文字，Pilot 數字不變）；
+  (ii) 改程式或規則（下面寫明改什麼、哪些 Pilot 數字會變——以 `data/external/results/pilot/` 的 prediction、transcript 與 gold 唯讀重算，**沒有重新評分**）。
+  選 (ii) 的項目是由 Pilot 引起的 013 修改，依 023 第 16 行要和本修訂併在一起：freeze 之前改程式、測試與本節，重新評分 Pilot（主要指標以外的 Pilot 數字照實更新）；
+  freeze 之後 013 不能改（026 解讀 7）。
 
-1. **非 `m-` 引用的時間範圍**：v1 §1 只寫 `m-` 可加 `t0` / `t1`；schema 允許每一種 id 帶範圍（`schemas/prediction.schema.json:117-138`），Pilot 上確實出現（F12 第 5 項）。
-   程式：`Snapshot.resolve` 只對 `m-` 檢查範圍，其他種類的範圍不影響 existence（`collect/snapshot.py:93-96`）；弱標籤的時間對 `s-` / `l-` / `p-` 不看範圍
-   （`eval/relevance.py:58-63`）；但弱標籤與 gold 的去重鍵 `(id, t0, t1)` 包含範圍（`eval/relevance.py:21-22`），所以同一個非 `m-` id 帶不同範圍是不同的項目、各自進分母。
-2. **usage 的 null**：v1 §1 寫「沒有的填 null」；schema 不要求任何 usage 鍵（`schemas/prediction.schema.json:139-193` 沒有 `required`），報告以 `.get` 讀，缺鍵與 null 相同
-   （`eval/runner.py:741`）；held-out 補位的放棄作答 usage 是 `{}`（`eval/runner.py:879`）。
-3. **022 的「fault 期間的分鐘」**：022 §2 第 1 項的窗是 `[fault_start, fault_end + 60 s]`，第 3 項寫「涵蓋至少一個 fault 期間的分鐘」；程式第 3 項用同一個含 60 s 的窗
-   算分鐘範圍（`eval/failures.py:24-27`、`:34`）。
-4. **Pilot 上缺 prediction 檔**：放棄作答的補位（026 解讀 19）只寫 held-out；沒有文件寫 Pilot 的這個情況。程式在 Pilot 缺檔時讀檔失敗、`eval score` exit 2，
-   不補放棄作答（`eval/runner.py:882`）。Pilot 上方法自己產生的放棄作答（F5）照常計分。
-5. **過期的錯誤訊息**：`eval/runner.py:1349-1350` 在 LLM 方法沒有分數時提示「once the paid LLM methods are approved, NEXT A1」；原 A1 已處理（本機模型，decision 029；
-   NEXT「已處理」）。只是訊息文字，Gate 的行為不變。
-6. **gold precision 的報告時機**：017「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」，030 §4 第 8 項照字面用於 held-out；
-   freeze 之前的 Pilot README 草稿目前報出樣本有 4 筆略的 dump-all 的數字（標明略與 coverage）。這個差異記在 017「補註（2026-10-16，第二則）」；
-   Pilot README 要不要這樣報**待使用者決定**（NEXT A12，freeze 的前置條件；回答在 freeze 之前補記在 017 第二則補註）。held-out 照 030 的字面，不變。
-7. **放棄作答「一律算錯」的範圍**：v1 §2 寫「放棄作答（null / 空清單）一律算錯」，026 解讀 19 對重試之後仍沒有 prediction 的補位寫「每一層都算錯」；
+1. **非 `m-` 引用的時間範圍**（評分邏輯：evidence 的鍵；**等使用者決定**）：v1 §1 只寫 `m-` 可加 `t0` / `t1`；schema 允許每一種 id 帶範圍（`schemas/prediction.schema.json:117-138`），
+   Pilot 上確實出現（F12 第 5 項）。程式：`Snapshot.resolve` 只對 `m-` 檢查範圍，其他種類的範圍不影響 existence（`collect/snapshot.py:93-96`）；弱標籤的時間對 `s-` / `l-` / `p-`
+   不看範圍（`eval/relevance.py:58-63`）；但弱標籤與 gold 的去重鍵 `(id, t0, t1)` 包含範圍（`eval/relevance.py:21-22`），所以同一個非 `m-` id 帶不同範圍是不同的項目、各自進分母、各自盲標。
+   - (i) 維持：把上面的行為寫成規則（非 `m-` 的範圍不影響 existence 與時間，但是鍵的一部分）。Pilot 數字都不變。
+   - (ii) 改：非 `m-` 引用的鍵只用 id（範圍忽略；`m-` 不變），弱標籤、gold 的判定、`gold_score` 與 `gold-todo` 的抽樣都用這個鍵（`eval/relevance.py` 的 `key`）。
+     Pilot 上：每個方法自己的引用都沒有同一個非 `m-` id 帶不同範圍，所以 existence 與弱標籤（含 n）不變，`gold-todo` 的樣本也不變；
+     gold 的 115 筆判定中有 4 個 id 各以兩個鍵判定、兩次都是 relevant（INC-003 `l-183383e77b3fcbbb`、`s-f104de301de60d25`；INC-004 `l-eb65d558d1e75819`、
+     `s-51f116ed17bcc2ec`，後者一次在 2026-10-10），合併後是 111 個鍵、71 個 relevant，沒有互相衝突的判定（gold 是只附加的檔案，合併的寫法另外要決定）；
+     2026-10-15 的 91 筆工作表會是 87 筆（INC-003 第 2/3、10/11 項與 INC-004 第 2/3 項各合成一項，INC-004 第 5 項已判定、不再列出）。
+     分數：只有 retrieval 的 INC-005 多 2 個引用算已判定（同一個 id 以別的鍵判定過），它的 gold coverage 5 / 22 → 7 / 22，retrieval 的 gold coverage
+     0.667 [0.345, 0.892] → 0.680 [0.384, 0.903]；各方法的 gold precision（retrieval INC-005 是 5 / 5 → 7 / 7，仍是 1.0）、其他 coverage、主要指標、compare 與 gate 都不變。
+2. **usage 的 null**（純文件；**已處理 2026-10-16**）：v1 §1 寫「沒有的填 null」；schema 不要求任何 usage 鍵（`schemas/prediction.schema.json:139-193` 沒有 `required`），報告以 `.get` 讀，
+   缺鍵與 null 相同（`eval/runner.py:741`）；held-out 補位的放棄作答 usage 是 `{}`（`eval/runner.py:879`）。處理：F1 的 `usage` 列照程式的行為寫明（每個鍵都可以省略，缺鍵與 null 相同、
+   都不計入 n，cost 總和遇到缺值寫 `-`）；v1 §1 是保留的原文，以 F1 為準。usage 只報告、不計分（F10），沒有任何結果改變。
+3. **022 的「fault 期間的分鐘」**（研究協定：失敗分類；**等使用者決定**）：022 §2 第 1 項的窗是 `[fault_start, fault_end + 60 s]`，第 3 項寫「涵蓋至少一個 fault 期間的分鐘」；
+   程式第 3 項用同一個含 60 s 的窗算分鐘範圍（`eval/failures.py:25-27`、`:34`）。
+   - (i) 維持：把「fault 期間」在 022 §2 的三種證據都定為第 1 項的窗 `[fault_start, fault_end + 60 s]`（寫進 022 的對應與 F9）。Pilot 數字都不變。
+   - (ii) 改：第 3 項的分鐘範圍只算 `[fault_start, fault_end]`（`eval/failures.py:27` 的 `last_minute` 用不含 60 s 的 end；span / log / point 的窗不變）。
+     Pilot 上**沒有任何失敗的類別改變**：dump-all（INC-006、007、010）與 retrieval（INC-006、010）的 seen_misread 都來自 exposure 的 `stats:*`；Agent 的 3 次 seen_misread
+     （INC-004、009、010）在不含 60 s 的分鐘範圍下仍然成立；stat-anomaly 沒有 exposure（rule_limit）。失敗表、Gate 條件 2、條件 3（3 / 6）都不變。
+     只會在 held-out 上有差別（某個 Agent 失敗唯一的 origin 證據是 fault 結束後那一分鐘的每分鐘統計時，會從 seen_misread 變成 not_seen）。
+4. **Pilot 上缺 prediction 檔**（純文件；**已處理 2026-10-16**）：放棄作答的補位（026 解讀 19）只寫 held-out，沒有文件寫 Pilot 的這個情況。程式在 Pilot 缺檔時讀檔失敗、`eval score` exit 2，
+   不補放棄作答（`eval/runner.py:882`）。處理：F5 照程式寫明（印 `error: …`、exit 2、不寫 scores.json 與 table.md、不補 `_abstain`；2026-10-16 以暫時的測試資料確認過）。
+   Pilot 的 10 個 incident 每個方法都有 prediction，沒有任何結果改變。
+5. **過期的錯誤訊息**（程式的訊息文字；**已處理 2026-10-16**）：`eval/runner.py:1349` 在 LLM 方法沒有分數時原本提示「once the paid LLM methods are approved, NEXT A1」；原 A1 已處理
+   （本機模型，decision 029；NEXT「已處理」）。處理：訊息改成「`python -m eval run|score --method <m> --set <set>` first: the LLM method's results must exist on the <set> set」，
+   不再提付費批准或 NEXT A1；行數、例外類別與行為不變（exit 2、什麼都不寫）。測試 `tests/test_gate.py::test_without_agent_scores_the_gate_names_the_missing_llm_results_not_a_paid_approval`
+   （先寫、看到失敗才改）。
+6. **gold precision 的報告時機**（**已處理 2026-10-16**，使用者回答 NEXT A12 選 (b)）：017「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」，
+   030 §4 第 8 項照字面用於 held-out；寫定時 freeze 之前的 Pilot README 草稿報出樣本有 4 筆略的 dump-all 的數字。處理：Pilot README 也照 017 的字面，不報 dump-all 的
+   gold precision、只報 coverage 0.840 並寫明原因與 4 筆略的理由（017「補註（2026-10-16，第二則）」的「使用者的回答」；F4）。Pilot 與 held-out 用同一條規則，沒有差異；
+   評分程式與 scores.json 不變。
+7. **放棄作答「一律算錯」的範圍**（評分邏輯；**等使用者決定**）：v1 §2 寫「放棄作答（null / 空清單）一律算錯」，026 解讀 19 對重試之後仍沒有 prediction 的補位寫「每一層都算錯」；
    程式沒有放棄作答的分支，照 F2 逐欄計分（`eval/score.py:45-63`）。補位的 `_abstain`（`agent/harness.py:69-72`；held-out 評分時的補位 `eval/runner.py:877-880`）
    每個欄位都是空的，所以每一層都是 0，與兩處文字一致；方法自己提交、`origin_candidates` 是空清單但其他欄位有值的 prediction，其他欄位照常得分
    （Pilot Agent INC-008 的 `symptom_exact` = 1；F5、F12 第 2 項）。兩種讀法下 origin 的各指標都是 0、失敗類別都是 `no_answer`；差別只在其他欄位。
+   - (i) 維持：「一律算錯」指 origin（`origin_candidates` 空 = origin 各指標 0、`no_answer`、留在分母），其他欄位照 F2 逐欄計分；補位的 `_abstain` 每一層都是 0。Pilot 數字都不變。
+   - (ii) 改：`origin_candidates` 是空清單的 prediction 在 F2 的 11 個指標都算 0、不論其他欄位（`eval/score.py` 的 `score_incident` 加一個放棄作答的分支）。
+     Pilot 上只有 Agent 的 INC-008 是這種 prediction（stat-anomaly、dump-all、retrieval 的計分 prediction 都有 origin 候選；修訂前封存的 dump-all INC-009、010 是 `_abstain`，
+     已經都是 0，也不重新評分）：它的 `symptom_exact` 1 → 0、`symptom_jaccard` 1.0 → 0。Agent 的 symptom_exact 0.60 [0.30, 0.90] → 0.50 [0.20, 0.80]（README 的 Pilot 表要改）、
+     symptom_jaccard 0.70 [0.45, 0.95] → 0.60 [0.35, 0.85]；依難度（hard）與各 fault（adHighCpu）的表中 INC-008 所在的格；compare agent − stat-anomaly 的 symptom_exact
+     （只描述）0.10 [−0.30, 0.50] → 0.00 [−0.50, 0.50]。origin、fault、affected 的指標、失敗類別、evidence 與 Gate 的三個條件都不變。
 
 ### 為什麼
 
 - 023 第 16 行規定 §7 寫進 013 正式版、用掉 013 唯一的一次修訂；freeze 檢查強制 013 宣告為 used（`collect/freeze.py:161-162`）。
 - 一份文件寫齊 held-out 用的格式、評分、比較與 Gate，每一項指向出處與程式行號：freeze 之後程式與文件一起被釘住（026 解讀 7），held-out 的報告（030 §4）可以逐項對照。
 - 只轉述既有規則：正式版寫在 Pilot 結果之後，任何新的指標、門檻或解讀都可能受 Pilot 結果影響（EXPERIMENT_RULES「先固定 metrics」；CLAUDE.md「不得看到結果後偷偷修改指標」）。
-- 出入只記錄：CLAUDE.md「先記錄差異，再處理，不要默默改規格」；改程式或規則是另一個決定。
+- 出入先記錄：CLAUDE.md「先記錄差異，再處理，不要默默改規格」；改程式或規則是另一個決定。2026-10-16 使用者決定純文件的直接修正、評分邏輯或研究協定的先問（F13），所以只有不改變任何結果的文字被修正。
 
 ### 放棄的替代方案
 
 - **依 Pilot 的觀察順便調整 013**（例如因為 LLM 方法多半只給一個 origin 候選而改 top-3 / RR 的地位，或改放棄作答的計分）：都是看過 Pilot 結果之後的設計變更，
   屬於使用者的決定（NEXT A11）；本修訂不做。
 - **把正式版寫成新的 decision 檔**：freeze 的宣告可以指名 frozen commit 中任何 decision 檔，但 023、026 都寫「013 正式版」，其他文件以「013 §n」引用；留在 013 讓引用不斷。
-- **在出入處直接改程式或文件的規則**：會在 Pilot 結果之後改變評分或規則，而且不經使用者；只記錄（F13）。
+- **在出入處直接改程式或文件的規則**：會在 Pilot 結果之後改變評分或規則，而且不經使用者；寫定時只記錄，2026-10-16 只處理純文件的項目，第 1、3、7 項等使用者在 (i)、(ii) 之間決定（F13）。
 
 ### 對實驗的影響
 
-- 程式、schema、測試都沒有改；Pilot 的分數、compare、gate 都不需要重算（評分程式不變）。
+- 寫定時程式、schema、測試都沒有改。2026-10-16（F13 第 5 項）只改了 `eval/runner.py:1349` 的錯誤訊息文字並新增一個測試；評分程式、schema 不變，Pilot 的分數、compare、gate 都不需要重算。F13 第 1、3、7 項若使用者選 (ii)，就要在 freeze 之前改程式並重新評分 Pilot（F13 列出會變的數字）。
 - freeze 的 Pilot 修訂宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`（NEXT「下一步」6）。
 - 正式版在 frozen commit 裡；freeze 之後本文件不能改（026 解讀 7），之後的紀錄只能寫進 NEXT 或新的 decision。
 - held-out 的評分、compare、gate 與 100 的報告都照本節（也就是照上面列出的出處與程式）。

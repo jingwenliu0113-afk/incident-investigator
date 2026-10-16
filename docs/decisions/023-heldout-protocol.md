@@ -7,6 +7,8 @@
   freeze 之後的修正路徑使用者選「沒有偏好」（不實作、維持現況，freeze 之前仍可決定）。同樣在任何 held-out 資料與 freeze 之前；
   見文末「使用者決定」的「追加（2026-10-10）」。同日另確認兩項（gold 標註量照 017 現行規定；Gate 解讀 4 的 Pilot 讀法），
   見「追加（2026-10-10，第二次）」。同日使用者批准 LLM 設定（本機模型，decision 029），freeze 多兩項檢查，見「追加（2026-10-10，第三次）」。
+  2026-10-16 使用者回答 Pilot 修訂宣告（015、017、019、020、022 都 waived，前提已確認）、heldout-plan 不吸收 label review 的 notes、freeze 之後的 bug 維持現況，
+  見「追加（2026-10-16）」。
   - 標「Pilot 後定稿」的項目，要等 Pilot 的收集、review、leakage audit 與 LLM 方法試跑都完成，並在第一個 held-out run group 之前定稿一次。
   - 定稿之後，每次修改都另寫 decision log。
   - 看到 held-out 方法結果之後，永不修改。
@@ -291,6 +293,63 @@
 `num_ctx` 262,144、think 關；沒有外部費用），同時把 §6 的兩項前提寫進 freeze 檢查，只會拒絕更多：要凍結的 env lock 必須有通過的 soak
 （decision 028「必須在 held-out freeze 之前」）；每個 LLM 方法的 Pilot 結果必須正好用要凍結的模型、runtime 與預算產生（§6「模型、版本、temperature」
 與 023 第 6 行「LLM 方法試跑」的機械檢查）。實作與解讀見 decision 026 修訂 3（解讀 31、32）；freeze 紀錄的內容與 §6 的其他規則不變。
+
+### 追加（2026-10-16；Pilot 修訂宣告、heldout-plan 的 amendments、freeze 之後的 bug；任何 held-out 資料、`heldout-plan` 與 freeze 之前）
+
+使用者在對話中回答了 NEXT 的 A9、A10、A4（同一則訊息也回答了 A12、A11：記在 decision 017「補註（2026-10-16，第二則）」與 013 正式版 F13）。這三項的原話：
+
+> * A9：015、017、019、020、022 全部宣告 waived，前提是確認沒有使用任何 Pilot 修訂額度。
+> * A10：不吸收六則 Pilot Review Notes，Held-out 維持原本事前設計。
+> * A4：維持現狀，Freeze 後如發現影響正確性的 Bug，先停止並保留紀錄，不自行修改研究規則。
+
+只記錄這三項，不延伸到其他規則、門檻、Gate、指標、切分、預算、模型或已封存的 Pilot 結果。
+
+1. **Pilot 修訂宣告（§6「用掉或明確放棄」；NEXT A9）**
+   - **前提的確認（2026-10-16，唯讀）**：「用掉」= 看過 Pilot 結果之後改了該 decision 的規則。對 015、017、019、020、022 逐一看 decision 檔的 `git log --follow -p`、
+     實作它的程式的 git 歷史，以及所有提到它在 Pilot 上修訂的地方（decision 014、021、022、023、026、027，NEXT，README）。時間基準（UTC）：第一個有 incident 的
+     Pilot run group RG-002 在 2026-10-09T01:29Z 起動（RG-001 在 2026-10-08T15:21Z aborted_unstable，沒有發布 incident）；第一個 Pilot 方法結果是 stat-anomaly
+     （prediction 檔 2026-10-09T23:58Z）；Pilot 的 leakage audit 2026-10-10T02:38Z；第一個 LLM 方法的 Pilot 執行是 Mac 上的 retrieval（INC-002 在 2026-10-10T15:09Z 開始，
+     封存的 `power.jsonl`）。
+     - **015**：v1（`05018d6`）之後只有修訂 1（`efdc78e`，2026-10-08T16:11Z）：在任何 Pilot incident 之前、只用無 fault 的 soak #3 資料，本文寫明「不占『Pilot 稽核後修訂一次』
+       的額度」。`eval/leakage.py` 最後一次改動是時鐘稽核（`15f02f9`，2026-10-08T17:03Z，也在 Pilot 之前）。Pilot 的 audit 10 個 incident 的詞彙命中都是 0，之後沒有任何修訂。
+     - **017**：v1（`1daa1ef`）之後只有 2026-10-16 的兩則補註（`54232fa`、`12d0c9a`、`4fc290d`）與這次對 A12 的回答，每一則都寫明「不是 017 在 Pilot 上的那一次修訂」：
+       render v2 的事實、使用者決定 1、2（照 §3 呈現、照 §1 的鍵）、gold precision 算法的字面說明、這一輪標註的紀錄、照「對實驗的影響」的字面不報 dump-all 的
+       gold precision；pool、弱標籤、抽樣、判準、標註者、分數與報告的規則都不變。`eval/relevance.py`、`eval/evidence.py`、`schemas/evidence_gold.schema.json`
+       在 Pilot 之後沒有改；`eval/runner.py` 與 `eval/__main__.py` 在第一個 Pilot 結果之後涉及 gold 的改動只有 `77b6a25` 在 CLI 的指令清單加上 `local-probe`。
+     - **019**：v1（`3d59882`）之後是 `5ab5363`（2026-10-08T17:04Z，decision 011 的 renderer v2 改了「render v1」的字樣，在 Pilot 之前）與 `54232fa`（2026-10-16 補註：
+       render 版本，規則不變）。`agent/tools.py` 最後一次改動是 `0fd72d7`（2026-10-08T17:05Z）。021 的修訂與 022 的補註都寫明不改 019 的工具。
+     - **020**：v1（`8b67db4`）之後：`0fd72d7`（2026-10-08T17:05Z，時鐘稽核，Pilot 之前）；`77b6a25`、`b18c8a0`（2026-10-10T04:24Z、04:59Z，decision 029 adapter 的補註：
+       介面不變；adapter 讀不成 JSON 物件的 tool call 參數照 §3 要求更正、不當成空的答案——只會拒絕更多，來自合併前的程式審查）；`d7576d2`（2026-10-10T08:24Z，「修正」：
+       更正訊息指出哪一個 evidence 項目錯並附上預期的形狀，答案格式與更正次數不變；發現於 029 的合成範例探測，本文寫明不是 Pilot 上的那一次）；`54232fa`（2026-10-16 補註：
+       render 版本）。這些改動都在任何 LLM 方法於 Pilot 執行之前。當時已經有 stat-anomaly 的 Pilot 結果，但改動只涉及 LLM 的 harness，來源是合成範例與程式審查，
+       不是 Pilot 的結果（`d7576d2` 寫的「沒有看過任何方法結果」應讀成沒有看過任何 LLM 方法的結果）。之後 `agent/harness.py`、`agent/prompt.py` 沒有再改；
+       021 的修訂寫明不改 020 的任務說明；029 修訂 1（2026-10-11，推論主機）改的是 adapter 的 host，屬於 029，不是 020 的規則。
+     - **022**：v1（`e74b6ba`）之後是 `09cc96f`（2026-10-11 補註：(b)、(c) 保留為失敗分析的發現，寫明「022 在 Pilot 上的那一次修訂沒有使用」）與 `54232fa`（2026-10-16 更正 (b)
+       的事實敘述）。`eval/failures.py` 最後一次改動是時鐘稽核（2026-10-08T17:03Z，Pilot 之前）。
+
+     結論：五項都**沒有**用掉 Pilot 修訂額度，使用者的前提成立，五項都宣告 `waived`。
+   - **宣告**（`collect heldout-freeze --pilot-revisions <file>` 的檔案內容；檔案由主 session 寫在 repo 之外）：
+
+     ```json
+     {"011": {"status": "waived"},
+      "013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"},
+      "014": {"status": "waived"},
+      "015": {"status": "waived"},
+      "017": {"status": "waived"},
+      "019": {"status": "waived"},
+      "020": {"status": "waived"},
+      "021": {"status": "used", "decision": "docs/decisions/021-dump-all-and-retrieval-baselines.md"},
+      "022": {"status": "waived"}}
+     ```
+
+     011 waived（policy v1，程式強制）、013 used（013 正式版，本文第 16 行，程式強制）、014 waived（2026-10-10 追加第 1 項，程式強制）、021 used（使用者 2026-10-11 選 (a)，
+     decision 021）；015、017、019、020、022 waived（本項）。2026-10-16 以 `collect.freeze.pilot_revision_problems`（policy v1、目前的 decision 檔清單）唯讀檢查，沒有問題。
+   - 放棄的效果：這五份 decision 的規則就是 freeze 時凍結的版本，之後不能再以 Pilot 修訂改它們；022「已知限制」說的「必要時用那一次修訂收緊」也就不會發生，照原文報告。
+2. **heldout-plan 的 amendments（§1；NEXT A10）**：不吸收 label review 的 6 則與 a priori 不同的 notes（paymentUnreachable、cartFailure、adHighCpu、adManualGc、emailMemoryLeak、
+   recommendationCacheFailure；affected 與 user symptom 本來就全部維持 a priori），held-out 維持事前設計的 PLANS。`collect heldout-plan --amendments` 的檔案是
+   `{"amend": [], "remove": []}`：沒有修改，也沒有手動移除（移除只依 §1 的證據，由 `heldout-plan` 依 Pilot 的證據檢查）。
+3. **freeze 之後的 bug（§6；026「待使用者決定」2；NEXT A4）**：維持現況（同 2026-10-10 追加第 3 項），不實作修正路徑。freeze 之後發現影響正確性的 bug 時，
+   held-out 評測**先停止並保留紀錄**（NEXT 與新的 decision），不自行修改程式或研究規則，由使用者決定。
 
 ## 實作說明（2026-10-09）
 

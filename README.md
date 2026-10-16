@@ -9,7 +9,7 @@
 > 四個方法（統計 baseline 與三個 LLM 方法）都已在 Pilot 上執行並評分（下表；診斷用，不是 Gate 判定）。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029）；
 > 2026-10-11 起模型在使用者的 RTX 5070 Ti 桌機上推論（029 修訂 1，eval 仍在 Mac）；dump-all 與 retrieval 依 decision 021 的 Pilot 修訂（2026-10-11，使用者決定）在 2026-10-15 重跑。
 > 四個方法引用的 evidence 依 decision 017 抽出的樣本都已呈現給使用者人工盲標（2026-10-10 統計 baseline 的 28 筆；2026-10-16 三個 LLM 方法的 91 筆，87 筆寫入、4 筆略；
-> 4 筆略都在 dump-all 的樣本裡，所以除了 dump-all 的這 4 筆之外都已判定），
+> 4 筆略都在 dump-all 的樣本裡，所以除了 dump-all 的這 4 筆之外都已判定；依 decision 017，dump-all 只報 gold coverage、不報 gold precision，使用者 2026-10-16 決定），
 > 並在 gold 之後重新評分（下面「Evidence」）。held-out 在 freeze 之後收集，Gate 只在 held-out 上判定；**Core 還沒完成，沒有進 Advanced**。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 
@@ -43,7 +43,7 @@ label 全部經人工 review（decision 018，review 時未看任何方法輸出
 | 方法 | n | existence | 弱標籤：temporal 且 service | gold precision | gold coverage |
 |---|---:|---:|---:|---:|---:|
 | stat-anomaly（統計 baseline v2） | 8 | 1.000 [1.000, 1.000] | 1.000 [1.000, 1.000] | 0.906 [0.719, 1.000] | 1.000 [1.000, 1.000] |
-| dump-all + LLM（021 修訂後） | 10 | 1.000 [1.000, 1.000] | 0.640 [0.340, 0.900] | 0.540 [0.240, 0.840] | 0.840 [0.710, 0.960] |
+| dump-all + LLM（021 修訂後） | 10 | 1.000 [1.000, 1.000] | 0.640 [0.340, 0.900] | 不報（樣本沒有全部判定，見下） | 0.840 [0.710, 0.960] |
 | retrieval + LLM（021 修訂後） | 7 | 1.000 [1.000, 1.000] | 0.571 [0.143, 0.857] | 0.571 [0.143, 0.857] | 0.667 [0.345, 0.892] |
 | Agent + tools | 9 | 0.956 [0.867, 1.000] | 0.833 [0.611, 1.000] | 0.756 [0.444, 1.000] | 1.000 [1.000, 1.000] |
 
@@ -53,10 +53,18 @@ label 全部經人工 review（decision 018，review 時未看任何方法輸出
 - **樣本與 coverage**：017 每個方法、每個 incident 以固定種子抽**最多 5 筆**引用給人判定；coverage = 已判定 / 存在的引用。標註時「略」的項目不寫入、
   不進分母，只降低 coverage。retrieval 的 0.667 來自引用多的 incident（INC-002、005、006 各 45、22、25 筆，只有抽到的樣本有判定）；dump-all 的 0.840 一部分來自
   4 筆略（INC-003 1 筆、INC-004 2 筆、INC-009 1 筆），它們都在 dump-all 的樣本裡，所以 **dump-all 的樣本沒有全部判定**；stat-anomaly、retrieval、Agent 的樣本全部判定。
+- **dump-all 不報 gold precision**（使用者 2026-10-16 決定；decision 017「補註（2026-10-16，第二則）」）：017 寫明「各自的樣本要先標完，gold precision 才會出現在報告中」。
+  dump-all 的樣本有上述 4 筆略、沒有判定，所以這裡只報它的 gold coverage 0.840（n = 10），不報 gold precision；評分程式照常算出這個欄位、沒有改，報告依 017 不引用。
+  4 筆略與使用者的理由（略的項目不寫入 gold 檔，理由的紀錄在 017 的那則補註）：
+  - INC-003 1 筆：單憑可見證據無法確認 `/api/recommendations` 的錯誤與 Product Catalog 故障的關聯。
+  - INC-004 2 筆：發生在故障結束後約 0.7 秒，可能是殘留影響，但無法確認。
+  - INC-009 1 筆：故障期間呼叫 AdService 約 1.31 秒，但缺少正常時段的基準，無法確認與 GC 壓力的關係。
+
+  held-out 用同一條規則（decision 030 §4 第 8 項）。
 - **標註**：全部由使用者（human:jingwen）方法盲標（不知道是哪個方法引用的、看不到弱標籤）：2026-10-10 統計 baseline 的 28 筆；2026-10-16 三個 LLM 方法的 91 筆
   （一次一個 incident），87 筆寫入、4 筆略（理由見 decision 017「補註（2026-10-16，第二則）」）。gold 共 115 筆判定、75 筆 relevant。
   017 的判準把 fault 造成的下游錯誤與延遲也算 relevant，所以 relevant 不表示這筆紀錄證明了根因機制（使用者在 INC-007、INC-011 的註記）。
-- **各 incident**：gold precision 是 0 的 incident——dump-all INC-006、008、009、010，retrieval INC-006、008、010，Agent INC-009、010；stat-anomaly 最低是 INC-006 的 0.25。
+- **各 incident**：gold precision 是 0 的 incident——retrieval INC-006、008、010，Agent INC-009、010；stat-anomaly 最低是 INC-006 的 0.25（dump-all 不報，見上）。
   弱標籤會把故障時間窗內、affected 服務上看起來正常的紀錄也算進去，所以與 gold 分開報（decision 017）。
 - 修訂前（封存）的 dump-all / retrieval 不補標、不重新評分，這裡不報它們的 gold precision（封存的分數只含評分當時與既有判定重疊的 gold：dump-all n = 1、
   coverage 0.025，retrieval n = 0）。
@@ -111,7 +119,8 @@ uv run python -m eval demo
 - Evidence：existence（引用的 id 是否存在）與 relevance（弱標籤 temporal / service，加上人工盲標的 gold subset）分開報（decision 017）。
   **gold precision**：每個方法、每個 incident = relevant 的引用數 / 已有 gold 判定的引用數（引用以 `(id, t0, t1)` 去重；判定不分是哪個方法的樣本抽到的）；
   跨 incident 是該方法至少有一筆已判定引用的 incident 的**等權平均**（報 n 與區間），不是把所有引用合在一起算。標註時「略」的項目不寫入、不進分母，只讓
-  coverage（已判定 / 存在的引用）變低。各方法的 n 不同，所以不是 paired 的比較。
+  coverage（已判定 / 存在的引用）變低。一個方法的樣本全部判定之前不報它的 gold precision，只報 coverage 並寫明原因（017「對實驗的影響」）。
+  各方法的 n 不同，所以不是 paired 的比較。
 - 每個方法的表也列出可見資料範圍、預算、usage（tokens、工具呼叫、retrieval、latency、cost）與實際看過多少資料；只報告、不計分（decision 024）。
 - Gate（SPEC Gate，decision 023 §7）：`python -m eval gate` 只讀已寫好的 scores.json 與 `eval compare` 的輸出（不跑任何方法），寫 `results/<set>/agent/gate.json` 與 `gate.md`。
   **held-out 上才是 Gate 判定**（pass / not passed，只用第一次執行的結果）；Pilot 上只是診斷，**不是 Gate 判定**。

@@ -238,7 +238,7 @@ def test_on_the_pilot_the_gate_is_a_diagnostic_read_from_written_scores_and_comp
     out = tmp_path / "results"
     methods(monkeypatch, {"INC-001": "cart", "INC-002": "cart", "INC-003": "cart"},
             {"INC-001": "checkout", "INC-002": "checkout", "INC-003": "checkout"})
-    with pytest.raises(LookupError, match="cannot be evaluated yet"):  # no Agent scores (LLM methods deferred)
+    with pytest.raises(LookupError, match="cannot be evaluated yet"):  # no Agent scores yet
         gate_methods("pilot", "agent", "stat-anomaly", out)
     assert files(out) == []
     for m in ("agent", "stat-anomaly"):
@@ -310,6 +310,21 @@ def test_on_the_pilot_the_gate_is_a_diagnostic_read_from_written_scores_and_comp
     with pytest.raises(LookupError, match="again"):
         gate_methods("pilot", "agent", "stat-anomaly", out)
     assert {name: (out / "pilot/agent" / name).read_bytes() for name in ("gate.json", "gate.md")} == written
+
+
+def test_without_agent_scores_the_gate_names_the_missing_llm_results_not_a_paid_approval(tmp_path):
+    # 013 F13 item 5 (fixed 2026-10-16): the LLM methods run on a local model (decision 029); the message only says the
+    # Agent's results must exist on the set, nothing about a paid approval or the old NEXT A1; the behavior is unchanged
+    from eval.runner import gate_methods
+
+    with pytest.raises(LookupError) as raised:
+        gate_methods("pilot", "agent", "stat-anomaly", tmp_path / "results")
+    message = str(raised.value)
+    assert "cannot be evaluated yet: agent has no scores on the pilot set" in message
+    assert "`python -m eval run|score --method agent --set pilot` first" in message
+    assert "the LLM method's results must exist on the pilot set" in message
+    assert "paid" not in message and "NEXT A1" not in message and "approved" not in message
+    assert message.endswith("nothing was written") and not (tmp_path / "results").exists()
 
 
 def test_the_gate_compares_the_agent_with_every_registered_statistical_baseline(tmp_path, monkeypatch):

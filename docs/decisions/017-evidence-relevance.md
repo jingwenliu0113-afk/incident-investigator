@@ -134,7 +134,7 @@ existence、弱標籤（temporal / service / origin / weak）、gold precision�
   | 方法 | n | gold precision | gold coverage |
   |---|---:|---:|---:|
   | stat-anomaly | 8 | 0.906 [0.719, 1.000] | 1.000 |
-  | dump-all（021 修訂後） | 10 | 0.540 [0.240, 0.840] | 0.840 [0.710, 0.960] |
+  | dump-all（021 修訂後） | 10 | 不報（樣本沒有全部判定；見下面「使用者的回答」） | 0.840 [0.710, 0.960] |
   | retrieval（021 修訂後） | 7 | 0.571 [0.143, 0.857] | 0.667 [0.345, 0.892] |
   | agent | 9 | 0.756 [0.444, 1.000] | 1.000 |
 
@@ -142,7 +142,15 @@ existence、弱標籤（temporal / service / origin / weak）、gold precision�
   各方法的 n 不同，不是 paired 的比較（上一則補註）。修訂前（封存）的 dump-all / retrieval 不補標、不重新評分。
 - **與「對實驗的影響」字面的差異（只記錄，不改規則）**：「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」；decision 030 §4 第 8 項照這句寫
   held-out 的 100「一個方法的樣本全部判定之前不報它的 gold precision」。Pilot 上 91 筆都已呈現並作答（「略」也是使用者的回答），但 dump-all 的樣本有 4 筆沒有判定。
-  使用者 2026-10-16 要求重新計算 gold precision 與 coverage（已完成，上表）；**Pilot README 要不要報出 dump-all 的 gold precision，使用者還沒有決定**。
-  freeze 之前的 README 草稿目前報出 dump-all 的數字，並標明這 4 筆略、「樣本沒有全部判定」與 coverage；held-out 照 030 §4 第 8 項的字面，不變。
-  這一點**待使用者確認**（NEXT「Blocked / 需要使用者」A12），是 freeze 的前置條件（NEXT「下一步」9）：README 在 freeze 時封存，要改只能在 freeze 之前；
-  使用者的回答在 freeze 之前補記在本補註。
+  使用者 2026-10-16 要求重新計算 gold precision 與 coverage（已完成，上表）；寫這則補註時 Pilot README 的草稿報出 dump-all 的 gold precision（標明 4 筆略與 coverage），
+  要不要這樣報列為待使用者確認（NEXT A12，freeze 的前置條件）。
+- **使用者的回答（2026-10-16，freeze 之前；NEXT A12 選 (b)）**，原話：
+  > A12 選 b：不報 dump-all 的 Gold Precision，只報 Coverage 0.840，保留四筆「略」及原因，遵守 Decision 017。
+
+  照本文「對實驗的影響」的字面：dump-all 的樣本沒有全部判定，所以 **Pilot 的報告不報 dump-all 的 gold precision**，只報它的 gold coverage 0.840（n = 10），
+  並寫明原因（上述 4 筆略都在 dump-all 的 §3 樣本裡）與 4 筆略的使用者理由（上面「略的 4 筆與使用者的理由」，README 的「Evidence」同樣列出）。
+  - 套用範圍：README「Evidence」（表中 dump-all 的 gold precision 欄寫「不報」，「各 incident」不列 dump-all 的 per-incident gold precision）、本補註上面的表
+    （原本列出數字，依這個回答改成「不報」）、NEXT「目前位置」的表。stat-anomaly、retrieval、Agent 的樣本全部判定，照常報（數字不變）。
+  - **不改的**：評分程式、`scores.json` 與 `table.md`（`eval score` 照 §3、§4 對每個有已判定引用的 incident 算出 gold precision，dump-all 的欄位仍在檔案裡；
+    報告依本文不引用它）、4 筆略的處理（不寫入、不進分母，之後的 `gold-todo` 會再列出；使用者沒有選 (c) 再判定）、pool、弱標籤、抽樣、判準、標註者與 held-out 的規則
+    （030 §4 第 8 項不變）。這是照 017 現行規則的報告方式，**不是 017 在 Pilot 上的那一次修訂**（freeze 宣告 `"017": waived`，見 decision 023「追加（2026-10-16）」）。
