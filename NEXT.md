@@ -1,12 +1,13 @@
 # NEXT
 
-## 目前位置（2026-10-16：freeze 前的使用者決策已記錄；freeze 之前只剩 013 F13 第 1、3、7 項等使用者決定）
+## 目前位置（2026-10-16：freeze 前的使用者決策都已記錄（含 013 F13 第 1、3、7 項選 (i)）；下一步是 freeze 前的最後檢查）
 
 **Core 還沒完成，Gate 還沒判定，不進 Advanced。** Pilot 上四個方法都已執行並評分（診斷用，不是 Gate 判定）；使用者的 evidence gold 盲標（91 筆）2026-10-16 完成
 （87 筆寫入、4 筆略），重新評分、compare、gate 與 README 都已更新（「下一步」1–4）；013 正式版已完成（「下一步」5）。使用者 2026-10-16 回答了 freeze 前的決策
-（A12、A9、A10、A4、A11），本次照回答處理（下面第一點）。**freeze 之前還要使用者回答 013 F13 第 1、3、7 項**（評分邏輯 / 研究協定，各兩個選項與 Pilot 上的影響見
-「Blocked / 需要使用者」A11；使用者自己說這類問題「先詢問我」）。之後依序（「下一步」6–9）：最後檢查（測試、version-check）→ heldout-plan（空的 amendments）→ commit →
-heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → held-out 收集（Mac 負載閘門）→ 使用者的 label review（不自動代替）→ 方法執行 → Gate。沒有技術上的 blocker。
+（A12、A9、A10、A4、A11），本次照回答處理（下面第一點）；A11 剩下的 013 F13 第 1、3、7 項（評分邏輯 / 研究協定）使用者同日也回答了：三項都選 (i)
+（原話「第 1、3、7 項都選 (i)，繼續 freeze」），維持程式現在的行為、寫成規則，只改文字，Pilot 數字不變，A9 的宣告不變。**freeze 之前沒有等使用者的事項**。
+剩下的依序（「下一步」6–9）：最後檢查（測試、version-check）→ heldout-plan（空的 amendments）→ commit → heldout-freeze（A9 的 Pilot 修訂宣告檔）→
+只 commit 兩個檔 → push → held-out 收集（Mac 負載閘門）→ 使用者的 label review（不自動代替）→ 方法執行 → Gate。沒有技術上的 blocker。
 
 - **使用者決定（2026-10-16，freeze 前決策確認）**，原話：
   > Freeze 前決策確認：
@@ -30,18 +31,27 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
   - **A9——已處理（前提已確認）**：015、017、019、020、022 的 decision 檔 `git log --follow -p`、實作程式的歷史與所有提到 Pilot 修訂的地方都看過：沒有任何一項在看過 Pilot
     結果之後改了規則（逐項證據在 decision 023「追加（2026-10-16）」第 1 項；摘要在「下一步」6）。五項都宣告 `waived`；宣告檔的內容在「下一步」6。
     **連動**（2026-10-16 審查補正）：013 F13 第 1、3 項的 (ii) 改的是 017、022 的規則，選了就是它們在 Pilot 上的那一次修訂（宣告改成 used），所以 017、022 的 waived
-    只在第 1、3 項都選 (i) 時成立（A11）。
+    只在第 1、3 項都選 (i) 時成立（A11）。**已解決**：使用者 2026-10-16 第 1、3 項都選 (i)，017、022 沒有修訂，五項 waived 與「下一步」6 的 JSON 照原樣。
   - **A10——已處理**：不吸收 6 則 notes，`heldout-plan` 的 amendments 是 `{"amend": [], "remove": []}`（023「追加（2026-10-16）」第 2 項）。
   - **A4——已處理（維持現狀）**：不實作 freeze 之後的修正路徑；freeze 之後發現影響正確性的 bug 時，held-out 評測先停止並保留紀錄，不自行修改程式或研究規則，由使用者決定
     （023「追加（2026-10-16）」第 3 項）。
-  - **A11——部分處理**：013 F13 的 7 項依「純文件 = 文件寫錯或沒寫程式已有的行為，改文字不改變任何計分、分類、evidence 的鍵、驗證或協定的結果」嚴格分類：
+  - **A11——已處理**：013 F13 的 7 項依「純文件 = 文件寫錯或沒寫程式已有的行為，改文字不改變任何計分、分類、evidence 的鍵、驗證或協定的結果」嚴格分類：
     第 2（usage 缺鍵 = null）、4（Pilot 缺 prediction 檔 → `eval score` exit 2）、5（`eval/runner.py:1349` 過期的錯誤訊息）、6（gold precision 的報告時機 = A12 (b)）項
     是純文件，**已處理**（只改文字；第 5 項先寫測試、看到失敗才改訊息，行為不變）；第 1（非 `m-` 引用的時間範圍進 evidence 的鍵）、3（022 第 3 項的分鐘窗含 60 s）、
-    7（放棄作答「一律算錯」與逐欄計分）項是評分邏輯或研究協定，**等使用者決定（freeze 之前）**，程式與規則都沒有改（選項與 Pilot 上的影響見 A11）。
-  - 「確認符合既定條件後，可以進行 Held-out Freeze」：既定條件見「下一步」9（含 F13 第 1、3、7 項的回答）；「持續自主推進資料收集」：freeze 之後的 held-out 收集照
+    7（放棄作答「一律算錯」與逐欄計分）項是評分邏輯或研究協定，先問使用者（選項與 Pilot 上的影響見 013 F13）。使用者 2026-10-16 回答，原話：
+    > 第 1、3、7 項都選 (i)，繼續 freeze
+
+    三項都維持程式現在的行為、寫成規則（使用者確認的既有實作，不是新的規則）：第 1 項——evidence 的鍵是 `(id, t0, t1)`、不分 id 的種類（017 §1，
+    `eval/relevance.py:21-22`），帶範圍的非 `m-` 引用在弱標籤與 gold 是另一個鍵，existence 與弱標籤的時間不看非 `m-` 的範圍（013 F1、F4）；第 3 項——022 §2 第 3 項的
+    「fault 期間的分鐘」用第 1 項的同一個窗 `[fault_start, fault_end + 60 s]`（`eval/failures.py`；013 F9、022「補註（2026-10-16）」；不是 022 的 Pilot 修訂）；
+    第 7 項——放棄作答照 `eval/score.py` 逐欄計分：origin 空的 prediction 在 origin 各指標 0、`no_answer`，其他欄位照提交的內容計分，補位的 `_abstain` 每個欄位都空、
+    每一層都是 0（013 F5；v1 §2「一律算錯」與 026 解讀 19「每一層都算錯」照這樣讀）。只改文字（013、017 第二則補註、022、023 追加、本文件）：程式、測試、schema 都沒有改，
+    Pilot 數字不變、不重新評分；017、022 沒有在 Pilot 上修訂，A9 的五項 waived 不變。測試：1116 passed（`-m "not network and not docker_daemon"`；沒有新增）。
+  - 「確認符合既定條件後，可以進行 Held-out Freeze」：既定條件見「下一步」9（F13 第 1、3、7 項已回答）；「持續自主推進資料收集」：freeze 之後的 held-out 收集照
     README「Held-out」段與「下一步」9，每次 run 之前看 Mac 的負載（使用者的說明）；label review 由使用者確認，不自動代替。
   - 本次的程式改動只有 F13 第 5 項的訊息文字與一個測試；Gate、模型、評測預算、指標、門檻、切分、評分、引用驗證、已封存的 Pilot 結果都沒有改，Pilot 不需要重新評分。
-    測試：1116 passed（`-m "not network and not docker_daemon"`；新增 1 個）。F13 第 1、3、7 項 (ii) 的影響是唯讀重算（只讀 `data/external`，沒有執行任何評分、收集或模型）。
+    測試：1116 passed（`-m "not network and not docker_daemon"`；新增 1 個）。F13 第 1、3、7 項 (ii) 的影響是唯讀重算（只讀 `data/external`，沒有執行任何評分、收集或模型）；
+    使用者選 (i)，(ii) 沒有採用，這三項也只改文字。
   - **審查（2026-10-16）的補正（只改文字）**：(1) F13 第 1、3 項的 (ii) 原本寫成「013 修改」，實際改的是 017 的鍵與 022 的分類，選了就是 017 / 022 的 Pilot 修訂、
     A9 的 waived 對該項不再成立——013 F13 開頭、A11、「下一步」6、023「追加（2026-10-16）」第 1 項的「連動」、017 第二則補註都已寫明；(2) F13 第 1 項補上 017 §1 與
     使用者較早的決定 2 已定下 `(id, t0, t1)`，(ii) 會推翻決定 2；(3) 023 追加第 1 項兩句事實更正（`d7576d2` 的讀法：看過的是合成範例探測的 LLM 輸出；`eval/runner.py` 與
@@ -74,7 +84,7 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
   > 若沒有其他需要我決定的問題，請依既定 SPEC 繼續推進 Held-out 正式評測。
 
   依序是「下一步」1（完成）、2–4（完成）、5（完成）；6、8 的使用者決定（A9、A10）與 A12 的回覆在 2026-10-16 收到（上面第一點）；
-  freeze 之前另等 013 F13 第 1、3、7 項的回答（A11）。需要使用者決定的事項列在「Blocked / 需要使用者」A，不自行決定。
+  013 F13 第 1、3、7 項的回答（A11）也在同日收到（三項都選 (i)）。需要使用者決定的事項列在「Blocked / 需要使用者」A，不自行決定。
 - **Pilot 結果**（n = 10，診斷用；2026-10-16 gold 標完後重新評分，評分程式沒有改：主要指標與 2026-10-15 的評分相同，只有 evidence 的 gold 欄位改變，見「下一步」2）：
 
   | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 失敗（022） | 平均 latency |
@@ -151,6 +161,10 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
 
 ## 下一步（Core，依序）
 
+1–5 已完成；6（Pilot 修訂宣告）與 8（amendments）的內容使用者已決定，013 F13 第 1、3、7 項也已回答（選 (i)），**freeze 之前沒有等使用者的事項**。
+剩下的只有：最後檢查（全部測試、第 7 步 version-check）→ 第 8 步 heldout-plan（空的 amendments）→ commit `plan.json` → 第 9 步 heldout-freeze（第 6 步的 A9 宣告）→
+只 commit `slots.json` 與 `freeze.json` 兩個檔 → push → held-out 收集（每個 run 之前的負載閘門）。
+
 1. **使用者的 evidence gold 盲標（91 筆）——已完成（2026-10-16）**：2026-10-15 `eval gold-todo --set pilot` 產生的工作表（INC-002 10、003 12、004 9、005 9、
    006 11、007 7、008 10、009 7、010 9、011 7；ground-truth 側各 incident 的 `evidence_gold_todo.json`）。
    - **做法**：一次一個 incident。主 session 唯讀顯示每一項的 record 內容（render v2）與 017 §3 的背景（label 的 fault_type、origin_service、affected_services 與
@@ -190,10 +204,13 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
    - 已處理（純文件，2026-10-16）：第 2 項 usage 缺鍵 = null（F1 的 `usage` 列照程式寫明）；第 4 項 Pilot 缺 prediction 檔（F5 寫明 `eval score` exit 2、不寫檔、不補放棄作答，
      以暫時的測試資料確認過）；第 5 項 `eval/runner.py:1349` 的訊息改成「`python -m eval run|score --method <m> --set <set>` first: the LLM method's results must exist
      on the <set> set」（測試先寫、看到失敗才改；行數、例外與行為不變）；第 6 項 gold precision 的報告時機（A12 (b)，F4）。
-   - **等使用者決定（freeze 之前）**：第 1、3、7 項（評分邏輯 / 研究協定），選項與 Pilot 上的影響見「Blocked / 需要使用者」A11 與 013 F13。
+   - **使用者 2026-10-16 選 (i)**（評分邏輯 / 研究協定；原話「第 1、3、7 項都選 (i)，繼續 freeze」）：第 1、3、7 項維持程式現在的行為、寫成規則，只改文字——
+     第 1 項 013 F1、F4（每一種 id 都可帶 `t0` / `t1`；非 `m-` 的範圍不影響 existence 與時間，但是 017 的鍵 `(id, t0, t1)` 的一部分）；第 3 項 013 F9 與
+     022「補註（2026-10-16）」（第 3 項的分鐘窗 = `[fault_start, fault_end + 60 s]`，既有實作，不是 022 的 Pilot 修訂）；第 7 項 013 F5（逐欄計分的讀法）。
+     程式不變，Pilot 數字不變；(ii) 的選項與影響保留在 013 F13，沒有採用（「已處理」的原 A11）。
    - 另外發現（不在 F13 的 7 項裡）：`collect/freeze.py:328` 的 freeze 拒絕訊息原本寫著過期的「NEXT A1: paid LLM methods are deferred」（只在 llm_methods.json 不是 approved 時出現）。**2026-10-16 主 session 已改**：訊息文字改為指向 decision 029（使用者批准模型與設定），測試先寫（tests/test_heldout_freeze.py llm-proposed 的 needle），行為不變；與 F13 第 5 項同類的純文字修正。
    freeze 宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`。
-6. **Pilot 修訂宣告——使用者已決定（2026-10-16，A9；前提已確認）**（`collect heldout-freeze --pilot-revisions <file>` 的輸入，023 §6「用掉或明確放棄」）：
+6. **Pilot 修訂宣告——使用者已決定（2026-10-16，A9；前提已確認；013 F13 第 1、3 項選 (i)，JSON 照原樣）**（`collect heldout-freeze --pilot-revisions <file>` 的輸入，023 §6「用掉或明確放棄」）：
 
    | decision | 宣告 | 根據 |
    |---|---|---|
@@ -222,8 +239,8 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
    ```
 
    2026-10-16 以 `collect.freeze.pilot_revision_problems`（policy v1、目前的 decision 檔清單）唯讀檢查這個內容，沒有問題。
-   **這份 JSON 假設 013 F13 第 1、3 項都選 (i)**（2026-10-16 審查補正）：第 1 項選 (ii) 時 `"017"`、第 3 項選 (ii) 時 `"022"` 要改成
-   `{"status": "used", "decision": <寫下修訂的 decision 檔>}`（那是 017 / 022 在 Pilot 上的那一次修訂；A11、023「追加（2026-10-16）」第 1 項的「連動」）。
+   **這份 JSON 以 013 F13 第 1、3 項都選 (i) 為前提**（2026-10-16 審查補正；選 (ii) 會是 017 / 022 在 Pilot 上的那一次修訂、該項改成 used）。
+   **使用者 2026-10-16 兩項都選 (i)，前提成立**：freeze 照這份 JSON 原樣宣告（023「追加（2026-10-16）」第 1 項的「連動」與「結果」）。
 7. **version-check（freeze 之前再一次）**：`uv run python -m eval version-check --set pilot` → exit 0 才繼續。`collect heldout-freeze` 不呼叫它
    （freeze 的 `pilot_llm_problems` 分不出 021 修訂前後的執行，decision 021「審查（2026-10-11）」），所以這是流程上的檢查。
 8. **heldout-plan——amendments 使用者已決定（2026-10-16，A10）**：不吸收 label review 的 6 則 notes（paymentUnreachable、cartFailure、adHighCpu、adManualGc、emailMemoryLeak、
@@ -232,8 +249,8 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
    `uv run python -m collect heldout-plan --amendments <amendments.json>` 寫一次 `docs/heldout/plan.json` → 檢查後 commit（只有這個檔）。
    移除 fault 只依 023 §1 的證據（觸發、無效率、詞彙命中），由 `heldout-plan` 檢查，永不依任何方法的分數。
 9. **heldout-freeze → held-out 收集 → label review → held-out 方法執行 → Gate**：
-   - **freeze 之前（全部成立才 freeze）**：013 F13 第 1、3、7 項**已由使用者回答**（A11；選 (ii) 的項目要先改程式、測試、013 F13，重新評分 Pilot 並同步 README、NEXT，
-     第 1、3 項選 (ii) 時另寫 017 / 022 的修訂紀錄、第 6 步的宣告改成 used；沒有回答就不 freeze）；README 已定稿（第 4 步，A12 已套用）；A9、A10 已回覆（第 6、8 步）；A4 維持現狀；全部測試通過；version-check exit 0（第 7 步）；
+   - **freeze 之前（全部成立才 freeze）**：013 F13 第 1、3、7 項**已由使用者回答**（2026-10-16，三項都選 (i)：只改文字，程式不變、Pilot 不重新評分，
+     第 6 步的宣告照原樣；已處理的原 A11）；README 已定稿（第 4 步，A12 已套用）；A9、A10 已回覆（第 6、8 步）；A4 維持現狀；全部測試通過；version-check exit 0（第 7 步）；
      plan.json 已 commit；checkout 乾淨、已 push。
      `uv run python -m collect heldout-freeze --pilot-revisions <revisions.json>`（第 6 步的內容）→ 只把 `docs/heldout/slots.json` 與 `freeze.json` commit 成一個 commit → push。
      程式另檢查：目前 env lock 有通過的 soak（soak #6）、三個 LLM 方法的 Pilot `run_config.json` 正好是 `llm_methods.json`（含 host `gpu-server`）且分數是從那次執行算的（026 解讀 31、32）。
@@ -257,44 +274,30 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
 
 （編號接在之前用過的 A0–A7 之後，避免和 decision 裡的「NEXT A1」等舊編號混淆；舊的項目見下面「已處理」。）
 
-- **A11（剩下的部分）013 F13 第 1、3、7 項——freeze 的前置條件，使用者回覆之前不 freeze（「下一步」9）**。使用者 2026-10-16 說「涉及評分邏輯或研究協定的問題先詢問我」，
-  這三項是評分邏輯或研究協定，程式與規則都沒有改。每一項請選 (i) 或 (ii)。(i) = 維持程式現在的行為、把它寫成規則（只改文字，Pilot 數字都不變）；
-  (ii) = 改程式或規則（freeze 之前改程式、測試與 013 F13，重新評分 Pilot，下面的 Pilot 數字會變）。**(ii) 改的是哪一份 decision**（2026-10-16 審查補正）：
-  第 7 項改 013 的計分，是由 Pilot 引起的 013 修改，依 023 第 16 行併進 013 正式版（013 已是 used）；**第 1 項改 017 §1 的鍵、第 3 項改 022 §2 的分類程式**——
-  看過 Pilot 結果之後改它們，照 A9 確認前提時用的同一個標準就是 **017 / 022 在 Pilot 上的那一次修訂**：「下一步」6 的宣告要把該項改成
-  `{"status": "used", "decision": <寫下修訂的 decision 檔>}`，你對 A9 的 waived（「前提是確認沒有使用任何 Pilot 修訂額度」）對該項就不再成立。
-  **只有第 1、3 項都選 (i)，A9 的五項 waived 才維持不變。**第 3 項若你認為 (ii) 只是讓程式符合 022 原文、不算修訂，也請明確說明。
-  影響以 `data/external/results/pilot/` 的 prediction、transcript 與 gold 唯讀重算（沒有重新評分）：
-  1. **非 `m-` 引用（`s-` / `l-` / `p-` / `t-`）帶的 `t0` / `t1`**：現在 existence 與弱標籤的時間不看這個範圍，但它是弱標籤與 gold 的鍵 `(id, t0, t1)` 的一部分
-     （同一筆紀錄的不同範圍是不同的項目、各自盲標）。
-     這個鍵是 017 §1 的規則（「以 `(id, t0, t1)` 去重」，不分 id 種類），而且你 2026-10-16 較早的決定 2（「重複證據維持原規則，不修改 91 筆工作表的標註單位」）
-     已確認標註單位是 `(id, t0, t1)`（017「補註（2026-10-16）」第 2 點；INC-003、INC-004 的重複項目就是照這樣分開標註）；程式與 017 一致，沒寫到的只有 013 v1 §1 / F1、F4。
-     依嚴格分類 (i) 其實接近純文件，但涉及 evidence 的鍵，仍請你確認。
-     - (i) 維持：就是 017 §1 與決定 2 的現狀；只在 013 F1、F4 補寫「每一種 id 都可帶 `t0` / `t1`，非 `m-` 的範圍不影響 existence 與時間，但是 017 的鍵的一部分」。
-       Pilot 數字不變，`"017": waived` 不變。
-     - (ii) 非 `m-` 的鍵只用 id（`m-` 不變）。**會推翻決定 2，而且是 017 的 Pilot 修訂（`"017"` 改成 used）**。
-       Pilot 上：existence、弱標籤（含 n）與 `gold-todo` 的樣本都不變；gold 有 4 個 id 各以兩個鍵判定、兩次都是 relevant（INC-003 2 個、INC-004 2 個），合併後 115 → 111 個鍵、relevant 75 → 71，沒有衝突（合併的寫法要另外決定，gold 是只附加的檔案）；2026-10-15 的工作表會是 87 筆、不是 91 筆；
-       retrieval 的 gold coverage 0.667 [0.345, 0.892] → 0.680 [0.384, 0.903]（INC-005 的 5 / 22 → 7 / 22）；所有 gold precision、其他 coverage、主要指標、compare、gate 都不變。
-  3. **022 第 3 項「涵蓋至少一個 fault 期間的分鐘」**：程式用與第 1 項相同的 `[fault_start, fault_end + 60 s]` 算分鐘範圍。
-     - (i) 維持（「fault 期間」在 022 §2 都是含 60 s 的窗）。`"022": waived` 不變。
-     - (ii) 第 3 項只算 `[fault_start, fault_end]` 的分鐘（span / log / point 的窗不變）。**是 022 的 Pilot 修訂（`"022"` 改成 used；除非你明確決定不算）**。
-       Pilot 上**沒有任何失敗的類別改變**（dump-all、retrieval 的 seen_misread 來自 `stats:*`；Agent 的 3 次 seen_misread 不含 60 s 也成立）；失敗表與 Gate 條件 2、3 都不變；只可能影響 held-out。
-  7. **放棄作答「一律算錯」**：程式沒有放棄作答的分支、照欄位計分；方法自己提交、origin 空但其他欄位有值的 prediction，其他欄位照常得分（補位的 `_abstain` 每一層都是 0）。
-     - (i) 維持（「一律算錯」指 origin：各指標 0、`no_answer`、留在分母；其他欄位照逐欄計分）。
-     - (ii) origin 空的 prediction 11 個指標都算 0。Pilot 上只有 Agent INC-008：symptom_exact 1 → 0、symptom_jaccard 1.0 → 0；Agent 的 symptom_exact 0.60 [0.30, 0.90] → 0.50 [0.20, 0.80]
-       （README 的 Pilot 表要改）、symptom_jaccard 0.70 → 0.60；compare agent − stat-anomaly 的 symptom_exact（只描述）0.10 [−0.30, 0.50] → 0.00 [−0.50, 0.50]；
-       compare 的 LOFO symptom_exact 列：拿掉 adHighCpu 的不變，其他 9 列平均差各少 0.111、下界變成 −0.333（cartFailure、emailMemoryLeak）或 −0.556（其他 7 列）；
-       Pilot `gate.md` 的描述段 symptom_exact 0.100 [−0.300, 0.500] → 0.000 [−0.500, 0.500]、Agent 各 fault 表 adHighCpu 1.000 → 0.000、equal weight / incidents 0.600 → 0.500
-       （以 `eval/compare.py` 的 `paired`、`lofo` 對記憶體裡的分數唯讀重算，沒有寫檔）；origin、fault、affected、失敗類別、evidence 與 Gate 三個條件都不變。
-       013 已是 used，A9 的宣告不受影響。
+（目前沒有：freeze 之前的決策都已回答。freeze 之後的 held-out label review 與 evidence gold 盲標仍由使用者本人做、不自動代替，見「下一步」9。）
+
+已處理（2026-10-16，使用者回答 013 F13 第 1、3、7 項；freeze 之前），原話：
+> 第 1、3、7 項都選 (i)，繼續 freeze
+
+- 原 A11（剩下的部分）013 F13 第 1、3、7 項（評分邏輯 / 研究協定，freeze 的前置條件）：**三項都選 (i)**——維持程式現在的行為、寫成規則（只改文字，Pilot 數字不變）。
+  (ii) 的選項與唯讀重算的影響保留在 013 F13，沒有採用。
+  1. 非 `m-` 引用的 `t0` / `t1`：evidence 的鍵維持 `(id, t0, t1)`、不分 id 的種類（017 §1，`eval/relevance.py:21-22`；與使用者較早的決定 2 一致）；帶範圍的非 `m-` 引用
+     在弱標籤與 gold 是另一個鍵；existence（`collect/snapshot.py` 的 `resolve`）與弱標籤的時間（`eval/relevance.py`）不看非 `m-` 的範圍。寫在 013 F1、F4。
+     017 沒有修訂，`"017": waived` 不變（017 第二則補註）。
+  3. 022 第 3 項「涵蓋至少一個 fault 期間的分鐘」：用第 1 項的同一個窗 `[fault_start, fault_end + 60 s]`（`eval/failures.py`）。這是使用者確認的既有實作，
+     不是 022 在 Pilot 上的那一次修訂；寫在 013 F9 與 022「補註（2026-10-16）」，`"022": waived` 不變。
+  7. 放棄作答：照 `eval/score.py` 逐欄計分——origin 空的 prediction 在 origin 各指標 0、`no_answer`、留在分母，其他欄位照提交的內容計分；harness / held-out 補位的
+     `_abstain` 每個欄位都空，所以每一層都是 0。013 v1 §2「一律算錯」與 026 解讀 19「每一層都算錯」照這樣讀；寫在 013 F5，013 的計分不變（013 仍是 used）。
+  - 第 1、3 項都選 (i)，所以 A9 的五項 waived 與「下一步」6 的 JSON 照原樣（023「追加（2026-10-16）」第 1 項的「連動」已解決）。程式、測試、schema 都沒有改，
+    Pilot 不重新評分。
 
 已處理（2026-10-16，使用者「Freeze 前決策確認」，原話見「目前位置」）：
 - 原 A12 Pilot README 的 dump-all gold precision：**選 (b)**——不報，只報 coverage 0.840，保留 4 筆略與理由（README、017「補註（2026-10-16，第二則）」、本文件；「下一步」4）。
 - 原 A9 Pilot 修訂宣告的五項：**015、017、019、020、022 都 waived**；使用者的前提（沒有使用任何 Pilot 修訂額度）已唯讀確認（「下一步」6、decision 023「追加（2026-10-16）」第 1 項）。
-  017、022 的 waived 另以上面 A11 第 1、3 項選 (i) 為前提（選 (ii) 就是它們的 Pilot 修訂，宣告改成 used）。
+  017、022 的 waived 另以 013 F13 第 1、3 項選 (i) 為前提（選 (ii) 就是它們的 Pilot 修訂，宣告改成 used）；使用者同日兩項都選 (i)，前提成立（上一則）。
 - 原 A10 heldout-plan 是否吸收 label review 的 notes：**不吸收**，amendments 是空的（「下一步」8、023「追加（2026-10-16）」第 2 項）。
 - 原 A4 freeze 之後的修正路徑：**維持現狀**——freeze 之後發現影響正確性的 bug，先停止並保留紀錄，不自行修改研究規則（023「追加（2026-10-16）」第 3 項；2026-10-10 的「沒有偏好」同樣不實作）。
-- 原 A11 的處理方式：純文件的直接修正（F13 第 2、4、5、6 項已處理），評分邏輯或研究協定的先問（第 1、3、7 項 → 上面的 A11）。
+- 原 A11 的處理方式：純文件的直接修正（F13 第 2、4、5、6 項已處理），評分邏輯或研究協定的先問（第 1、3、7 項 → 使用者選 (i)，上一則）。
 
 已處理（2026-10-16，較早）：
 - 原 A8 evidence gold 盲標（91 筆）：使用者 2026-10-16 一次一個 incident 盲標完成（87 筆寫入、4 筆略），已重新評分（「下一步」1–4）。
