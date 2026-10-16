@@ -4,7 +4,7 @@
 
 **Core 還沒完成，Gate 還沒判定，不進 Advanced。** Pilot 上四個方法都已執行並評分（診斷用，不是 Gate 判定）。使用者的 evidence gold 盲標（91 筆）
 2026-10-16 完成（87 筆寫入、4 筆略），重新評分、compare、gate 與 README 的結果都已更新（「下一步」1–4 完成）。剩下的 Core 依序見「下一步（Core，依序）」5–9：
-013 正式版（起草中）、Pilot 修訂宣告、version-check、heldout-plan、freeze。沒有技術上的 blocker；需要使用者的事項見「Blocked / 需要使用者」A。
+013 正式版（**已完成**，2026-10-16）、Pilot 修訂宣告、version-check、heldout-plan、freeze。沒有技術上的 blocker；需要使用者的事項見「Blocked / 需要使用者」A。
 
 - **使用者決定（2026-10-16）**，原話：
   > 我的決定：
@@ -24,14 +24,14 @@
   - 3 是本次的文件同步（下面「文件同步（2026-10-16）」）。
   - 4 是 decision 030：held-out 最終結果的固定檔名 `docs/decisions/100-heldout-final-results.md`（100 保留，一般 decision 用 031–099）；README 已加預留連結
     （held-out 評測完成前打不開）。README 在 freeze 時封存，之後不改；held-out 的結果只寫在 100 與同時新增的 decision 紀錄。
-  - 「重新計算 Pilot 的分數、比較與診斷性 Gate」是「下一步」2、3（**已完成**）；「Freeze 前稽核」是「下一步」4–8（README 定稿——**已完成**、013 正式版、
+  - 「重新計算 Pilot 的分數、比較與診斷性 Gate」是「下一步」2、3（**已完成**）；「Freeze 前稽核」是「下一步」4–8（README 定稿——**已完成**、013 正式版——**已完成**、
     Pilot 修訂宣告、version-check、plan），freeze 本身再由程式檢查（「下一步」9）。門檻、Gate、指標、切分、預算、評分、引用驗證都不改。
 - **使用者（2026-10-16，回答 INC-011 時）**，原話（標註的部分記在 017「補註（2026-10-16，第二則）」）：
   > 請依 decision 017 寫入人工標註，保持方法盲標，不修改既有判定標準。
   > 10 個 Incident 全部完成後，請重新計算 Gold Evidence Precision、Coverage 與 Pilot 比較結果，進行 Freeze 前稽核。
   > 若沒有其他需要我決定的問題，請依既定 SPEC 繼續推進 Held-out 正式評測。
 
-  依序是「下一步」1（完成）、2–4（完成）、5–9（進行中）；需要使用者決定的事項列在「Blocked / 需要使用者」A，不自行決定。
+  依序是「下一步」1（完成）、2–4（完成）、5（完成）、6–9（進行中）；需要使用者決定的事項列在「Blocked / 需要使用者」A，不自行決定。
 - **Pilot 結果**（n = 10，診斷用；2026-10-16 gold 標完後重新評分，評分程式沒有改：主要指標與 2026-10-15 的評分相同，只有 evidence 的 gold 欄位改變，見「下一步」2）：
 
   | 方法 | fault_type | origin_top1 | origin_top3 | affected_f1 | symptom_exact | 失敗（022） | 平均 latency |
@@ -89,7 +89,7 @@
   | label 與 review（Pilot 10 個，human:jingwen） | 006、010、016、018 |
   | canonical snapshot 與凍結的 policy v1 | 011；renderer v2 |
   | docker_stats 覆蓋 | 012 |
-  | 分層評分（正式版待「下一步」5） | 013 |
+  | 分層評分（正式版 2026-10-16，「下一步」5） | 013 |
   | 統計 baseline v2（Pilot 修訂放棄） | 014 |
   | leakage audit | 015 |
   | evidence relevance（Pilot 的 gold：統計 baseline 2026-10-10、LLM 方法 2026-10-16，human:jingwen） | 017 |
@@ -136,9 +136,12 @@
    修訂前（封存）的 dump-all / retrieval **不補標、不重新評分**（封存目錄不被 `gold-todo` 讀；封存的 `scores.json` 只含評分當時與既有判定重疊的 gold：
    dump-all n = 1、coverage 0.025，retrieval n = 0），README 不報它們的 gold precision。decision 030 的預留連結還在。README 在 freeze 時封存；
    dump-all 的 gold precision 照使用者 2026-10-16 的要求報出，並標明它的樣本沒有全部判定；使用者若要改（A12），只能在 freeze 之前。
-5. **013 正式版**（decision 013、023 §7：§7 的 paired 比較與 Gate 判準寫進 013 正式版，用掉 013 唯一的一次修訂；其他由 Pilot 引起的 013 修改必須和它併在一起）。
+5. **013 正式版——已完成（2026-10-16）**（decision 013、023 §7：§7 的 paired 比較與 Gate 判準寫進 013 正式版，用掉 013 唯一的一次修訂；其他由 Pilot 引起的 013 修改必須和它併在一起）。
    **程式不檢查它的內容**：`collect/freeze.py` 只檢查 Pilot 修訂宣告的 013 是 `used`、而且指名 frozen commit 裡存在的 decision 檔。內容是流程上的檢查。
-   主 session 依 023 §7 起草中（2026-10-16）；要併入其他 013 修改時先問使用者（A11）。
+   寫在 013 文末「正式版（2026-10-16，held-out 之前凍結；013 唯一的一次修訂）」（F1–F13）：只轉述已決定、已實作的規則（v1 §1–§4、023 §2–§7 與 Gate 計算的解讀、
+   026、017、022、024、030）並標出程式行號，**沒有新增任何指標、門檻、規則或解讀**，也沒有其他由 Pilot 引起的 013 修改（F12 列出 Pilot 的觀察，都不改 013）。
+   文件與程式的 6 項出入只記錄、不改（F13：非 `m-` 引用的時間範圍、usage 缺鍵 = null、022 的分鐘窗、Pilot 缺 prediction 檔、`eval/runner.py:1349` 過期的 A1 訊息、
+   gold precision 的報告時機 = A12）。程式、schema、測試都沒有改，Pilot 分數不需要重算。freeze 宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`。
 6. **Pilot 修訂宣告**（`collect heldout-freeze --pilot-revisions <file>` 的輸入，023 §6「用掉或明確放棄」）：
 
    | decision | 宣告 | 根據 |
@@ -173,7 +176,8 @@
 
 - **A9 Pilot 修訂宣告的五項**（015、017、019、020、022 寫 `used` 或 `waived`；「下一步」6）：推導的建議是五個都 `waived`，由使用者決定。
 - **A10 heldout-plan 是否吸收 label review 的 notes**（「下一步」8）。
-- **A11（需要時）013 正式版**：主 session 依 023 §7 起草；若要併入其他由 Pilot 引起的 013 修改，那是設計決定，先問使用者（「下一步」5）。
+- **A11（需要時）013 正式版**：已寫好（2026-10-16，「下一步」5），只併入 023 §7、沒有其他修改；若使用者要併入其他由 Pilot 引起的 013 修改或處理 F13 的出入，
+  那是設計決定，必須在 freeze 之前（freeze 之後 013 不能改）。沒有要改就不需要回覆。
 - **A12 Pilot README 的 dump-all gold precision（確認即可；要改只能在 freeze 之前）**：017「對實驗的影響」寫「各自的樣本要先標完，gold precision 才會出現在報告中」，
   decision 030 §8 照這句寫 held-out 的 100「一個方法的樣本全部判定之前不報它的 gold precision」。Pilot 上 91 筆都已呈現並作答，但 4 筆略都在 dump-all 的樣本裡，
   所以 dump-all 的樣本沒有全部判定（stat-anomaly、retrieval、agent 的樣本全部判定）。README 照使用者 2026-10-16 的要求（重新計算 Gold Evidence Precision、Coverage）
