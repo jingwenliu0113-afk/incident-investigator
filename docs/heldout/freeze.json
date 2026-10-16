@@ -1,0 +1,94 @@
+{
+  "freeze_version": 1,
+  "decision": "023 \u00a76",
+  "frozen_at": "2026-10-16T13:47:17Z",
+  "frozen_from_commit": "4b42a4a287a4cfea10bf4e0a32c9cbe000d34f59",
+  "frozen_tree": "c8bb86dd8c0074c5b4c9625c6dff6589fcaa3b96",
+  "decisions": {
+    "docs/decisions/001-pin-otel-demo-3.1.0.md": "4f4f297cf445fed4f2d3869f040c893793123715",
+    "docs/decisions/002-manifest-vs-ground-truth-split.md": "1325464e67c0829bfe95be4b2089a2cd6efb464e",
+    "docs/decisions/003-traffic-generator-and-seed-policy.md": "967922ffbab0dae3984f090b084705194355d585",
+    "docs/decisions/004-product-catalog-memory-limit.md": "642aeb8ddca2cb34ccc07a63856320e5b73a263a",
+    "docs/decisions/005-known-ambient-failures-and-opensearch.md": "8afd2e8f57be08e2db6a76c841528f7d6aa64775",
+    "docs/decisions/006-incident-label-schema.md": "3c7eefc49797f95da2bcd95335e7682997d2c1f6",
+    "docs/decisions/007-checkout-memory-limit.md": "d7bef73416a59f8163988765374197af300bd1e7",
+    "docs/decisions/008-raw-telemetry-export.md": "e18b1e6844c1f9112f36cec8b57662ca6191088b",
+    "docs/decisions/009-run-group-protocol-and-validity.md": "7dab04859bbffb4daa6ac8f02eceff27e1adf988",
+    "docs/decisions/010-first-incident-and-affected-services-rule.md": "49be4cfd41effdaa392b854dc6cd002a9d9f7c71",
+    "docs/decisions/011-canonical-telemetry-schema.md": "9785325f5dcfb0e85733ae475f107f2badab78dc",
+    "docs/decisions/012-docker-stats-container-coverage.md": "3a361f02dc6056a6158f10ffe9f7606041ad600c",
+    "docs/decisions/013-prediction-format-and-layered-scoring.md": "64c83c6ec2453cf8a4418a871ad268a73413545f",
+    "docs/decisions/014-time-framing-and-statistical-baseline.md": "0c51071dd4719e9bba2d0fd11a00c5b1e851f74c",
+    "docs/decisions/015-leakage-audit-v1.md": "aed4762ffc468e13f3693374320d50f002d4b03b",
+    "docs/decisions/016-pilot-fault-list-and-a-priori-labels.md": "4fc92b6e3fd9ab9a9852e3e138c3c3b750294713",
+    "docs/decisions/017-evidence-relevance.md": "5b52fa8ab0a972771a33fd26d278ed145e7564cf",
+    "docs/decisions/018-label-review.md": "f5624c847e1294f3c5b1b8c4d23a9e54cc70ea40",
+    "docs/decisions/019-agent-tools-v1.md": "72363191cce34a6e2418d73ef1a257f21081e2ea",
+    "docs/decisions/020-agent-harness-v1.md": "f3079ce0b29efd32baeca266930692a2b8b40ed3",
+    "docs/decisions/021-dump-all-and-retrieval-baselines.md": "f100b5366f1d81402fb103f2fb1a83dc4b3e6b56",
+    "docs/decisions/022-failure-taxonomy-v1.md": "9a020e00495b26d4e008555ceac3ea9e72db9d4b",
+    "docs/decisions/023-heldout-protocol.md": "f98f5e8e7d12c1cef04fd67afc52f944cbe5dd69",
+    "docs/decisions/024-budgets-usage-and-visible-data.md": "d9bbbaa784bdacc2c3f321cb2df7125ec8e4b797",
+    "docs/decisions/025-power-mode-provenance.md": "a05e07029e6bb136281004695d40d7af87c91249",
+    "docs/decisions/026-heldout-implementation.md": "f932e425809d270d3904194842e89087b7a57b1c",
+    "docs/decisions/027-synthetic-sample.md": "0b93e8408c09d3a635ae59449721e0c44ddad4e4",
+    "docs/decisions/028-grafana-no-plugin-download.md": "7983024bafd789722457c42b8608233d54d7e281",
+    "docs/decisions/029-local-llm-ollama.md": "e984a2bf48c1a6831aa2b58d03c58097a7efe851",
+    "docs/decisions/030-heldout-results-publication.md": "ae39c1a04e5c9ccd45e457346548fecb3489902e"
+  },
+  "env_lock_sha256": "sha256:1e749f6737440e8851ae6f193a4b6f79108336d5c7c551ed8c30694a485f92ab",
+  "policy": {
+    "version": 1,
+    "sha256": "sha256:95bc4b07388fb04c9e3a8b0ee7faf8cdeefa5d309c069f540d446d24f4609b4e"
+  },
+  "llm": {
+    "status": "approved",
+    "model": "qwen3.5:9b-q4_K_M",
+    "model_version": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "temperature": 0,
+    "config_sha256": "sha256:1284b8f2773d3ae2041299e888e5e843a98ef0fe02d5dd05770e592b6246fd72"
+  },
+  "pilot_revisions": {
+    "011": {
+      "status": "waived"
+    },
+    "013": {
+      "status": "used",
+      "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"
+    },
+    "014": {
+      "status": "waived"
+    },
+    "015": {
+      "status": "waived"
+    },
+    "017": {
+      "status": "waived"
+    },
+    "019": {
+      "status": "waived"
+    },
+    "020": {
+      "status": "waived"
+    },
+    "021": {
+      "status": "used",
+      "decision": "docs/decisions/021-dump-all-and-retrieval-baselines.md"
+    },
+    "022": {
+      "status": "waived"
+    }
+  },
+  "plan": {
+    "path": "docs/heldout/plan.json",
+    "sha256": "sha256:0a10496a9e3f72b4d783c1f738ed0e0c5443ee2b2233c076a6f040ee62360cf8",
+    "faults": 10
+  },
+  "k": 5,
+  "master_seed": 20261009,
+  "slots": {
+    "path": "docs/heldout/slots.json",
+    "sha256": "sha256:b33276bc395526fece0921901b667fd9da9cbc9525d4e8a1f8d5f364f66b97c5",
+    "count": 50
+  }
+}

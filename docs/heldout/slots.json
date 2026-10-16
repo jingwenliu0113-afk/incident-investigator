@@ -1,0 +1,351 @@
+{
+  "slots_version": 1,
+  "decision": "023 \u00a74",
+  "master_seed": 20261009,
+  "k": 5,
+  "plan_sha256": "sha256:0a10496a9e3f72b4d783c1f738ed0e0c5443ee2b2233c076a6f040ee62360cf8",
+  "faults": [
+    [
+      "paymentFailure",
+      "100%"
+    ],
+    [
+      "productCatalogFailure",
+      "on"
+    ],
+    [
+      "paymentUnreachable",
+      "on"
+    ],
+    [
+      "cartFailure",
+      "100%"
+    ],
+    [
+      "intlShippingSlowdown",
+      "10sec"
+    ],
+    [
+      "productCatalogLockContention",
+      "on"
+    ],
+    [
+      "adHighCpu",
+      "on"
+    ],
+    [
+      "adManualGc",
+      "on"
+    ],
+    [
+      "emailMemoryLeak",
+      "1000x"
+    ],
+    [
+      "recommendationCacheFailure",
+      "on"
+    ]
+  ],
+  "slots": [
+    {
+      "slot": "H01",
+      "block": 1,
+      "flag": "productCatalogLockContention",
+      "variant": "on"
+    },
+    {
+      "slot": "H02",
+      "block": 1,
+      "flag": "productCatalogFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H03",
+      "block": 1,
+      "flag": "intlShippingSlowdown",
+      "variant": "10sec"
+    },
+    {
+      "slot": "H04",
+      "block": 1,
+      "flag": "paymentUnreachable",
+      "variant": "on"
+    },
+    {
+      "slot": "H05",
+      "block": 1,
+      "flag": "cartFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H06",
+      "block": 1,
+      "flag": "emailMemoryLeak",
+      "variant": "1000x"
+    },
+    {
+      "slot": "H07",
+      "block": 1,
+      "flag": "paymentFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H08",
+      "block": 1,
+      "flag": "recommendationCacheFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H09",
+      "block": 1,
+      "flag": "adManualGc",
+      "variant": "on"
+    },
+    {
+      "slot": "H10",
+      "block": 1,
+      "flag": "adHighCpu",
+      "variant": "on"
+    },
+    {
+      "slot": "H11",
+      "block": 2,
+      "flag": "recommendationCacheFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H12",
+      "block": 2,
+      "flag": "paymentFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H13",
+      "block": 2,
+      "flag": "emailMemoryLeak",
+      "variant": "1000x"
+    },
+    {
+      "slot": "H14",
+      "block": 2,
+      "flag": "cartFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H15",
+      "block": 2,
+      "flag": "adHighCpu",
+      "variant": "on"
+    },
+    {
+      "slot": "H16",
+      "block": 2,
+      "flag": "productCatalogFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H17",
+      "block": 2,
+      "flag": "adManualGc",
+      "variant": "on"
+    },
+    {
+      "slot": "H18",
+      "block": 2,
+      "flag": "productCatalogLockContention",
+      "variant": "on"
+    },
+    {
+      "slot": "H19",
+      "block": 2,
+      "flag": "intlShippingSlowdown",
+      "variant": "10sec"
+    },
+    {
+      "slot": "H20",
+      "block": 2,
+      "flag": "paymentUnreachable",
+      "variant": "on"
+    },
+    {
+      "slot": "H21",
+      "block": 3,
+      "flag": "intlShippingSlowdown",
+      "variant": "10sec"
+    },
+    {
+      "slot": "H22",
+      "block": 3,
+      "flag": "adHighCpu",
+      "variant": "on"
+    },
+    {
+      "slot": "H23",
+      "block": 3,
+      "flag": "productCatalogFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H24",
+      "block": 3,
+      "flag": "adManualGc",
+      "variant": "on"
+    },
+    {
+      "slot": "H25",
+      "block": 3,
+      "flag": "productCatalogLockContention",
+      "variant": "on"
+    },
+    {
+      "slot": "H26",
+      "block": 3,
+      "flag": "paymentUnreachable",
+      "variant": "on"
+    },
+    {
+      "slot": "H27",
+      "block": 3,
+      "flag": "cartFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H28",
+      "block": 3,
+      "flag": "paymentFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H29",
+      "block": 3,
+      "flag": "recommendationCacheFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H30",
+      "block": 3,
+      "flag": "emailMemoryLeak",
+      "variant": "1000x"
+    },
+    {
+      "slot": "H31",
+      "block": 4,
+      "flag": "productCatalogLockContention",
+      "variant": "on"
+    },
+    {
+      "slot": "H32",
+      "block": 4,
+      "flag": "adManualGc",
+      "variant": "on"
+    },
+    {
+      "slot": "H33",
+      "block": 4,
+      "flag": "emailMemoryLeak",
+      "variant": "1000x"
+    },
+    {
+      "slot": "H34",
+      "block": 4,
+      "flag": "paymentFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H35",
+      "block": 4,
+      "flag": "recommendationCacheFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H36",
+      "block": 4,
+      "flag": "productCatalogFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H37",
+      "block": 4,
+      "flag": "paymentUnreachable",
+      "variant": "on"
+    },
+    {
+      "slot": "H38",
+      "block": 4,
+      "flag": "intlShippingSlowdown",
+      "variant": "10sec"
+    },
+    {
+      "slot": "H39",
+      "block": 4,
+      "flag": "cartFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H40",
+      "block": 4,
+      "flag": "adHighCpu",
+      "variant": "on"
+    },
+    {
+      "slot": "H41",
+      "block": 5,
+      "flag": "adHighCpu",
+      "variant": "on"
+    },
+    {
+      "slot": "H42",
+      "block": 5,
+      "flag": "emailMemoryLeak",
+      "variant": "1000x"
+    },
+    {
+      "slot": "H43",
+      "block": 5,
+      "flag": "productCatalogFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H44",
+      "block": 5,
+      "flag": "recommendationCacheFailure",
+      "variant": "on"
+    },
+    {
+      "slot": "H45",
+      "block": 5,
+      "flag": "intlShippingSlowdown",
+      "variant": "10sec"
+    },
+    {
+      "slot": "H46",
+      "block": 5,
+      "flag": "paymentFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H47",
+      "block": 5,
+      "flag": "paymentUnreachable",
+      "variant": "on"
+    },
+    {
+      "slot": "H48",
+      "block": 5,
+      "flag": "adManualGc",
+      "variant": "on"
+    },
+    {
+      "slot": "H49",
+      "block": 5,
+      "flag": "cartFailure",
+      "variant": "100%"
+    },
+    {
+      "slot": "H50",
+      "block": 5,
+      "flag": "productCatalogLockContention",
+      "variant": "on"
+    }
+  ]
+}
