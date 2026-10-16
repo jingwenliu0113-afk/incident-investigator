@@ -160,7 +160,7 @@ Pilot 修訂宣告、version-check、heldout-plan、freeze。沒有技術上的 
 7. **version-check（freeze 之前再一次）**：`uv run python -m eval version-check --set pilot` → exit 0 才繼續。`collect heldout-freeze` 不呼叫它
    （freeze 的 `pilot_llm_problems` 分不出 021 修訂前後的執行，decision 021「審查（2026-10-11）」），所以這是流程上的檢查。
 8. **heldout-plan**：`uv run python -m collect heldout-plan --amendments <amendments.json>` 寫一次 `docs/heldout/plan.json` → 人檢查後 commit。
-   label review 的 affected 與 user symptom 全部維持 a priori；7 個 incident 有 notes——要不要把 notes 當成 amendments 吸收（`field: notes`，每項要理由，
+   label review 的 affected 與 user symptom 全部維持 a priori；**6 個** incident 的 notes 與 a priori 不同（paymentUnreachable、cartFailure、adHighCpu、adManualGc、emailMemoryLeak、recommendationCacheFailure；INC-003、006、007 的 notes 與 a priori 相同、INC-002 沒有 notes；2026-10-16 稽核以 label_review.json 核對，先前寫的「7 個」是錯的）——要不要把 notes 當成 amendments 吸收（`field: notes`，每項要理由，
    023 解讀 3）由使用者決定（A10）。移除 fault 只依 023 §1 的證據（觸發、無效率、詞彙命中），永不依任何方法的分數。
 9. **heldout-freeze → held-out 收集 → held-out 方法執行 → Gate**：
    - freeze 之前：README 已定稿（第 4 步）、**A12 已由使用者回覆**（照回覆處理 README，回答補記在 017「補註（2026-10-16，第二則）」；沒有回覆就不 freeze）、
@@ -434,7 +434,7 @@ A1 已由使用者決定（2026-10-10「照建議」：本機模型 qwen3.5 9B�
     023 狀態行改為「決定三項、一項沒有偏好」，014 補註只留使用者的決定與證據（理由標明是原 A2 建議的理由）。
   - 測試：947 passed（`-m "not network and not docker_daemon"`）；新增的測試只用 synthetic fixture，沒有執行任何收集、Docker 或付費 API。
 - **label review 結果**：10 個都是 `fault_exercised = true`、`saw_method_outputs = false`；affected 與 user symptom 全部維持 a priori；
-  7 個補了 notes（實際觀察，例如 emailMemoryLeak 沒有 OOM、recommendationCacheFailure 4 次 OOM、adHighCpu 時多數服務 p95 小幅上升）。
+  7 個補了 notes（2026-10-16 更正：與 a priori 不同的是 6 個；實際觀察，例如 emailMemoryLeak 沒有 OOM、recommendationCacheFailure 4 次 OOM、adHighCpu 時多數服務 p95 小幅上升）。
   coverage：traces origin 10；metrics origin 9、symptom_only 1；logs none 5、origin 3、symptom_only 2（逐案見 `label_review.json`）。
 - **第一張 baseline 表（stat-anomaly v2，Pilot，n = 10，用 reviewed label）**：fault_type 0.30、origin_top1 0.60（top3 0.90）、affected_f1 0.77、symptom_exact 0.50；
   失敗 8 個 = mechanism 4 + rule_limit 4；easy / hard 的 origin_top1 都是 0.60。evidence existence 1.0、弱標籤 temporal / service 1.0、origin 0.625。
