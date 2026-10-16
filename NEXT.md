@@ -45,8 +45,8 @@
     `eval/relevance.py:21-22`），帶範圍的非 `m-` 引用在弱標籤與 gold 是另一個鍵，existence 與弱標籤的時間不看非 `m-` 的範圍（013 F1、F4）；第 3 項——022 §2 第 3 項的
     「fault 期間的分鐘」用第 1 項的同一個窗 `[fault_start, fault_end + 60 s]`（`eval/failures.py`；013 F9、022「補註（2026-10-16）」；不是 022 的 Pilot 修訂）；
     第 7 項——放棄作答照 `eval/score.py` 逐欄計分：origin 空的 prediction 在 origin 各指標 0、`no_answer`，其他欄位照提交的內容計分，補位的 `_abstain` 每個欄位都空、
-    每一層都是 0（013 F5；v1 §2「一律算錯」與 026 解讀 19「每一層都算錯」照這樣讀）。只改文字（013、017 第二則補註、022、023 追加、本文件）：程式、測試、schema 都沒有改，
-    Pilot 數字不變、不重新評分；017、022 沒有在 Pilot 上修訂，A9 的五項 waived 不變。測試：1116 passed（`-m "not network and not docker_daemon"`；沒有新增）。
+    F2 的每一層（11 個指標）都是 0、沒有引用所以 evidence 各層是 null、不進 n（013 F5；v1 §2「一律算錯」與 026 解讀 19「每一層都算錯」照這樣讀）。
+    只改文字（013、017 第二則補註、022、023 追加、本文件）：程式、測試、schema 都沒有改，Pilot 數字不變、不重新評分；017、022 沒有在 Pilot 上修訂，A9 的五項 waived 不變。測試：1116 passed（`-m "not network and not docker_daemon"`；沒有新增）。
   - 「確認符合既定條件後，可以進行 Held-out Freeze」：既定條件見「下一步」9（F13 第 1、3、7 項已回答）；「持續自主推進資料收集」：freeze 之後的 held-out 收集照
     README「Held-out」段與「下一步」9，每次 run 之前看 Mac 的負載（使用者的說明）；label review 由使用者確認，不自動代替。
   - 本次的程式改動只有 F13 第 5 項的訊息文字與一個測試；Gate、模型、評測預算、指標、門檻、切分、評分、引用驗證、已封存的 Pilot 結果都沒有改，Pilot 不需要重新評分。
@@ -222,7 +222,7 @@
    | 019 | `waived` | 使用者 2026-10-16（A9）。之後只有 renderer v2 的字樣（`5ab5363`，Pilot 之前）與 2026-10-16 的 render 補註；`agent/tools.py` 在 Pilot 之前最後一次改動 |
    | 020 | `waived` | 使用者 2026-10-16（A9）。2026-10-10 的 029 adapter 補註與「修正」（`77b6a25`、`b18c8a0`、`d7576d2`）都在任何 LLM 方法於 Pilot 執行（2026-10-10T15:09Z）之前，來源是程式審查與合成範例探測，不是 Pilot 結果，「修正」寫明不是 Pilot 修訂；之後 harness 與任務說明沒有改 |
    | 021 | `used`，`docs/decisions/021-dump-all-and-retrieval-baselines.md` | 使用者 2026-10-11 選 (a) |
-   | 022 | `waived` | 使用者 2026-10-16（A9）。2026-10-11 補註寫明「022 在 Pilot 上的那一次修訂沒有使用」，2026-10-16 只更正 (b) 的事實；`eval/failures.py` 在 Pilot 之前最後一次改動 |
+   | 022 | `waived` | 使用者 2026-10-16（A9）。2026-10-11 補註寫明「022 在 Pilot 上的那一次修訂沒有使用」，2026-10-16 更正 (b) 的事實，並新增使用者決定的補註（013 F13 第 3 項選 (i)：照既有實作寫明分鐘窗，不是 Pilot 修訂）；`eval/failures.py` 在 Pilot 之前最後一次改動 |
 
    逐項的證據（commit、時間與程式檔的歷史）在 decision 023「追加（2026-10-16）」第 1 項。**宣告檔的內容**（主 session 寫在 repo 之外，freeze 時用 `--pilot-revisions` 傳入）：
 
@@ -287,7 +287,8 @@
   3. 022 第 3 項「涵蓋至少一個 fault 期間的分鐘」：用第 1 項的同一個窗 `[fault_start, fault_end + 60 s]`（`eval/failures.py`）。這是使用者確認的既有實作，
      不是 022 在 Pilot 上的那一次修訂；寫在 013 F9 與 022「補註（2026-10-16）」，`"022": waived` 不變。
   7. 放棄作答：照 `eval/score.py` 逐欄計分——origin 空的 prediction 在 origin 各指標 0、`no_answer`、留在分母，其他欄位照提交的內容計分；harness / held-out 補位的
-     `_abstain` 每個欄位都空，所以每一層都是 0。013 v1 §2「一律算錯」與 026 解讀 19「每一層都算錯」照這樣讀；寫在 013 F5，013 的計分不變（013 仍是 used）。
+     `_abstain` 每個欄位都空，所以 F2 的每一層（11 個指標）都是 0（沒有引用，evidence 各層是 null、不進 n）。013 v1 §2「一律算錯」與 026 解讀 19「每一層都算錯」
+     照這樣讀；寫在 013 F5，013 的計分不變（013 仍是 used）。
   - 第 1、3 項都選 (i)，所以 A9 的五項 waived 與「下一步」6 的 JSON 照原樣（023「追加（2026-10-16）」第 1 項的「連動」已解決）。程式、測試、schema 都沒有改，
     Pilot 不重新評分。
 

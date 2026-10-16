@@ -189,7 +189,8 @@
     這就是下面的讀法（F13 第 7 項）。
   - 兩種都是失敗（origin_top1 = 0），失敗類別都是 `no_answer`（022；`eval/failures.py:54-55`）。
   - **讀法**（F13 第 7 項，使用者 2026-10-16 選 (i)）：v1 §2 的「一律算錯」與 026 解讀 19 的「每一層都算錯」都照上面的逐欄計分讀——`origin_candidates` 空的 prediction
-    在 origin 的 3 個指標都是 0、失敗類別是 `no_answer`、留在分母，其他欄位照提交的內容計分；harness 與 held-out 補位的 `_abstain` 每個欄位都是空的，所以每一層都是 0。
+    在 origin 的 3 個指標都是 0、失敗類別是 `no_answer`、留在分母，其他欄位照提交的內容計分；harness 與 held-out 補位的 `_abstain` 每個欄位都是空的，所以 F2 的每一層
+    （11 個指標）都是 0（沒有引用，evidence 各層是 null、不進 n）。
 - **held-out 的嘗試**（`eval/runner.py:507-606`）：
   - 每個（方法, 列表內 incident）只跑一次：有 prediction 或嘗試已關閉就不再跑（:551）；prediction 與 transcript 原子寫入、永不覆寫，transcript 先寫、prediction 最後寫（:589-594）；
     每個方法一個 O_EXCL 的 `run.lock`（:524-532）。
@@ -405,9 +406,11 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
    評分程式與 scores.json 不變。
 7. **放棄作答「一律算錯」的範圍**（評分邏輯；**使用者 2026-10-16 選 (i)**）：v1 §2 寫「放棄作答（null / 空清單）一律算錯」，026 解讀 19 對重試之後仍沒有 prediction 的補位寫「每一層都算錯」；
    程式沒有放棄作答的分支，照 F2 逐欄計分（`eval/score.py:45-63`）。補位的 `_abstain`（`agent/harness.py:69-72`；held-out 評分時的補位 `eval/runner.py:877-880`）
-   每個欄位都是空的，所以每一層都是 0，與兩處文字一致；方法自己提交、`origin_candidates` 是空清單但其他欄位有值的 prediction，其他欄位照常得分
-   （Pilot Agent INC-008 的 `symptom_exact` = 1；F5、F12 第 2 項）。兩種讀法下 origin 的各指標都是 0、失敗類別都是 `no_answer`；差別只在其他欄位。
-   - (i) 維持（**採用**）：「一律算錯」指 origin（`origin_candidates` 空 = origin 各指標 0、`no_answer`、留在分母），其他欄位照 F2 逐欄計分；補位的 `_abstain` 每一層都是 0。Pilot 數字都不變。
+   每個欄位都是空的，所以 F2 的每一層（11 個指標）都是 0（沒有引用，evidence 各層是 null、不進 n），與兩處文字一致；方法自己提交、`origin_candidates`
+   是空清單但其他欄位有值的 prediction，其他欄位照常得分（Pilot Agent INC-008 的 `symptom_exact` = 1；F5、F12 第 2 項）。
+   兩種讀法下 origin 的各指標都是 0、失敗類別都是 `no_answer`；差別只在其他欄位。
+   - (i) 維持（**採用**）：「一律算錯」指 origin（`origin_candidates` 空 = origin 各指標 0、`no_answer`、留在分母），其他欄位照 F2 逐欄計分；補位的 `_abstain` 在 F2 的每一層
+     （11 個指標）都是 0（evidence 各層是 null、不進 n）。Pilot 數字都不變。
    - (ii) 改（沒有採用）：`origin_candidates` 是空清單的 prediction 在 F2 的 11 個指標都算 0、不論其他欄位（`eval/score.py` 的 `score_incident` 加一個放棄作答的分支）。
      Pilot 上只有 Agent 的 INC-008 是這種 prediction（stat-anomaly、dump-all、retrieval 的計分 prediction 都有 origin 候選；修訂前封存的 dump-all INC-009、010 是 `_abstain`，
      已經都是 0，也不重新評分）：它的 `symptom_exact` 1 → 0、`symptom_jaccard` 1.0 → 0。Agent 的 symptom_exact 0.60 [0.30, 0.90] → 0.50 [0.20, 0.80]（README 的 Pilot 表要改）、
@@ -418,8 +421,8 @@ Pilot：10 個 incident、每個 fault 1 個；四個方法都已執行並評分
      1.000 → 0.000、equal weight 與 incidents 列 0.600 → 0.500（`gate.md` 的 LOFO 只有 origin_top1，不變）。以上用 `eval/compare.py` 的 `paired`、`lofo` 對記憶體裡的分數唯讀重算
      （現在的值與 `compare-agent-vs-stat-anomaly.md` 逐列相同），沒有寫任何檔。origin、fault、affected 的指標、失敗類別、evidence 與 Gate 的三個條件都不變。
    - **處理（2026-10-16，(i)）**：F5 寫明讀法——v1 §2 的「一律算錯」與 026 解讀 19 的「每一層都算錯」照 `eval/score.py` 的逐欄計分讀：
-     origin 空的 prediction origin 各指標 0、`no_answer`、留在分母，其他欄位照提交的內容計分；harness / held-out 補位的 `_abstain` 每個欄位都是空的，所以每一層都是 0。
-     013 的計分與程式都不變，Pilot 數字不變（Agent INC-008 的 `symptom_exact` 仍是 1）。
+     origin 空的 prediction origin 各指標 0、`no_answer`、留在分母，其他欄位照提交的內容計分；harness / held-out 補位的 `_abstain` 每個欄位都是空的，所以 F2 的每一層
+     （11 個指標）都是 0（沒有引用，evidence 各層是 null、不進 n）。013 的計分與程式都不變，Pilot 數字不變（Agent INC-008 的 `symptom_exact` 仍是 1）。
 
 ### 為什麼
 
