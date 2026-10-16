@@ -192,8 +192,6 @@ heldout-freeze（Pilot 修訂宣告檔）→ 只 commit 兩個檔 → push → h
      on the <set> set」（測試先寫、看到失敗才改；行數、例外與行為不變）；第 6 項 gold precision 的報告時機（A12 (b)，F4）。
    - **等使用者決定（freeze 之前）**：第 1、3、7 項（評分邏輯 / 研究協定），選項與 Pilot 上的影響見「Blocked / 需要使用者」A11 與 013 F13。
    - 另外發現（不在 F13 的 7 項裡）：`collect/freeze.py:328` 的 freeze 拒絕訊息原本寫著過期的「NEXT A1: paid LLM methods are deferred」（只在 llm_methods.json 不是 approved 時出現）。**2026-10-16 主 session 已改**：訊息文字改為指向 decision 029（使用者批准模型與設定），測試先寫（tests/test_heldout_freeze.py llm-proposed 的 needle），行為不變；與 F13 第 5 項同類的純文字修正。
-     不是 approved 時出現（目前是 approved，所以不會出現）；同樣是過期的訊息文字。本次的指示只改 F13 第 5 項的那一個訊息，這一個留給主 session 在 freeze 之前決定
-     要不要以同樣的方式（先寫測試、只改文字）修正；不影響 freeze 的檢查。
    freeze 宣告：`"013": {"status": "used", "decision": "docs/decisions/013-prediction-format-and-layered-scoring.md"}`。
 6. **Pilot 修訂宣告——使用者已決定（2026-10-16，A9；前提已確認）**（`collect heldout-freeze --pilot-revisions <file>` 的輸入，023 §6「用掉或明確放棄」）：
 
