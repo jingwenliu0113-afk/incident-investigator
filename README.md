@@ -8,7 +8,8 @@
 > 狀態（2026-10-16）：Core 的工具鏈完成並測試（1,100+ 個測試）；**Pilot Set 的 10 個 incident 已正式收集並完成人工 label review**；
 > 四個方法（統計 baseline 與三個 LLM 方法）都已在 Pilot 上執行並評分（下表；診斷用，不是 Gate 判定）。LLM 方法：付費 API 延後，使用者 2026-10-10 批准本機模型 qwen3.5 9B（Ollama，decision 029）；
 > 2026-10-11 起模型在使用者的 RTX 5070 Ti 桌機上推論（029 修訂 1，eval 仍在 Mac）；dump-all 與 retrieval 依 decision 021 的 Pilot 修訂（2026-10-11，使用者決定）在 2026-10-15 重跑。
-> 進行中：LLM 方法引用的 evidence gold 人工盲標（91 筆，使用者）。held-out 在 freeze 之後收集，Gate 只在 held-out 上判定；**Core 還沒完成，沒有進 Advanced**。
+> 四個方法引用的 evidence 依 decision 017 抽出的樣本都已由使用者人工盲標（2026-10-10 統計 baseline 的 28 筆；2026-10-16 三個 LLM 方法的 91 筆，87 筆寫入、4 筆略），
+> 並在 gold 之後重新評分（下面「Evidence」）。held-out 在 freeze 之後收集，Gate 只在 held-out 上判定；**Core 還沒完成，沒有進 Advanced**。
 > 進度與待辦見 [`NEXT.md`](NEXT.md)，所有設計決策見 [`docs/decisions/`](docs/decisions/)。
 
 ## 結果
@@ -31,11 +32,33 @@ label 全部經人工 review（decision 018，review 時未看任何方法輸出
 
 - stat-anomaly 依難度（leakage audit）：easy 5 個、hard 5 個；origin_top1 兩者都是 0.60。
 - stat-anomaly 的失敗（origin 或 fault type 錯）8 個：`mechanism`（origin 對、機制錯）4、`rule_limit`（統計規則本身的限制）4。
-- stat-anomaly 的 Evidence：引用全部存在（existence 1.0）；弱標籤（時間窗內的 affected 服務）1.0，但人工盲標的 gold precision 是 0.906（n = 8 個有引用的 incident，
-  coverage 1.0）——弱標籤會把故障時間窗內看起來正常的紀錄也算進去，所以兩者分開報（decision 017）。0.906 是 8 個 incident 各自 precision 的平均
-  （7 個 1.0、1 個 0.25）；28 筆合在一起算的 25 / 28 = 0.893 不是報告的數字（算法見「評分」）。
-- LLM 方法：本機模型 qwen3.5 9B（q4_K_M、`num_ctx` 262,144、think 關、temperature 0、Ollama 0.35.0 釘選；decision 029），推論在使用者的 RTX 5070 Ti 桌機（decision 029 修訂 1：snapshot、ground truth 與評分留在 Mac，只有模型呼叫經 SSH tunnel 送到桌機）。**結論只限於這個本機模型。** origin 的候選數（失敗分析的發現 (b)，不改）：提出方案時的那次執行，三個方法每個 incident 最多一個候選（top3 = top1）；021 修訂後重跑，dump-all 在 INC-007 給了 2 個（origin_top1 0.70、top3 0.80），retrieval 仍每個 1 個（0.80 / 0.80），Agent（未重跑）每個 1 個、INC-008 沒有答案（0.60 / 0.60）。dump-all 修訂前有 2 個 incident 把概覽的每分鐘列當成證據（不是可引用的紀錄 id），更正兩次後放棄作答。使用者 2026-10-11 決定用 decision 021 在 Pilot 上的那一次修訂處理：概覽寫明它的列是彙總、沒有 id、不能引用（列本身、引用驗證、評分門檻、模型、資料、預算與推論主機都不變），dump-all 與 retrieval 在相同條件下重跑（2026-10-15），上表修訂前（封存）與修訂後並列；Agent 的輸入不變，不重跑。修訂後兩個方法的 20 個 incident 都提交了答案（沒有放棄作答），引用全部存在（existence 1.0）；但 dump-all 仍有 4 個 incident（INC-007、008、009、010）的第一次提交與第一次更正都引用概覽列，第三次、也就是最後一次允許的提交才改用紀錄 id——錯誤降低但沒有消除：最後一次允許的提交才改正。retrieval 修訂後沒有引用概覽列；它有 3 個 incident 的查詢沒有找到任何紀錄、沒有附證據（允許，不計入 evidence 分數）。Agent 的 existence 是 0.96（引用了不存在但格式正確的 id；020 的範圍，這次不改）。每個 incident 的平均 latency：retrieval 40 s、dump-all 139 s、Agent 188 s（中位數 76 s）。LLM 方法的引用依 decision 017 抽出的 91 筆（抽出時都還沒有人工判定），使用者 2026-10-16 起一次一個 incident 盲標中、還沒標完；91 筆標完、重新評分之前，這裡不報 LLM 方法的 gold precision。
+- LLM 方法：本機模型 qwen3.5 9B（q4_K_M、`num_ctx` 262,144、think 關、temperature 0、Ollama 0.35.0 釘選；decision 029），推論在使用者的 RTX 5070 Ti 桌機（decision 029 修訂 1：snapshot、ground truth 與評分留在 Mac，只有模型呼叫經 SSH tunnel 送到桌機）。**結論只限於這個本機模型。** origin 的候選數（失敗分析的發現 (b)，不改）：提出方案時的那次執行，三個方法每個 incident 最多一個候選（top3 = top1）；021 修訂後重跑，dump-all 在 INC-007 給了 2 個（origin_top1 0.70、top3 0.80），retrieval 仍每個 1 個（0.80 / 0.80），Agent（未重跑）每個 1 個、INC-008 沒有答案（0.60 / 0.60）。dump-all 修訂前有 2 個 incident 把概覽的每分鐘列當成證據（不是可引用的紀錄 id），更正兩次後放棄作答。使用者 2026-10-11 決定用 decision 021 在 Pilot 上的那一次修訂處理：概覽寫明它的列是彙總、沒有 id、不能引用（列本身、引用驗證、評分門檻、模型、資料、預算與推論主機都不變），dump-all 與 retrieval 在相同條件下重跑（2026-10-15），上表修訂前（封存）與修訂後並列；Agent 的輸入不變，不重跑。修訂後兩個方法的 20 個 incident 都提交了答案（沒有放棄作答），引用全部存在（existence 1.0）；但 dump-all 仍有 4 個 incident（INC-007、008、009、010）的第一次提交與第一次更正都引用概覽列，第三次、也就是最後一次允許的提交才改用紀錄 id——錯誤降低但沒有消除：最後一次允許的提交才改正。retrieval 修訂後沒有引用概覽列；它有 3 個 incident 的查詢沒有找到任何紀錄、沒有附證據（允許，不計入 evidence 分數）。Agent 的 existence 是 0.96（引用了不存在但格式正確的 id；020 的範圍，這次不改）。每個 incident 的平均 latency：retrieval 40 s、dump-all 139 s、Agent 188 s（中位數 76 s）。Evidence 的分數見下面「Evidence」。
 - Gate 條件在 Pilot 上的診斷（不是 Gate 判定）：條件 1（Agent 的 origin_top1 顯著高於統計 baseline）不成立（差 0.00，95% [-0.50, 0.50]）；條件 2 在 Pilot 上不評估（每個 fault 只有 1 個 incident）；條件 3 不成立（3/6 = 0.50，未超過一半）。held-out（每個 fault 5 個）在 freeze 之後收集，Gate 只在 held-out 上判定。
+  gold 不是 Gate 條件；gold 之後重算的 compare 與 gate（2026-10-16）結果不變。
+
+**Evidence（Pilot；decision 013 §4、017）**：各層分開報，永不合成一個數字，也不與上表的主要指標合併。n = 有引用的 incident 數（Pilot 上四層的 n 相同）；
+平均是這 n 個 incident 的**等權平均**，區間同上（run-group cluster bootstrap 95%）。**各方法的 n 不同（引用的 incident 不同），所以不是 paired 的比較。**
+
+| 方法 | n | existence | 弱標籤：temporal 且 service | gold precision | gold coverage |
+|---|---:|---:|---:|---:|---:|
+| stat-anomaly（統計 baseline v2） | 8 | 1.000 [1.000, 1.000] | 1.000 [1.000, 1.000] | 0.906 [0.719, 1.000] | 1.000 [1.000, 1.000] |
+| dump-all + LLM（021 修訂後） | 10 | 1.000 [1.000, 1.000] | 0.640 [0.340, 0.900] | 0.540 [0.240, 0.840] | 0.840 [0.710, 0.960] |
+| retrieval + LLM（021 修訂後） | 7 | 1.000 [1.000, 1.000] | 0.571 [0.143, 0.857] | 0.571 [0.143, 0.857] | 0.667 [0.345, 0.892] |
+| Agent + tools | 9 | 0.956 [0.867, 1.000] | 0.833 [0.611, 1.000] | 0.756 [0.444, 1.000] | 1.000 [1.000, 1.000] |
+
+- **gold precision**：人工盲標的判定（017 §3）。每個方法、每個 incident = relevant 的引用數 / 已有 gold 判定的引用數（引用以 `(id, t0, t1)` 去重；
+  判定不分是哪個方法的樣本抽到的）；跨 incident 是該方法至少有一筆已判定引用的 incident 的等權平均，不是把所有引用合在一起算
+  （stat-anomaly 的 0.906 是 7 個 1.0、1 個 0.25 的平均；28 筆合在一起的 25 / 28 = 0.893 不是報告的數字）。
+- **樣本與 coverage**：017 每個方法、每個 incident 以固定種子抽**最多 5 筆**引用給人判定；coverage = 已判定 / 存在的引用。標註時「略」的項目不寫入、
+  不進分母，只降低 coverage。retrieval 的 0.667 來自引用多的 incident（INC-002、005、006 各 45、22、25 筆，只有抽到的樣本有判定）；dump-all 的 0.840 一部分來自
+  4 筆略（INC-003 1 筆、INC-004 2 筆、INC-009 1 筆），它們都在 dump-all 的樣本裡，所以 **dump-all 的樣本沒有全部判定**；stat-anomaly、retrieval、Agent 的樣本全部判定。
+- **標註**：全部由使用者（human:jingwen）方法盲標（不知道是哪個方法引用的、看不到弱標籤）：2026-10-10 統計 baseline 的 28 筆；2026-10-16 三個 LLM 方法的 91 筆
+  （一次一個 incident），87 筆寫入、4 筆略（理由見 decision 017「補註（2026-10-16，第二則）」）。gold 共 115 筆判定、75 筆 relevant。
+  017 的判準把 fault 造成的下游錯誤與延遲也算 relevant，所以 relevant 不表示這筆紀錄證明了根因機制（使用者在 INC-007、INC-011 的註記）。
+- **各 incident**：gold precision 是 0 的 incident——dump-all INC-006、008、009、010，retrieval INC-006、008、010，Agent INC-009、010；stat-anomaly 最低是 INC-006 的 0.25。
+  弱標籤會把故障時間窗內、affected 服務上看起來正常的紀錄也算進去，所以與 gold 分開報（decision 017）。
+- 修訂前（封存）的 dump-all / retrieval 不補標、不重新評分，這裡不報它們的 gold precision（封存的分數只含評分當時與既有判定重疊的 gold：dump-all n = 1、
+  coverage 0.025，retrieval n = 0）。
 
 ## Pipeline
 
