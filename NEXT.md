@@ -1,17 +1,23 @@
 # NEXT
 
-## 目前位置（2026-10-16 21:50，held-out freeze 完成；收集進行中）
+## 目前位置（2026-10-22 10:30Z，held-out 收集進行中：50 個 slot 已填 14 個）
 
 - **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
   slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
-  Pilot 修訂宣告：013、021 used，011、014、015、017、019、020、022 waived）。`git diff --name-status 4b42a4a..HEAD` 只有兩個 `A`；
-  `collect status --set heldout`：freeze_problems `[]`、open 50。之後只能改 NEXT.md 或新增 decision 檔（100 保留給最終結果，decision 030）。
-- **收集**：主 session 的驅動腳本（不在 repo；`collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`），
-  每次 run 前等：heavy lock 空、高效能 + AC、checkout 乾淨、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（使用者 2026-10-16：其他工作可能沒用 lock 在跑；
-  只等、不碰）；run 期間每分鐘記錄負載。待人處理的 slot 只回報、不代為確認（ack-failures 由使用者決定）。
-- **目前被擋（需要使用者）**：2026-10-16 13:48Z 第一個 run（H01）的 preflight 拒絕：另一個專案的 container `rtu-clean-db`、`rtu-maintenance-platform-db-1` 正在執行（decision 008 §4），沒有產生任何 run group。不屬於本專案，主 session 不停止、不移除；驅動腳本改為等它們停掉後自動開始。
-- **之後需要使用者**：每個 held-out incident 的 label review（不自動代替）；held-out gold 盲標；LLM 方法執行前，Mac 的 127.0.0.1:11434 不能被占用
-  （目前有一個不屬於本專案的 Homebrew Ollama 0.40.3 在聽，tools/with-remote-ollama 會拒絕）。
+  Pilot 修訂宣告：013、021 used，011、014、015、017、019、020、022 waived）。之後只能改 NEXT.md 或新增 decision 檔（100 保留給最終結果，decision 030）。
+- **收集進度**（`collect status --set heldout`，2026-10-22）：filled 14、open 36、closed 0、needs_person 0，freeze_problems `[]`。H01–H14 → INC-012–INC-025
+  （RG-020–RG-034）。RG-032 依規則判為 invalid（`container_metrics_missing`、`power_not_formal`：2026-10-19 00:50–00:55Z 電源短暫掉到電池），
+  該 slot 由 RG-033（INC-024）補上。14 個 incident 都已 `collect process`（normalize、replay、a priori label）；label review 尚未開始（使用者的事）。
+- **收集方式**：驅動腳本不在 repo（repo 已凍結），放在 `data/external/logs/heldout-loop/heldout_collect.sh`（git-ignored；log 同目錄，重開機不會消失）：
+  `collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`。每次 run 前等：heavy lock 空、高效能 + AC、
+  checkout 乾淨、Docker 引擎可連、沒有其他專案的 container（decision 008 §4）、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（5 次取樣的中位數；
+  使用者 2026-10-16：其他工作可能沒用 lock 在跑；只等、不碰）；run 期間每分鐘記錄負載。待人處理的 slot 只回報、不代為確認（ack-failures 由使用者決定）。
+- **中斷紀錄**：(1) 2026-10-16–18 另一個專案的 container 在跑，等到使用者停掉；停掉時 Docker 的 VM 一起當掉，使用者重開 Docker Desktop。
+  (2) 2026-10-19 02:22Z INC-025 的 `collect process` 在 replay 失敗（replay 用 `docker ps` 確認 live stack 已刪，當時 Docker 引擎不在），驅動腳本停下；
+  之後 Mac 重開機、`/tmp` 清空。2026-10-22 啟動 Docker 後重跑 `collect process --incident INC-025` 成功（步驟可重入）。腳本已改成：process 遇到 Docker 不在時
+  等待重試，其他失敗才停下。沒有改任何程式、資料、門檻或 Gate。
+- **之後需要使用者**：每個 held-out incident 的 label review（依 incident 一次一個，不自動代替）；held-out gold 盲標；LLM 方法執行前，Mac 的 127.0.0.1:11434
+  不能被占用（之前有一個不屬於本專案的 Homebrew Ollama 0.40.3 在聽，tools/with-remote-ollama 會拒絕）。
 
 ### 之前的「目前位置」
 
