@@ -1,13 +1,19 @@
 # NEXT
 
-## 目前位置（2026-10-22 10:30Z，held-out 收集進行中：50 個 slot 已填 14 個）
+## 目前位置（2026-10-23 12:45Z，held-out 收集完成：50 / 50；下一步是使用者的 label review）
 
 - **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
   slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
   Pilot 修訂宣告：013、021 used，011、014、015、017、019、020、022 waived）。之後只能改 NEXT.md 或新增 decision 檔（100 保留給最終結果，decision 030）。
-- **收集進度**（`collect status --set heldout`，2026-10-22）：filled 14、open 36、closed 0、needs_person 0，freeze_problems `[]`。H01–H14 → INC-012–INC-025
-  （RG-020–RG-034）。RG-032 依規則判為 invalid（`container_metrics_missing`、`power_not_formal`：2026-10-19 00:50–00:55Z 電源短暫掉到電池），
-  該 slot 由 RG-033（INC-024）補上。14 個 incident 都已 `collect process`（normalize、replay、a priori label）；label review 尚未開始（使用者的事）。
+- **收集完成**（`collect status --set heldout`，2026-10-23 12:36Z）：filled 50、open 0、closed 0、needs_person 0，freeze_problems `[]`。H01–H50 → INC-012–INC-061
+  （每個 fault 5 個）。run group RG-020–RG-072：valid 50、invalid 3，都依規則判定、該 slot 自動重收成功：RG-032（`container_metrics_missing`、
+  `power_not_formal`：2026-10-19 00:50–00:55Z 電源短暫掉到電池；使用者 2026-10-22 換成 140 W）、RG-042 與 RG-062（`raw_incomplete`：
+  accounting_mismatch，metrics 少 23 筆 / traces 多 5 筆；兩次都是 adHighCpu）。50 個都已 `collect process`。
+- **leakage 稽核完成**（`eval leakage --set heldout`，2026-10-23）：50 個；difficulty easy 25、hard 25；lexicon hits 0。
+- **label review 工作表**：50 份 `collect review-sheet` 都已產生（`label_review_todo.json`，好讀版 `label_review_todo.md` 在同目錄）。
+  **下一步：使用者逐個 incident review**（decision 018；不自動代替；`saw_method_outputs` 必須是 false，任何方法都還沒在 held-out 上執行）；
+  review 工具在 `data/external/logs/heldout-review/`（`review_show.py` 唯讀顯示、`review_fill.py` 只寫使用者回答的內容，`--reviewer human:jingwen`）。
+  之後：未觸發的 slot 補收一次（023 §5.3）→ `collect heldout-list` → 方法執行 → score → compare → gate。
 - **收集方式**：驅動腳本不在 repo（repo 已凍結），放在 `data/external/logs/heldout-loop/heldout_collect.sh`（git-ignored；log 同目錄，重開機不會消失）：
   `collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`。每次 run 前等：heavy lock 空、高效能 + AC、
   checkout 乾淨、Docker 引擎可連、沒有其他專案的 container（decision 008 §4）、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（5 次取樣的中位數；
