@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-24，held-out label review 完成 50 / 50；H21 未觸發、重收中）
+## 目前位置（2026-10-24，heldout-list 完成：50 個 incident；下一步是方法執行）
 
 - **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
   slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
@@ -21,8 +21,15 @@
   總表上記下的事實（供日後報告）：INC-032（H21）的 shipping / checkout 沒有任何 ≥5 s 的 span → fault_exercised = false；lock contention 的 frontend-proxy
   access log 在 fault 期間有 77–84 筆 504（沒有 severity，工作表 WARN+ 看不到；Pilot INC-007 同樣 78 筆，選 none）；emailMemoryLeak 5 個都沒有 a priori notes 寫的 OOM；
   INC-053 整個 run 的基準偏高。
-- **H21 重收**（023 §5.3）：`collect status`：filled 49、open 1（H21 intlShippingSlowdown 10sec，unexercised 1）。重收一次 → process → `eval leakage --set heldout`
-  → 使用者 review 新的 incident；再次未觸發就關閉並列出。之後 `collect heldout-list` → 方法執行 → score → compare → gate。
+- **H21 重收完成**（023 §5.3）：RG-073 → INC-062（valid），`eval leakage --set heldout` 重跑（51 個；先前 50 個的結果不變，INC-062 difficulty medium），
+  使用者 review INC-062（2026-10-24，原話「1 觸發 是；2 traces origin / metrics origin / logs none；3 affected 維持；4 symptom 維持；5 notes 維持；
+  saw_method_outputs false」）。INC-062 的 fault 期間 Mac 上有其他工作的負載（CPU 閒置一度 0–5%、GPU 51–63%；run 開始時正常），
+  幾個不在 shipping 路徑上的服務 p95 最大值跳高（payment 2,012 ms、email 1,498 ms）——已在 review 前告知使用者，依凍結規則不影響 validity。
+- **`collect heldout-list` 完成**（2026-10-24）：listed 50、excluded 1（INC-032，fault 未觸發）、closed 0、removed 0，
+  `heldout_incidents.json` sha256 `e606baae8b8944f1267e6296e7d9784620b952149b12f37e46dc99821a6140b5`。之後不能再 review 或 ack-failures。
+- **下一步（主 session，不需要使用者）**：`eval run --method stat-anomaly --set heldout`（Mac，heavy lock 與負載閘門）→ gpu-server 唯讀確認（「原下一步 8.2」開始前 2）
+  → 三個 LLM 方法各一次 `./tools/with-remote-ollama … eval run --method <m> --set heldout`（retrieval → agent → dump-all）→ score → compare → gate
+  → `eval gold-todo --set heldout`（使用者盲標，依 incident 分組）→ 依 decision 030 §5 發布（100 + 一份 decision + NEXT）。
 - **收集方式**：驅動腳本不在 repo（repo 已凍結），放在 `data/external/logs/heldout-loop/heldout_collect.sh`（git-ignored；log 同目錄，重開機不會消失）：
   `collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`。每次 run 前等：heavy lock 空、高效能 + AC、
   checkout 乾淨、Docker 引擎可連、沒有其他專案的 container（decision 008 §4）、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（5 次取樣的中位數；
