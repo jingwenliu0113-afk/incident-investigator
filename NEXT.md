@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-24，heldout-list 完成：50 個 incident；下一步是方法執行）
+## 目前位置（2026-10-24，held-out 方法執行中：stat-anomaly 完成，LLM 方法等 GPU）
 
 - **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
   slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
@@ -27,9 +27,15 @@
   幾個不在 shipping 路徑上的服務 p95 最大值跳高（payment 2,012 ms、email 1,498 ms）——已在 review 前告知使用者，依凍結規則不影響 validity。
 - **`collect heldout-list` 完成**（2026-10-24）：listed 50、excluded 1（INC-032，fault 未觸發）、closed 0、removed 0，
   `heldout_incidents.json` sha256 `e606baae8b8944f1267e6296e7d9784620b952149b12f37e46dc99821a6140b5`。之後不能再 review 或 ack-failures。
-- **下一步（主 session，不需要使用者）**：`eval run --method stat-anomaly --set heldout`（Mac，heavy lock 與負載閘門）→ gpu-server 唯讀確認（「原下一步 8.2」開始前 2）
-  → 三個 LLM 方法各一次 `./tools/with-remote-ollama … eval run --method <m> --set heldout`（retrieval → agent → dump-all）→ score → compare → gate
-  → `eval gold-todo --set heldout`（使用者盲標，依 incident 分組）→ 依 decision 030 §5 發布（100 + 一份 decision + NEXT）。
+- **方法執行（2026-10-24）**：stat-anomaly 完成（`./tools/with-mac-lock … eval run --method stat-anomaly --set heldout`，50 個都有 prediction，
+  `without_prediction` 空；分數等全部方法跑完再算）。gpu-server 唯讀確認通過（Ollama 0.35.0、manifest sha256 `6488c96f…`、flock / pkill / pgrep /
+  nvidia-smi、RTX 5070 Ti、Windows 與 Mac 都沒有程式在聽 11434）。三個 LLM 方法由 `data/external/logs/heldout-methods/llm_driver.sh`
+  依序執行（retrieval → agent → dump-all，各一次 `./tools/with-remote-ollama`）；它在自己的 session 裡（`os.setsid` + `caffeinate -i`），
+  因為 held-out 的嘗試被中斷就永遠不能重跑（`eval/runner.py` `_closed`：有 start 沒有 end）。每次嘗試前等：Mac 127.0.0.1:11434 沒人聽、高效能 + AC、
+  checkout 乾淨、gpu-server GPU memory.used ≤ 2000 MiB；wrapper exit 75（GPU lock 被占用）→ 等；其他失敗停下。
+  **目前在等**：另一個 project（agent-gym）的 llama-server 正常持有共用 GPU lock（`/tmp/ai-portfolio-gpu.lock`），用 8.5 GB VRAM；不搶、不刪。
+- **之後**：score（四個方法）→ compare（agent vs stat-anomaly）→ gate → `eval gold-todo --set heldout`（使用者盲標，依 incident 分組）
+  → 依 decision 030 §5 發布（100 + 一份 decision + NEXT）。
 - **收集方式**：驅動腳本不在 repo（repo 已凍結），放在 `data/external/logs/heldout-loop/heldout_collect.sh`（git-ignored；log 同目錄，重開機不會消失）：
   `collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`。每次 run 前等：heavy lock 空、高效能 + AC、
   checkout 乾淨、Docker 引擎可連、沒有其他專案的 container（decision 008 §4）、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（5 次取樣的中位數；
