@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-24，held-out 方法執行中：stat-anomaly 完成，LLM 方法等 GPU）
+## 目前位置（2026-10-25，held-out Gate 判定 NOT PASSED；下一步是使用者的 gold 盲標與「收尾或改題」的決定）
 
 - **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
   slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
@@ -27,15 +27,19 @@
   幾個不在 shipping 路徑上的服務 p95 最大值跳高（payment 2,012 ms、email 1,498 ms）——已在 review 前告知使用者，依凍結規則不影響 validity。
 - **`collect heldout-list` 完成**（2026-10-24）：listed 50、excluded 1（INC-032，fault 未觸發）、closed 0、removed 0，
   `heldout_incidents.json` sha256 `e606baae8b8944f1267e6296e7d9784620b952149b12f37e46dc99821a6140b5`。之後不能再 review 或 ack-failures。
-- **方法執行（2026-10-24）**：stat-anomaly 完成（`./tools/with-mac-lock … eval run --method stat-anomaly --set heldout`，50 個都有 prediction，
-  `without_prediction` 空；分數等全部方法跑完再算）。gpu-server 唯讀確認通過（Ollama 0.35.0、manifest sha256 `6488c96f…`、flock / pkill / pgrep /
-  nvidia-smi、RTX 5070 Ti、Windows 與 Mac 都沒有程式在聽 11434）。三個 LLM 方法由 `data/external/logs/heldout-methods/llm_driver.sh`
-  依序執行（retrieval → agent → dump-all，各一次 `./tools/with-remote-ollama`）；它在自己的 session 裡（`os.setsid` + `caffeinate -i`），
-  因為 held-out 的嘗試被中斷就永遠不能重跑（`eval/runner.py` `_closed`：有 start 沒有 end）。每次嘗試前等：Mac 127.0.0.1:11434 沒人聽、高效能 + AC、
-  checkout 乾淨、gpu-server GPU memory.used ≤ 2000 MiB；wrapper exit 75（GPU lock 被占用）→ 等；其他失敗停下。
-  **目前在等**：另一個 project（agent-gym）的 llama-server 正常持有共用 GPU lock（`/tmp/ai-portfolio-gpu.lock`），用 8.5 GB VRAM；不搶、不刪。
-- **之後**：score（四個方法）→ compare（agent vs stat-anomaly）→ gate → `eval gold-todo --set heldout`（使用者盲標，依 incident 分組）
-  → 依 decision 030 §5 發布（100 + 一份 decision + NEXT）。
+- **方法執行完成（2026-10-25）**：四個方法各 50 個 prediction（`without_prediction` 都是空的）。stat-anomaly、retrieval、agent 各 50 次嘗試都 `ok`；
+  dump-all 51 次：INC-045 第 1 次 `transport_error`（2026-10-25 03:30Z Mac 到 gpu-server 的 ssh 逾時，wrapper 停止、GPU lock 釋放），
+  確認遠端乾淨、網路恢復後只用 dump-all 重啟，第 2 次 `ok`（023 §5：只有 api_error / transport_error 依停止原因重試、最多 2 次；兩次都在 attempts.jsonl）。
+  執行用 `llm_driver.sh`（自己的 session + `caffeinate -i`）；開始前等了 agent-gym 正常持有的 GPU lock（2026-10-24 10:53Z → 23:55Z）。
+- **score / compare / gate 完成（2026-10-25）**：held-out **Gate 判定：NOT PASSED**（`data/external/results/heldout/agent/gate.md`，只用第一次執行的結果）。
+  - 條件 1 不成立：agent − stat-anomaly 的 origin_top1 = −0.080，95% [−0.280, 0.120]，n 50（下界 ≤ 0）。
+  - 條件 2 成立（intlShippingSlowdown、paymentUnreachable、productCatalogLockContention 答錯的都是 seen_misread）；條件 3 成立（17 / 32 = 0.53）。
+  - 主要指標（平均，95% 區間）：stat-anomaly fault_type 0.32、origin_top1 0.66 [0.52, 0.78]、affected_f1 0.80、symptom_exact 0.40；
+    retrieval 0.48 / 0.62 / 0.81 / 0.50；dump-all 0.46 / 0.72 / 0.74 / 0.46；agent 0.48 / 0.58 [0.44, 0.72] / 0.70 / 0.46。
+  - 依 SPEC「Gate」：沒有通過就不進 Advanced，依「收尾或改題」**由使用者決定**（使用者 2026-10-16：不自行進入 Advanced）。
+- **held-out gold（使用者盲標，進行中）**：`eval gold-todo --set heldout` 寫出 50 個工作表、共 604 項（每個 incident 3–20 項；38 項是同一筆紀錄、不同時間範圍）。
+  好讀版：每個 incident 的 `evidence_gold_todo.md`，全部合在 `data/external/logs/heldout-gold/gold_all.md`；寫入用 `gold_fill.py`（`gold-add`，human:jingwen）。
+  gold 不影響 Gate 條件；decision 030 §5：gold 完成之後才做發布 commit（100 + 031 decision + NEXT）。
 - **收集方式**：驅動腳本不在 repo（repo 已凍結），放在 `data/external/logs/heldout-loop/heldout_collect.sh`（git-ignored；log 同目錄，重開機不會消失）：
   `collect next --set heldout` → `./tools/with-mac-lock … collect run --set heldout` → `collect process`。每次 run 前等：heavy lock 空、高效能 + AC、
   checkout 乾淨、Docker 引擎可連、沒有其他專案的 container（decision 008 §4）、CPU 閒置 ≥ 60%、RAM free ≥ 30%、GPU 使用率 ≤ 30%（5 次取樣的中位數；
