@@ -1,6 +1,24 @@
 # NEXT
 
-## 目前位置（2026-10-25，held-out Gate 判定 NOT PASSED；下一步是使用者的 gold 盲標與「收尾或改題」的決定）
+## 目前位置（2026-10-30，held-out 全部步驟完成，Gate 判定 NOT PASSED；下一步是使用者「收尾或改題」的決定，之後才做發布 commit）
+
+- **held-out gold 完成（使用者 human:jingwen，2026-10-26–30）**：50 個 incident、604 項全部判定（null 0），relevant 423。使用者依 fault 分 10 組看
+  method-blind 的精簡版（`data/external/logs/heldout-gold/gold_compact.py`），每組一次給答案與註記；主 session 只用 `gold_fill.py`（`eval gold-add`）照答案寫入，
+  不代替判斷。註記照原文存（「註 n,m: …」掛在列到的每一項）。工作表每個 metric 最多列引用範圍內前 20 點（`eval/runner.py` `_render`，與 Pilot 相同），
+  第 10 組呈現時已告知使用者。
+- **gold 之後重算（2026-10-30，凍結工具）**：`eval score` 四個方法、`eval compare`、`eval gate` 都 exit 0。主要指標與 Gate 都不變
+  （gold 前的 scores / table / compare / gate 備份在 `data/external/logs/heldout-methods/pre-gold/`；scores.json 除了 gold 欄位之外沒有任何改變；
+  gate.json 除了 inputs sha 之外完全相同）。Gate 仍是 **NOT PASSED**（條件 1 −0.080 [−0.280, 0.120]）。
+  - gold precision（n = 有引用的 incident 數，平均，95% 區間）/ gold coverage（每個方法每個 incident 抽 5 個引用，decision 017）：
+    stat-anomaly 0.850 [0.745, 0.940]，n 40，coverage 1.000；retrieval 0.520 [0.353, 0.681]，n 33，coverage 0.374；
+    dump-all 0.589 [0.443, 0.727]，n 44，coverage 0.944；agent 0.727 [0.604, 0.840]，n 46，coverage 0.986（數字來自各方法的 `table.md`）。
+- **唯讀確認（2026-10-30）**：`collect status --set heldout` freeze_problems `[]`；`eval version-check --set pilot` exit 0；
+  `git diff --name-status 4b42a4a..HEAD` 只有 `M NEXT.md`、`A docs/heldout/freeze.json`、`A docs/heldout/slots.json`。
+- **下一步（需要使用者）**：依 SPEC「Gate」沒有通過 → 「收尾或改題」由使用者決定。決定之後，發布 commit 只含 decision 030 §5 的三項：
+  `A docs/decisions/100-heldout-final-results.md`（只轉寫凍結工具寫出的數字，不列 held-out incident / run group id）、`A docs/decisions/031-*.md`（日期、freeze 紀錄、
+  Gate 判定、下一步的決定）、`M NEXT.md`；commit 前後各跑一次上面三項確認。
+
+### 之前的「目前位置」（2026-10-25，held-out Gate 判定 NOT PASSED；下一步是使用者的 gold 盲標與「收尾或改題」的決定）
 
 - **Held-out freeze 完成**：plan `4b42a4a`（10 個 fault、amended 0、removed 0、6 則 notes 未吸收），freeze commit `045bc27`（frozen_from_commit `4b42a4a`；
   slots 50；soak report `soak/20261010T053643Z`；Pilot run_config sha256 agent `5bac6e23…`、dump-all `36226686…`、retrieval `1fa43e19…`；
