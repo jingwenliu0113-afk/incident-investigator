@@ -1,6 +1,23 @@
 # NEXT
 
-## 目前位置（2026-10-30，held-out 全部步驟完成，Gate 判定 NOT PASSED；下一步是使用者「收尾或改題」的決定，之後才做發布 commit）
+## 目前位置（2026-10-31，**Core 正式收尾**：held-out Gate 判定 NOT PASSED，使用者決定照現在的結果收尾，不改題、不進 Advanced；最終結果已發布）
+
+- **使用者決定（2026-10-31，原話）**：「我的決定是：照現在的 `NOT PASSED` 結果正式收尾，不改題、不進入 Advanced。」理由與核對寫在
+  [decision 031](docs/decisions/031-heldout-wrap-up.md)。
+- **發布 commit（decision 030 §5）**：只有三項——`A docs/decisions/100-heldout-final-results.md`（held-out 最終結果，只轉寫凍結工具寫出的檔案，
+  不列 held-out incident / run group id；只寫一次，之後的更正寫新的 decision 032–099）、`A docs/decisions/031-heldout-wrap-up.md`（日期、freeze 紀錄、
+  Gate 判定、使用者的收尾決定）、`M NEXT.md`。README、SPEC、程式、測試、資料、門檻與 Gate 都沒有改。
+  - 100 用 scratchpad 的產生程式從凍結的 `table.md`、`gate.md`、`gate.json`、`compare-*.md`、`scores.json`、`attempts.jsonl` 原文擷取（不進 git）；
+    產生後對照：除了 §4 把四份 table.md 同一列並排的總表（逐格對照相符），其餘每一列表格都與來源逐字相同；全文沒有 `INC-` / `RG-`。
+  - commit 前的唯讀確認（2026-10-31）：`git diff --name-status 4b42a4a..HEAD` 只有 `M NEXT.md`、`A docs/heldout/freeze.json`、`A docs/heldout/slots.json`；
+    `collect status --set heldout` freeze_problems `[]`；`eval version-check --set pilot` exit 0。commit 後再跑一次，結果回報使用者。
+- **最終結論**（數字見 100）：條件 1 不成立（agent − stat-anomaly origin_top1 −0.080 [−0.280, 0.120]，n 50）；條件 2、3 成立；coverage 0 / 32。
+  結論只限於本機模型 qwen3.5 9B（q4_K_M，decision 029）。
+- **之後沒有待辦**：Core 完成；不進 Advanced、不改題、不實作 Optional。沒有持有任何 lock，Docker daemon 沒有在跑（2026-10-31 唯讀確認）。
+  沒有做任何清理：`data/external/`（snapshot、結果、gold、log、`logs/heldout-gold/` 與 `logs/heldout-methods/` 的工具與備份）與本機的 Docker image 都保留，
+  要不要清理由使用者決定。之後若有新的工作，由使用者提出並另寫 decision（032 起）。
+
+### 之前的「目前位置」（2026-10-30，held-out 全部步驟完成，Gate 判定 NOT PASSED；下一步是使用者「收尾或改題」的決定，之後才做發布 commit）
 
 - **held-out gold 完成（使用者 human:jingwen，2026-10-26–30）**：50 個 incident、604 項全部判定（null 0），relevant 423。使用者依 fault 分 10 組看
   method-blind 的精簡版（`data/external/logs/heldout-gold/gold_compact.py`），每組一次給答案與註記；主 session 只用 `gold_fill.py`（`eval gold-add`）照答案寫入，
@@ -231,6 +248,8 @@
   | 端到端測試、README | — |
 
 ## 下一步（Core，依序）
+
+（2026-10-31：Core 全部完成並收尾，見最上面的「目前位置」與 decision 031；本節以下保留為紀錄。）
 
 1–5 已完成；6（Pilot 修訂宣告）與 8（amendments）的內容使用者已決定，013 F13 第 1、3、7 項也已回答（選 (i)），**freeze 之前沒有等使用者的事項**。
 剩下的只有：最後檢查（全部測試、第 7 步 version-check）→ 第 8 步 heldout-plan（空的 amendments）→ commit `plan.json` → 第 9 步 heldout-freeze（第 6 步的 A9 宣告）→
