@@ -97,7 +97,7 @@ def tree(root):
 def test_the_committed_config_has_the_frozen_budgets_and_runs_nothing_before_approval():
     config = json.loads(explore.CONFIG.read_text())
     assert config["status"] in explore.STATUSES and config["decision"] == "032"
-    assert (config["endpoint"], config["model"]) == ("gemini-api", "gemini-4-argon")  # decision 033
+    assert config["model"] == "gemini-4-argon" and config["endpoint"] == "vertex"  # decisions 033, 034
     assert explore.config_problems(config, "check") == []  # the free check runs in every status
     assert config["budgets"] == load_llm_config(need_client=False)["budgets"]
     if config["status"] != "approved":  # the Pilot and held-out runs wait for the user's total (032 §6 step 5)
