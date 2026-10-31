@@ -18,10 +18,11 @@
   所以改用 Gemini API（模型 `gemini-4-argon`），不走 Vertex AI。單價取自官方價格頁：到 11/30 是 $2 / $0.10 / $10（input / cached / output），
   12/1 起翻倍；每次回覆依它的時間計價。新增免費的 `python -m eval.explore check`（只呼叫 models.get）。之後的修訂一律另寫新的 decision（main 只允許新增）。
   branch commit 0a474e8，完整測試 1150 passed。
-- **下一步（需要使用者，key 不要貼進對話）**：在 key 所屬的 project 啟用 Generative Language API、確認有連結帳單帳戶、（建議）把 key 限制成只能呼叫
-  Generative Language API；用 `security add-generic-password -a "$USER" -s gemini-api-key -w` 存進鑰匙圈，`~/.zshrc` 加一行從鑰匙圈匯出
-  `GEMINI_API_KEY`，然後重開 Claude app；（建議）設 $250 預算警示。
-- **之後（主 session）**：只檢查 `GEMINI_API_KEY` 有沒有設定 → `python -m eval.explore check`（免費）→ 報告合成範例探測的預估（< $1），
+- **下一步（需要使用者，key 不要貼進對話）**：Gemini API（原名 Generative Language API）在「My First Project」已啟用、帳單帳戶已連結
+  （免費試用帳戶，抵免額充足；2026-10-31 主 session 在使用者同意下用 Chrome 唯讀查看）。使用者只剩把 key 存進鑰匙圈：
+  `security add-generic-password -a "$USER" -s gemini-api-key -w`。不必改 `~/.zshrc`、不必重開 app（使用者有其他 session 在跑）：
+  branch 上的 `tools/with-gemini-key` 每次執行時從鑰匙圈取 key，只放進那一個指令的環境（不印出、不記錄）；commit 6cfdae5，完整測試 1153 passed。
+- **之後（主 session）**：`./tools/with-gemini-key uv run python -m eval.explore check`（免費，只呼叫 models.get）→ 報告合成範例探測的預估（< $1），
   等使用者批准才把設定檔改成 probe → 探測 → 依 032 §6 繼續。
 
 ### 之前的「目前位置」（2026-10-31，**Core 正式收尾**：held-out Gate 判定 NOT PASSED，使用者決定照現在的結果收尾，不改題、不進 Advanced；最終結果已發布）
