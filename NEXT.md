@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-31，**decision 032 / 033 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；程式完成，等使用者設定 API key，之後才有付費呼叫）
+## 目前位置（2026-10-31，**decision 032 / 033 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；程式完成，Vertex 探測 retrieval 失敗（$0.21），等使用者批准小診斷）
 
 - **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。使用者 2026-10-31 選了 Google Cloud 的 Gemini、模型 Argon、做法 A
   （沿用這 50 個 held-out incident 的探索性補充）、三個 LLM 方法都跑；[decision 032](docs/decisions/032-exploratory-gemini-argon.md) 已 Accepted
@@ -14,16 +14,20 @@
     `data/external/results/explore-032/`；held-out 只認 032 登記的 freeze.json 與 heldout_incidents.json sha；評分用凍結的 `score_method`
     （gold = 正式判定加 `evidence_gold.explore-032.json`）；累計費用到 `cost_ceiling_usd` 就停。
   - `eval/llm_methods.explore-032.json`：status `draft`（什麼都不能跑）。測試確認 branch 對 heldout-final 的程式只有新增檔案。
-- **[decision 033](docs/decisions/033-explore-gemini-api-key.md)（2026-10-31）**：使用者只有在 console.cloud.google.com 建立的 API key，
-  所以改用 Gemini API（模型 `gemini-4-argon`），不走 Vertex AI。單價取自官方價格頁：到 11/30 是 $2 / $0.10 / $10（input / cached / output），
-  12/1 起翻倍；每次回覆依它的時間計價。新增免費的 `python -m eval.explore check`（只呼叫 models.get）。之後的修訂一律另寫新的 decision（main 只允許新增）。
-  branch commit 0a474e8，完整測試 1150 passed。
-- **下一步（需要使用者，key 不要貼進對話）**：Gemini API（原名 Generative Language API）在「My First Project」已啟用、帳單帳戶已連結
-  （免費試用帳戶，抵免額充足；2026-10-31 主 session 在使用者同意下用 Chrome 唯讀查看）。使用者只剩把 key 存進鑰匙圈：
-  `security add-generic-password -a "$USER" -s gemini-api-key -w`。不必改 `~/.zshrc`、不必重開 app（使用者有其他 session 在跑）：
-  branch 上的 `tools/with-gemini-key` 每次執行時從鑰匙圈取 key，只放進那一個指令的環境（不印出、不記錄）；commit 6cfdae5，完整測試 1153 passed。
-- **之後（主 session）**：`./tools/with-gemini-key uv run python -m eval.explore check`（免費，只呼叫 models.get）→ 報告合成範例探測的預估（< $1），
-  等使用者批准才把設定檔改成 probe → 探測 → 依 032 §6 繼續。
+- **[decision 033](docs/decisions/033-explore-gemini-api-key.md) → [034](docs/decisions/034-explore-back-to-vertex.md)（2026-10-31）**：
+  Gemini API 用 API key 的探測被拒（HTTP 402，預付點數；$0），改回 Vertex AI（global，project `lyrical-link-483206-r8`，使用者自己登入的 ADC，
+  付款用 Google Cloud 試用抵免額）。主 session 經同意用 Homebrew 裝了 `gcloud-cli` 591.0.0；登入與 quota project 由使用者自己執行。
+  免費檢查（models.get）通過。設定檔 `status` 是 probe（使用者「批准探測」「探測費用也同意」）；Pilot 與 held-out 還不能跑（要 approved 與總上限）。
+- **合成範例探測（Vertex，2026-10-31，實際 $0.21）**：報告在 `data/external/logs/explore-032/`（probe-1 是 402 那次，probe-2 是這次）。
+  - dump-all：1 次呼叫、合格答案、68,187 input tokens、$0.139。agent：3 次呼叫（5 次工具呼叫，平行）、合格答案、cache 命中 16,335、$0.051。
+  - temperature 0、seed 42、thinking LOW 都被接受（thinking tokens 都是 0）。回覆的 model_version 是 `gemini-4-argon`（只是模型名稱，
+    models.get 的 version 是 "default"）：版本釘選只能抓到換模型，抓不到 Google 靜默更新，要寫進下一份 decision 的限制。
+  - **retrieval 失敗**：第 2 次呼叫（submit_round）HTTP 400 "Requests ending with a model turn are not supported"（adapter 的 bad_request，
+    不重試）。離線重建的請求結構是 user → model（propose_queries 的 function_call）→ user（function_response + 文字），結尾是 user；
+    免費的 count_tokens 不檢查結構，重現不了。可能的觸發：同一個 user turn 混了 function_response 與文字、或歷史裡的 propose_queries 沒有在這次請求宣告。
+  - 使用者離開前的規則（「如果成功你就直接開始」；主 session 回覆：不成功就不再花錢、只做免費的找原因與修正）：**沒有進 Pilot**。
+- **下一步（需要使用者）**：批准一個很小的診斷（幾次各約百個 tokens 的呼叫，< $0.01），找出是哪一種結構觸發 400；修 adapter（TDD，
+  另寫 decision 035，main 只允許新增）；再跑一次探測（實測約 $0.25）。成功後才依 032 §6 第 5 步跑 Pilot 第 1 個 incident（上限 $15）並估總預算。
 
 ### 之前的「目前位置」（2026-10-31，**Core 正式收尾**：held-out Gate 判定 NOT PASSED，使用者決定照現在的結果收尾，不改題、不進 Advanced；最終結果已發布）
 
