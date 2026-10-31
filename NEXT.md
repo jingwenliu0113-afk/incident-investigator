@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-31，**decision 032 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；程式完成，等使用者的 Google Cloud 準備，之後才有付費呼叫）
+## 目前位置（2026-10-31，**decision 032 / 033 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；程式完成，等使用者設定 API key，之後才有付費呼叫）
 
 - **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。使用者 2026-10-31 選了 Google Cloud 的 Gemini、模型 Argon、做法 A
   （沿用這 50 個 held-out incident 的探索性補充）、三個 LLM 方法都跑；[decision 032](docs/decisions/032-exploratory-gemini-argon.md) 已 Accepted
@@ -14,9 +14,15 @@
     `data/external/results/explore-032/`；held-out 只認 032 登記的 freeze.json 與 heldout_incidents.json sha；評分用凍結的 `score_method`
     （gold = 正式判定加 `evidence_gold.explore-032.json`）；累計費用到 `cost_ceiling_usd` 就停。
   - `eval/llm_methods.explore-032.json`：status `draft`（什麼都不能跑）。測試確認 branch 對 heldout-final 的程式只有新增檔案。
-- **下一步（需要使用者）**：在 Google Cloud 自己完成——有 billing 的 project、啟用 Vertex AI API、在 Model Garden 確認 Argon 的 model ID 與單價
-  （input、cached input、output）、`gcloud auth application-default login`、預算警示（建議 $250）。然後告訴主 session project ID、region、
-  model ID 與單價（都不是憑證）。之後依 032 §6：合成範例探測（預估 < $1，先報告等批准）→ Pilot 第 1 個 incident → 使用者核准總預算 → 其餘。
+- **[decision 033](docs/decisions/033-explore-gemini-api-key.md)（2026-10-31）**：使用者只有在 console.cloud.google.com 建立的 API key，
+  所以改用 Gemini API（模型 `gemini-4-argon`），不走 Vertex AI。單價取自官方價格頁：到 11/30 是 $2 / $0.10 / $10（input / cached / output），
+  12/1 起翻倍；每次回覆依它的時間計價。新增免費的 `python -m eval.explore check`（只呼叫 models.get）。之後的修訂一律另寫新的 decision（main 只允許新增）。
+  branch commit 0a474e8，完整測試 1150 passed。
+- **下一步（需要使用者，key 不要貼進對話）**：在 key 所屬的 project 啟用 Generative Language API、確認有連結帳單帳戶、（建議）把 key 限制成只能呼叫
+  Generative Language API；用 `security add-generic-password -a "$USER" -s gemini-api-key -w` 存進鑰匙圈，`~/.zshrc` 加一行從鑰匙圈匯出
+  `GEMINI_API_KEY`，然後重開 Claude app；（建議）設 $250 預算警示。
+- **之後（主 session）**：只檢查 `GEMINI_API_KEY` 有沒有設定 → `python -m eval.explore check`（免費）→ 報告合成範例探測的預估（< $1），
+  等使用者批准才把設定檔改成 probe → 探測 → 依 032 §6 繼續。
 
 ### 之前的「目前位置」（2026-10-31，**Core 正式收尾**：held-out Gate 判定 NOT PASSED，使用者決定照現在的結果收尾，不改題、不進 Advanced；最終結果已發布）
 
