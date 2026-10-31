@@ -1,7 +1,8 @@
 """python -m eval.explore — decision 032's exploratory run: the three frozen LLM methods with Gemini on Vertex AI, on the
 held-out incidents (and the Pilot, to check the adapter). EXPLORATORY, NOT a Gate decision: 100 and 031 stand.
 
-    python -m eval.explore check                                  # free: the key works, the model is known (033)
+    ./tools/with-gemini-key uv run python -m eval.explore check   # free: the key works, the model is known (033)
+    (every command that calls the model runs under tools/with-gemini-key: the key from the keychain, never printed)
     python -m eval.explore probe [--out PATH]                     # the SYNTHETIC sample only (032 §6 step 4)
     python -m eval.explore run --method <m> --set pilot|heldout [--limit N]
     python -m eval.explore score --method <m> --set pilot|heldout

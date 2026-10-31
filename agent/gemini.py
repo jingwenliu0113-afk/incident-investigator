@@ -3,8 +3,8 @@ complete(system, messages, tools) -> {content, usage} with Anthropic Messages AP
 
 - Used only by eval.explore on the branch explore/032-argon; the frozen methods, prompts, tools and budgets are unchanged
   (decision 032 §2). Endpoint (decision 033): the Gemini API with the user's API key, which the user keeps in the macOS
-  keychain and ~/.zshrc exports as GEMINI_API_KEY (the SDK reads it); or Vertex AI with the user's Application Default
-  Credentials. This module never reads, asks for, prints or stores a credential (key_problem only sees whether the
+  keychain and tools/with-gemini-key puts into one command's environment as GEMINI_API_KEY (the SDK reads it); or Vertex
+  AI with the user's Application Default Credentials. This module never reads, asks for, prints or stores a credential (key_problem only sees whether the
   variable is set).
 - Shapes: tool_use <-> function_call (our ids are deterministic, toolu_<turn>_<i>; Gemini's own call id is kept as
   `call_id`), tool_result -> function_response ({"output": text} or {"error": text}), thinking <-> a thought part. Every
@@ -287,8 +287,9 @@ def key_problem(environ=None) -> str | None:
 
     environ = os.environ if environ is None else environ
     if not any(environ.get(name) for name in KEY_VARIABLES):
-        return (f"no API key in the environment ({' or '.join(KEY_VARIABLES)}): the user stores it (decision 033: in the "
-                "macOS keychain, exported by ~/.zshrc) and restarts the app; it is never pasted into the conversation")
+        return (f"no API key in the environment ({' or '.join(KEY_VARIABLES)}): run the command under "
+                "tools/with-gemini-key, which takes the key the user stored in the macOS keychain (decision 033); it is "
+                "never pasted into the conversation")
     return None
 
 

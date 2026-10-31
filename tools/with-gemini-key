@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# with-gemini-key
+#
+# 用法：
+#   ./tools/with-gemini-key uv run python -m eval.explore <command> ...
+#
+# 用途（decision 032 / 033，只用於探索性實驗）：
+#   從 macOS 鑰匙圈取出使用者自己存的 Gemini API key（項目名稱 gemini-api-key），只放進這一個指令的環境變數 GEMINI_API_KEY，
+#   然後執行指令。不需要改 ~/.zshrc，也不需要重開 app。
+#
+# 注意：
+#   - key 由使用者用 `security add-generic-password -a "$USER" -s gemini-api-key -w` 存入；主 session 不要求、不讀出、不保存它。
+#   - 這個 script 從不印出、記錄或寫入 key；錯誤訊息只說「沒有」或「是空的」。
+#   - 鑰匙圈裡沒有這個項目時 exit 3，不執行指令。
+
+set -u
+
+if [ "$#" -eq 0 ]; then
+  echo "Usage: $0 <command> [args...]" >&2
+  exit 64
+fi
+
+if ! GEMINI_API_KEY="$(security find-generic-password -a "$USER" -s gemini-api-key -w 2>/dev/null)"; then
+  echo "ERROR: the keychain has no item gemini-api-key for $USER: store the key with" >&2
+  echo "  security add-generic-password -a \"\$USER\" -s gemini-api-key -w" >&2
+  echo "(decision 033; never paste the key into the conversation)" >&2
+  exit 3
+fi
+if [ -z "$GEMINI_API_KEY" ]; then
+  echo "ERROR: the keychain item gemini-api-key is empty: store the key again (decision 033)" >&2
+  exit 3
+fi
+export GEMINI_API_KEY
+exec "$@"
