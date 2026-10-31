@@ -20,6 +20,13 @@ from test_gemini import SIG, VERSION, Scripted, api_error, part_call, response
 PRICE = {"input": 2.0, "cached_input": 0.1, "output": 10.0}
 
 
+@pytest.fixture(autouse=True)
+def no_key(monkeypatch):
+    """No test can authenticate to Google, whatever the committed config allows: every model here is scripted."""
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+
 def config_doc(**over) -> dict:
     doc = {"status": "approved", "decision": "032", "provider": "google-gemini", "endpoint": "gemini-api",
            "model": "gemini-test", "timeout_s": 3600,
@@ -87,14 +94,14 @@ def tree(root):
 
 # ---------------------------------------------------------------- configuration
 
-def test_the_committed_config_is_a_draft_with_the_frozen_budgets():
+def test_the_committed_config_has_the_frozen_budgets_and_runs_nothing_before_approval():
     config = json.loads(explore.CONFIG.read_text())
-    assert config["status"] == "draft" and config["decision"] == "032"
+    assert config["status"] in explore.STATUSES and config["decision"] == "032"
     assert (config["endpoint"], config["model"]) == ("gemini-api", "gemini-4-argon")  # decision 033
-    assert explore.config_problems(config, "check") == []  # the free check runs while the config is a draft
+    assert explore.config_problems(config, "check") == []  # the free check runs in every status
     assert config["budgets"] == load_llm_config(need_client=False)["budgets"]
-    assert config["settings"]["thinking_level"] == "LOW"  # 032 §3, confirmed after the probe
-    assert any("does not allow the probe" in p for p in explore.config_problems(config, "probe"))
+    if config["status"] != "approved":  # the Pilot and held-out runs wait for the user's total (032 §6 step 5)
+        assert any("does not allow the run" in p for p in explore.config_problems(config, "run"))
 
 
 def test_each_paid_step_needs_its_status_and_the_run_needs_a_ceiling():
@@ -363,7 +370,10 @@ def test_the_probe_runs_the_three_methods_on_the_synthetic_sample_and_writes_not
         explore.probe(config_path=path, make_model=Maker(), facts=facts)
 
 
-def test_the_cli_refuses_every_paid_step_while_the_committed_config_is_a_draft(capsys):
+def test_the_cli_refuses_every_paid_step_while_the_config_is_a_draft(tmp_path, monkeypatch, capsys):
+    draft = tmp_path / "draft.json"
+    draft.write_text(json.dumps(config_doc(status="draft")))
+    monkeypatch.setattr(explore, "CONFIG", draft)
     before = tree(PROJECT_DIR / "data")
     assert explore.main(["run", "--method", "agent", "--set", "heldout"]) == 2
     assert "does not allow the run" in capsys.readouterr().err
