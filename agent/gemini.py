@@ -1,9 +1,11 @@
-"""The Vertex AI Gemini adapter for the model interface of decision 020 §6 (decision 032, exploratory only):
+"""The Gemini adapter for the model interface of decision 020 §6 (decisions 032, 033; exploratory only):
 complete(system, messages, tools) -> {content, usage} with Anthropic Messages API shapes, over the Google Gen AI SDK.
 
 - Used only by eval.explore on the branch explore/032-argon; the frozen methods, prompts, tools and budgets are unchanged
-  (decision 032 §2). Credentials are Application Default Credentials set up by the user (`gcloud auth
-  application-default login`); this module never reads, asks for or stores them.
+  (decision 032 §2). Endpoint (decision 033): the Gemini API with the user's API key, which the user keeps in the macOS
+  keychain and ~/.zshrc exports as GEMINI_API_KEY (the SDK reads it); or Vertex AI with the user's Application Default
+  Credentials. This module never reads, asks for, prints or stores a credential (key_problem only sees whether the
+  variable is set).
 - Shapes: tool_use <-> function_call (our ids are deterministic, toolu_<turn>_<i>; Gemini's own call id is kept as
   `call_id`), tool_result -> function_response ({"output": text} or {"error": text}), thinking <-> a thought part. Every
   thought signature the model returns stays on its block and goes back unchanged, as Gemini requires for tool calls.
@@ -24,7 +26,9 @@ from collections.abc import Callable
 
 from agent.harness import CallError
 
-PROVIDER = "vertex-gemini"
+PROVIDER = "google-gemini"
+ENDPOINTS = ("gemini-api", "vertex")  # decision 033: the Gemini API with the user's API key; Vertex AI with ADC
+KEY_VARIABLES = ("GEMINI_API_KEY", "GOOGLE_API_KEY")  # where the SDK looks for the Gemini API key
 BLOCKED = "blocked"  # the provider's filters blocked the prompt or the reply
 BAD_REQUEST = "bad_request"  # HTTP 400: the request itself is wrong, so sending it again cannot help
 PIN_MISMATCH = "pin_mismatch"  # a reply from another model version, or one that names none
@@ -203,7 +207,7 @@ def _now() -> str:
 
 
 class GeminiModel:
-    """One Vertex AI Gemini model with fixed settings (decision 032 §3). `call` sends one request (sdk_call in a run, a
+    """One Gemini model with fixed settings (decision 032 §3). `call` sends one request (sdk_call in a run, a
     script in the tests); `calls` lists every reply that came back, billed or not, until the runner drains it."""
 
     def __init__(self, model: str, *, call: Call, thinking_level: str | None, temperature: float | None, seed: int | None,
@@ -276,19 +280,38 @@ class GeminiModel:
 
 # ---------------------------------------------------------------- the SDK (a run only; never in the tests)
 
-def _client(project: str, location: str, timeout_s: float):
+def key_problem(environ=None) -> str | None:
+    """Why the Gemini API cannot authenticate (None when it can). Only whether a key variable is set is looked at; its
+    value is never read here, printed or stored (the SDK reads it)."""
+    import os
+
+    environ = os.environ if environ is None else environ
+    if not any(environ.get(name) for name in KEY_VARIABLES):
+        return (f"no API key in the environment ({' or '.join(KEY_VARIABLES)}): the user stores it (decision 033: in the "
+                "macOS keychain, exported by ~/.zshrc) and restarts the app; it is never pasted into the conversation")
+    return None
+
+
+def _client(endpoint: str, timeout_s: float, *, project: str | None = None, location: str | None = None):
     from google import genai
     from google.genai import types
 
+    if endpoint not in ENDPOINTS:
+        raise ValueError(f"endpoint must be one of {ENDPOINTS}, got {endpoint!r}")
     options = types.HttpOptions(timeout=int(timeout_s * 1000), retry_options=types.HttpRetryOptions(attempts=1))
-    return genai.Client(vertexai=True, project=project, location=location, http_options=options)
+    if endpoint == "vertex":
+        return genai.Client(vertexai=True, project=project, location=location, http_options=options)
+    if problem := key_problem():
+        raise ValueError(problem)
+    return genai.Client(http_options=options)  # the Gemini API; the SDK takes the key from the environment
 
 
-def sdk_call(project: str, location: str, timeout_s: float = DEFAULT_TIMEOUT_S) -> Call:
-    """generate_content on Vertex AI with the SDK's own retries off (GeminiModel retries, and records each retry)."""
+def sdk_call(endpoint: str, timeout_s: float = DEFAULT_TIMEOUT_S, *, project: str | None = None,
+             location: str | None = None) -> Call:
+    """generate_content with the SDK's own retries off (GeminiModel retries, and records each retry)."""
     from google.genai import types
 
-    client = _client(project, location, timeout_s)
+    client = _client(endpoint, timeout_s, project=project, location=location)
 
     def call(request: dict) -> dict:
         response = client.models.generate_content(
@@ -299,11 +322,14 @@ def sdk_call(project: str, location: str, timeout_s: float = DEFAULT_TIMEOUT_S) 
     return call
 
 
-def sdk_model_facts(project: str, location: str, model: str, timeout_s: float = 60.0) -> dict:
-    """What Vertex AI says about `model` (models.get: free, no generation). ValueError when it cannot be read, so a run
-    stops before an attempt starts (decision 032 §4, like the pin check of decision 029)."""
+def sdk_model_facts(endpoint: str, model: str, timeout_s: float = 60.0, *, project: str | None = None,
+                    location: str | None = None) -> dict:
+    """What the endpoint says about `model` (models.get: free, no generation). ValueError when it cannot be read, so a
+    run stops before an attempt starts (decision 032 §4, like the pin check of decision 029)."""
+    client = _client(endpoint, timeout_s, project=project, location=location)  # a missing key: its own ValueError
     try:
-        m = _client(project, location, timeout_s).models.get(model=model)
+        m = client.models.get(model=model)
     except Exception as e:
-        raise ValueError(f"cannot read {model} on Vertex AI ({project}, {location}): {_detail(e)}") from e
-    return {"name": m.name, "version": m.version, "display_name": m.display_name}
+        raise ValueError(f"cannot read {model} on {endpoint}: {_detail(e)}") from e
+    return {"name": m.name, "version": m.version, "display_name": m.display_name,
+            "input_token_limit": m.input_token_limit, "output_token_limit": m.output_token_limit}

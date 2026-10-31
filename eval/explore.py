@@ -1,6 +1,7 @@
 """python -m eval.explore — decision 032's exploratory run: the three frozen LLM methods with Gemini on Vertex AI, on the
 held-out incidents (and the Pilot, to check the adapter). EXPLORATORY, NOT a Gate decision: 100 and 031 stand.
 
+    python -m eval.explore check                                  # free: the key works, the model is known (033)
     python -m eval.explore probe [--out PATH]                     # the SYNTHETIC sample only (032 §6 step 4)
     python -m eval.explore run --method <m> --set pilot|heldout [--limit N]
     python -m eval.explore score --method <m> --set pilot|heldout
@@ -18,8 +19,9 @@ byte for byte the ones decision 032 registered, and the incident list comes from
 
 - Results: data/external/results/explore-032/<set>/<method>/ (predictions, transcripts, attempts.jsonl with the retry
   rule of decision 023 §5, calls.jsonl with every reply's tokens and cost, run_config.json, scores.json, table.md).
-- Model: eval/llm_methods.explore-032.json (status draft: nothing runs; probe: only the synthetic probe; approved: all).
-  The budgets must equal those of eval/llm_methods.json. Prices are per 1M tokens (input, cached input, output).
+- Model: eval/llm_methods.explore-032.json (status draft: only the free check; probe: also the synthetic probe;
+  approved: all). Endpoint (decision 033): the Gemini API with the user's key, or Vertex AI. The budgets must equal those
+  of eval/llm_methods.json. Prices are per 1M tokens (input, cached input, output); price_changes date the later ones.
 - Cost: cost_usd of a prediction is computed from its replies (cached input and thinking apart); a run stops before an
   attempt once everything recorded under explore-032/ reaches cost_ceiling_usd, and after the attempt that reaches it.
 - Pin: the model version of the first reply is written once to explore-032/model_version.json; any other version later
@@ -58,37 +60,49 @@ TODO_FILE = "evidence_gold_todo.explore-032.json"
 CALLS_LOG = "calls.jsonl"
 PIN_FILE = "model_version.json"
 SPLITS = ("pilot", "heldout")
-STATUSES = {"draft": (), "probe": ("probe",), "approved": ("probe", "run")}
+STATUSES = {"draft": ("check",), "probe": ("check", "probe"), "approved": ("check", "probe", "run")}
 PRICE_KEYS = ("input", "cached_input", "output")
-EXPLORATORY = ("EXPLORATORY (decision 032), NOT a Gate decision: the frozen methods with another model (Gemini on Vertex "
-               "AI), on incidents whose results were already published. The Gate decision stays the one of decisions "
-               "100 and 031 (NOT PASSED).")
+EXPLORATORY = ("EXPLORATORY (decision 032), NOT a Gate decision: the frozen methods with another model (Gemini), on "
+               "incidents whose results were already published. The Gate decision stays the one of decisions 100 and 031 "
+               "(NOT PASSED).")
 
 
 # ---------------------------------------------------------------- configuration
 
+def _price_problem(price, where: str) -> str | None:
+    price = price if isinstance(price, dict) else {}
+    if any(isinstance(price.get(k), bool) or not isinstance(price.get(k), (int, float)) or price[k] < 0 for k in PRICE_KEYS):
+        return f"{where} needs {', '.join(PRICE_KEYS)} in USD per 1M tokens, as the price list shows them"
+    return None
+
+
 def config_problems(config: dict, action: str) -> list[str]:
-    """Why `config` cannot be used for `action` ("probe" or "run")."""
-    from agent.gemini import PROVIDER, THINKING_LEVELS
+    """Why `config` cannot be used for `action`: "check" (models.get only, free), "probe" or "run"."""
+    import re
+
+    from agent.gemini import ENDPOINTS, PROVIDER, THINKING_LEVELS
 
     problems = []
     status = config.get("status")
     if action not in STATUSES.get(status, ()):
-        problems.append(f"status {status!r} does not allow the {action} (draft: nothing; probe: the synthetic probe; "
-                        "approved: everything): the user approves each paid step first (decision 032 §6)")
+        problems.append(f"status {status!r} does not allow the {action} (draft: only the free check; probe: also the "
+                        "synthetic probe; approved: everything): the user approves each paid step first (decision 032 §6)")
     if config.get("decision") != DECISION:
         problems.append(f"decision must be {DECISION!r}")
     if config.get("provider") != PROVIDER:
         problems.append(f"provider must be {PROVIDER!r}, got {config.get('provider')!r}")
+    if config.get("endpoint") not in ENDPOINTS:
+        problems.append(f"endpoint must be one of {ENDPOINTS} (decision 033), got {config.get('endpoint')!r}")
     if not isinstance(config.get("model"), str) or not config["model"]:
-        problems.append("model must be the Vertex AI model id shown in Model Garden")
-    v = config.get("vertex") or {}
-    for k in ("project", "location"):
-        if not isinstance(v.get(k), str) or not v[k]:
-            problems.append(f"vertex.{k} must be set (given by the user; not a credential)")
-    t = v.get("timeout_s")
+        problems.append("model must be the model id of the endpoint (e.g. gemini-4-argon)")
+    if config.get("endpoint") == "vertex":
+        v = config.get("vertex") or {}
+        for k in ("project", "location"):
+            if not isinstance(v.get(k), str) or not v[k]:
+                problems.append(f"vertex.{k} must be set for the Vertex AI endpoint (given by the user; not a credential)")
+    t = config.get("timeout_s")
     if isinstance(t, bool) or not isinstance(t, (int, float)) or t <= 0:
-        problems.append(f"vertex.timeout_s must be a positive number, got {t!r}")
+        problems.append(f"timeout_s must be a positive number, got {t!r}")
     s = config.get("settings") or {}
     if s.get("thinking_level") is not None and s.get("thinking_level") not in THINKING_LEVELS:
         problems.append(f"settings.thinking_level must be one of {THINKING_LEVELS} or null, got {s.get('thinking_level')!r}")
@@ -99,9 +113,14 @@ def config_problems(config: dict, action: str) -> list[str]:
         problems.append(f"settings.seed must be a positive integer or null, got {seed!r}")
     if isinstance(out, bool) or not isinstance(out, int) or out <= 0:
         problems.append(f"settings.max_output_tokens must be a positive integer, got {out!r}")
-    price = config.get("price_per_mtok") or {}
-    if any(isinstance(price.get(k), bool) or not isinstance(price.get(k), (int, float)) or price[k] < 0 for k in PRICE_KEYS):
-        problems.append(f"price_per_mtok needs {', '.join(PRICE_KEYS)} in USD per 1M tokens, as the console shows them")
+    if action != "check" and (problem := _price_problem(config.get("price_per_mtok"), "price_per_mtok")):
+        problems.append(problem)
+    changes = config.get("price_changes") or []
+    if not isinstance(changes, list) or any(
+            not isinstance(c, dict) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", str(c.get("from")))
+            or _price_problem(c.get("price_per_mtok"), "") for c in changes) or [c["from"] for c in changes] != sorted(
+            c["from"] for c in changes):
+        problems.append("price_changes must list {from: <UTC time>, price_per_mtok: {...}} in time order (decision 033)")
     ceiling = config.get("cost_ceiling_usd")
     if action == "run" and (isinstance(ceiling, bool) or not isinstance(ceiling, (int, float)) or ceiling <= 0):
         problems.append("cost_ceiling_usd must be the total the user approved after the first Pilot incident (032 §6 step 5)")
@@ -119,26 +138,49 @@ def load_config(action: str, path: Path | None = None) -> dict:
     return config
 
 
+def price_at(config: dict, at: str) -> dict:
+    """The prices in force at `at` (a UTC time like the calls' "at"): the last price change at or before it (033)."""
+    price = config["price_per_mtok"]
+    for change in config.get("price_changes") or []:
+        if change["from"] <= at:
+            price = change["price_per_mtok"]
+    return price
+
+
+def _connection(config: dict) -> dict:
+    v = config.get("vertex") or {}
+    return {"project": v.get("project"), "location": v.get("location")} if config["endpoint"] == "vertex" else {}
+
+
 def runtime(config: dict) -> dict:
     """The settings that define the run (run_config.json): a resumed run must have the same ones. The ceiling is not
     among them (the user may approve more), nor the status."""
-    return {"provider": config["provider"], "model": config["model"], **{k: config["vertex"][k] for k in ("project", "location")},
-            **config["settings"], "price_per_mtok": config["price_per_mtok"]}
+    return {"provider": config["provider"], "endpoint": config["endpoint"], "model": config["model"], **_connection(config),
+            **config["settings"], "price_per_mtok": config["price_per_mtok"],
+            "price_changes": config.get("price_changes") or []}
 
 
-def vertex_model(config: dict, *, expected_version: str | None):
+def cloud_model(config: dict, *, expected_version: str | None):
     from agent.gemini import GeminiModel, sdk_call
 
-    v, s = config["vertex"], config["settings"]
-    return GeminiModel(config["model"], call=sdk_call(v["project"], v["location"], v["timeout_s"]),
+    s = config["settings"]
+    return GeminiModel(config["model"], call=sdk_call(config["endpoint"], config["timeout_s"], **_connection(config)),
                        thinking_level=s["thinking_level"], temperature=s["temperature"], seed=s["seed"],
                        max_output_tokens=s["max_output_tokens"], expected_version=expected_version)
 
 
-def vertex_facts(config: dict) -> dict:
+def cloud_facts(config: dict) -> dict:
     from agent.gemini import sdk_model_facts
 
-    return sdk_model_facts(config["vertex"]["project"], config["vertex"]["location"], config["model"])
+    return sdk_model_facts(config["endpoint"], config["model"], **_connection(config))
+
+
+def check(*, config_path: Path | None = None, facts=None) -> dict:
+    """The free check (decision 033): the key or credentials work and the endpoint knows the model (models.get only:
+    nothing is generated, nothing is billed)."""
+    config = load_config("check", config_path)
+    return {"endpoint": config["endpoint"], "model": config["model"], "facts": (facts or cloud_facts)(config),
+            "billed": False}
 
 
 # ---------------------------------------------------------------- the incidents (032 §4)
@@ -199,12 +241,12 @@ def cost_by_run(results_root: Path) -> dict:
     return out
 
 
-def _record_calls(out_dir: Path, inc: str, attempt: int, model, price: dict) -> float:
+def _record_calls(out_dir: Path, inc: str, attempt: int, model, config: dict) -> float:
     from agent.gemini import call_cost
 
     total = 0.0
     for call in model.drain():
-        cost = call_cost(call, price)
+        cost = call_cost(call, price_at(config, call["at"]))
         total += cost
         _append(out_dir, {"incident_id": inc, "attempt": attempt, **call, "cost_usd": round(cost, 6)}, name=CALLS_LOG)
     return round(total, 6)
@@ -245,7 +287,7 @@ def run_explore(layout: DataLayout, method: str, split: str, results_root: Path,
                          "the formal results")
     config = load_config("run", config_path)
     pairs, held = _pairs(layout, split, project_dir)
-    make_model, facts = make_model or vertex_model, facts or vertex_facts
+    make_model, facts = make_model or cloud_model, facts or cloud_facts
     facts(config)  # the model can be read before anything is written (ValueError)
     out_dir = explore_root(results_root) / split / method
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -301,7 +343,7 @@ def run_explore(layout: DataLayout, method: str, split: str, results_root: Path,
                                   cache_root=Path(snapshot.path).parents[2] / "cache")
                 except CallError as e:
                     usage = {**{k: (e.usage or {}).get(k) for k in LEDGER_USAGE},
-                             "cost_usd": _record_calls(out_dir, inc, attempt, model, config["price_per_mtok"])}
+                             "cost_usd": _record_calls(out_dir, inc, attempt, model, config)}
                     _pin(results_root, model, config, f"{split}/{method}/{inc}")
                     if e.reason in RETRYABLE:
                         end(e.reason, e.detail, usage)
@@ -312,11 +354,10 @@ def run_explore(layout: DataLayout, method: str, split: str, results_root: Path,
                     end("error", f"CallError {e.reason}: {e.detail}", usage)
                     raise
                 except Exception as e:
-                    end("error", f"{type(e).__name__}: {e}", {"cost_usd": _record_calls(out_dir, inc, attempt, model,
-                                                                                        config["price_per_mtok"])})
+                    end("error", f"{type(e).__name__}: {e}", {"cost_usd": _record_calls(out_dir, inc, attempt, model, config)})
                     raise
                 pred, transcript = out
-                pred["usage"]["cost_usd"] = _record_calls(out_dir, inc, attempt, model, config["price_per_mtok"])
+                pred["usage"]["cost_usd"] = _record_calls(out_dir, inc, attempt, model, config)
                 transcript["usage"] = pred["usage"]
                 _pin(results_root, model, config, f"{split}/{method}/{inc}")
                 usage = {k: pred["usage"].get(k) for k in LEDGER_USAGE}
@@ -487,12 +528,16 @@ def _banner(run_config: dict) -> str:
 def _explore_lines(result: dict) -> str:
     e, g = result["explore"], result["run_config"]["gemini"]
     p, t = g["price_per_mtok"], e["tokens"]
+    changes = "".join(f"; from {c['from']}: input {c['price_per_mtok']['input']}, cached input "
+                      f"{c['price_per_mtok']['cached_input']}, output {c['price_per_mtok']['output']}"
+                      for c in g.get("price_changes") or [])
     return "\n".join([
         "", "## Model and cost (decision 032; reported, never scored)", "",
-        f"Model: {g['provider']} {g['model']} on Vertex AI ({g['location']}); versions seen: {', '.join(e['model_versions']) or '-'}.",
+        f"Model: {g['provider']} {g['model']} through {g['endpoint']}; versions seen: {', '.join(e['model_versions']) or '-'}.",
         f"Settings: thinking {g['thinking_level']}, temperature {g['temperature']}, seed {g['seed']}, max_output_tokens "
         f"{g['max_output_tokens']}.",
-        f"Prices (USD per 1M tokens): input {p['input']}, cached input {p['cached_input']}, output {p['output']}.",
+        f"Prices (USD per 1M tokens, each reply at the price of its time): input {p['input']}, cached input "
+        f"{p['cached_input']}, output {p['output']}{changes}.",
         f"Replies: {e['calls']} (failed attempts included); prompt tokens {t['prompt']:,} of which cached {t['cached']:,}; "
         f"output tokens {t['candidates'] + t['thoughts']:,} of which thinking {t['thoughts']:,}; cost USD {e['cost_usd']:.2f}.",
         "Tokens and latency are not comparable with the formal run (another tokenizer; network and cloud instead of the "
@@ -616,7 +661,7 @@ def probe(*, config_path: Path | None = None, sample_root: Path | None = None, m
     root = Path(sample_root) if sample_root is not None else PROJECT_DIR / SAMPLE_DIR
     if check_sample(root).get("incident_id") != INCIDENT:
         raise ValueError(f"{root} is not the synthetic sample ({INCIDENT}): the probe runs on nothing else")
-    make_model, facts = make_model or vertex_model, facts or vertex_facts
+    make_model, facts = make_model or cloud_model, facts or cloud_facts
     seen = facts(config)
     layout = DataLayout(root)
     snapshot = open_snapshot(layout.incident_dir(INCIDENT) / "normalized", layout)
@@ -627,11 +672,12 @@ def probe(*, config_path: Path | None = None, sample_root: Path | None = None, m
             methods[kind] = _method(kind, snapshot, model, {"budgets": config["budgets"], "price_per_mtok": None}, Path(cache))
             calls = model.drain()
             methods[kind]["gemini_calls"] = calls
-            methods[kind]["cost_usd"] = round(sum(call_cost(c, config["price_per_mtok"]) for c in calls), 6)
+            methods[kind]["cost_usd"] = round(sum(call_cost(c, price_at(config, c["at"])) for c in calls), 6)
     versions = sorted({c["model_version"] for m in methods.values() for c in m["gemini_calls"] if c.get("model_version")})
     return {"decision": DECISION, "synthetic": True, "statement": "a probe on the synthetic sample, not a result",
             "model": config["model"], "model_facts": seen, "model_versions": versions, "settings": config["settings"],
-            "price_per_mtok": config["price_per_mtok"], "methods": methods,
+            "price_per_mtok": config["price_per_mtok"], "price_changes": config.get("price_changes") or [],
+            "methods": methods,
             "cost_usd_total": round(sum(m["cost_usd"] for m in methods.values()), 6)}
 
 
@@ -642,7 +688,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="python -m eval.explore", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["probe", "run", "score", "compare", "gate", "gold-todo", "gold-add", "cost",
+    parser.add_argument("command", choices=["check", "probe", "run", "score", "compare", "gate", "gold-todo", "gold-add", "cost",
                                             "archive-pilot"])
     parser.add_argument("--method", choices=LLM_METHODS)
     parser.add_argument("--against", choices=sorted(runner.METHODS), help="compare: a formal method (read only)")
@@ -660,7 +706,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     layout = DataLayout(PROJECT_DIR / "data/external")
     results = PROJECT_DIR / "data/external/results"
     try:
-        if ns.command == "probe":
+        if ns.command == "check":
+            print(json.dumps(check(), indent=2))
+        elif ns.command == "probe":
             from eval.probe import out_problem
 
             if ns.out is not None and (problem := out_problem(ns.out)):

@@ -21,10 +21,11 @@ PRICE = {"input": 2.0, "cached_input": 0.1, "output": 10.0}
 
 
 def config_doc(**over) -> dict:
-    doc = {"status": "approved", "decision": "032", "provider": "vertex-gemini", "model": "gemini-test",
-           "vertex": {"project": "proj-x", "location": "global", "timeout_s": 3600},
+    doc = {"status": "approved", "decision": "032", "provider": "google-gemini", "endpoint": "gemini-api",
+           "model": "gemini-test", "timeout_s": 3600,
            "settings": {"thinking_level": "LOW", "temperature": 0, "seed": 42, "max_output_tokens": 32_768},
-           "price_per_mtok": dict(PRICE), "cost_ceiling_usd": 100, "budgets": load_llm_config(need_client=False)["budgets"]}
+           "price_per_mtok": dict(PRICE), "price_changes": [], "cost_ceiling_usd": 100,
+           "budgets": load_llm_config(need_client=False)["budgets"]}
     return {**doc, **over}
 
 
@@ -89,6 +90,8 @@ def tree(root):
 def test_the_committed_config_is_a_draft_with_the_frozen_budgets():
     config = json.loads(explore.CONFIG.read_text())
     assert config["status"] == "draft" and config["decision"] == "032"
+    assert (config["endpoint"], config["model"]) == ("gemini-api", "gemini-4-argon")  # decision 033
+    assert explore.config_problems(config, "check") == []  # the free check runs while the config is a draft
     assert config["budgets"] == load_llm_config(need_client=False)["budgets"]
     assert config["settings"]["thinking_level"] == "LOW"  # 032 §3, confirmed after the probe
     assert any("does not allow the probe" in p for p in explore.config_problems(config, "probe"))
@@ -106,6 +109,26 @@ def test_each_paid_step_needs_its_status_and_the_run_needs_a_ceiling():
     assert len([p for p in explore.config_problems(bad, "run") if p.startswith("settings.")]) == 4
     unset = config_doc(settings={"thinking_level": None, "temperature": None, "seed": None, "max_output_tokens": 32_768})
     assert explore.config_problems(unset, "run") == []  # null: the model's default (032 §3, after the probe)
+
+
+def test_the_vertex_endpoint_needs_a_project_and_a_location_and_prices_change_by_date():
+    assert any("vertex.project" in p for p in explore.config_problems(config_doc(endpoint="vertex"), "run"))
+    assert explore.config_problems(config_doc(endpoint="vertex", vertex={"project": "p", "location": "global"}), "run") == []
+    assert any("endpoint" in p for p in explore.config_problems(config_doc(endpoint="openai"), "run"))
+    later = {"input": 4.0, "cached_input": 0.2, "output": 20.0}
+    config = config_doc(price_changes=[{"from": "2026-12-01T00:00:00Z", "price_per_mtok": later}])
+    assert explore.config_problems(config, "run") == []
+    assert explore.price_at(config, "2026-11-30T23:59:59Z") == PRICE and explore.price_at(config, "2026-12-01T00:00:00Z") == later
+    unordered = config_doc(price_changes=[{"from": "2026-12-01T00:00:00Z", "price_per_mtok": later},
+                                          {"from": "2026-11-01T00:00:00Z", "price_per_mtok": later}])
+    assert any("price_changes" in p for p in explore.config_problems(unordered, "run"))
+
+
+def test_the_free_check_reads_the_model_and_bills_nothing(tmp_path):
+    path = tmp_path / "explore.json"
+    path.write_text(json.dumps(config_doc(status="draft", price_per_mtok=None)))
+    assert explore.check(config_path=path, facts=facts) == {
+        "endpoint": "gemini-api", "model": "gemini-test", "facts": facts(config_doc()), "billed": False}
 
 
 # ---------------------------------------------------------------- the guard (032 §4)
@@ -156,6 +179,15 @@ def test_a_heldout_run_writes_only_under_explore_and_prices_every_reply(tmp_path
     run(layout, out, project, path, maker=maker)  # each incident once: nothing left to attempt
     assert maker.models == [] and explore.cost_so_far(out) == spent
     assert set(explore.cost_by_run(out)) == {"heldout/agent", "heldout/dump-all", "heldout/retrieval"}
+
+
+def test_each_reply_is_priced_at_the_price_of_its_time(tmp_path, monkeypatch):
+    later = {"input": 4.0, "cached_input": 0.2, "output": 20.0}
+    project, layout, out, path = setting(tmp_path, monkeypatch,
+                                         price_changes=[{"from": "2000-01-01T00:00:00Z", "price_per_mtok": later}])
+    run(layout, out, project, path, limit=1)
+    first = lines(out / "explore-032/heldout/agent/calls.jsonl")[0]
+    assert first["cost_usd"] == pytest.approx((1000 * 4.0 + 70 * 20.0) / 1e6)
 
 
 def test_limit_attempts_only_that_many_incidents_and_a_resumed_run_needs_the_same_settings(tmp_path, monkeypatch):

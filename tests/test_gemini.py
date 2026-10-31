@@ -274,3 +274,24 @@ def test_the_harness_runs_an_investigation_through_the_adapter(tmp_path):
     second = call.requests[1]["contents"]
     assert second[1]["parts"][0]["thought_signature"] == SIG  # the model's signature goes back unchanged
     assert json.dumps(transcript)  # the transcript stays JSON
+
+
+def test_the_key_is_only_checked_to_be_set_never_read():
+    from agent.gemini import key_problem
+
+    assert "GEMINI_API_KEY" in key_problem({})
+    assert "never pasted into the conversation" in key_problem({"GEMINI_API_KEY": ""})
+    assert key_problem({"GEMINI_API_KEY": "x"}) is None and key_problem({"GOOGLE_API_KEY": "x"}) is None
+
+
+def test_without_a_key_the_gemini_api_client_is_refused_before_any_request(monkeypatch):
+    from agent.gemini import sdk_call, sdk_model_facts
+
+    for name in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(ValueError, match="no API key"):
+        sdk_call("gemini-api")
+    with pytest.raises(ValueError, match="no API key"):
+        sdk_model_facts("gemini-api", MODEL)
+    with pytest.raises(ValueError, match="endpoint must be one of"):
+        sdk_call("openai")

@@ -1,14 +1,11 @@
 {
   "status": "draft",
   "decision": "032",
-  "note": "decision 032 (exploratory, NOT a Gate decision). status draft: nothing runs; probe: only the synthetic probe (032 §6 step 4, after the user approves its estimate); approved: the Pilot and the held-out runs, capped by cost_ceiling_usd (the total the user approves after the first Pilot incident, 032 §6 step 5). model, vertex.project / location and the prices come from the user (Model Garden / the console); credentials are the user's Application Default Credentials and never appear here. settings follow 032 §3 (thinking LOW; temperature 0 and seed 42 if Vertex accepts them, otherwise null = the model's default, decided after the probe); budgets are exactly those of eval/llm_methods.json.",
-  "provider": "vertex-gemini",
-  "model": null,
-  "vertex": {
-    "project": null,
-    "location": null,
-    "timeout_s": 3600
-  },
+  "note": "decisions 032 and 033 (exploratory, NOT a Gate decision). status draft: only the free check (models.get); probe: also the synthetic probe (032 §6 step 4, after the user approves its estimate); approved: the Pilot and the held-out runs, capped by cost_ceiling_usd (the total the user approves after the first Pilot incident, 032 §6 step 5). Endpoint gemini-api (decision 033): the user's API key from console.cloud.google.com, kept in the macOS keychain and exported by ~/.zshrc as GEMINI_API_KEY; it never appears here or in the conversation. Model and prices from the Gemini API price list (ai.google.dev/gemini-api/docs/pricing, read 2026-10-31): gemini-4-argon, no free tier, introductory prices to 2026-11-30, standard from 2026-12-01 (dated 00:00 UTC, the earlier reading). settings follow 032 §3 (thinking LOW; temperature 0 and seed 42 if accepted, otherwise null = the model's default, decided after the probe); budgets are exactly those of eval/llm_methods.json.",
+  "provider": "google-gemini",
+  "endpoint": "gemini-api",
+  "model": "gemini-4-argon",
+  "timeout_s": 3600,
   "settings": {
     "thinking_level": "LOW",
     "temperature": 0,
@@ -16,10 +13,20 @@
     "max_output_tokens": 32768
   },
   "price_per_mtok": {
-    "input": null,
-    "cached_input": null,
-    "output": null
+    "input": 2.0,
+    "cached_input": 0.1,
+    "output": 10.0
   },
+  "price_changes": [
+    {
+      "from": "2026-12-01T00:00:00Z",
+      "price_per_mtok": {
+        "input": 4.0,
+        "cached_input": 0.2,
+        "output": 20.0
+      }
+    }
+  ],
   "cost_ceiling_usd": null,
   "budgets": {
     "dump_all_proxy_tokens": 120000,
