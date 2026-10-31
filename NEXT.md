@@ -1,6 +1,6 @@
 # NEXT
 
-## 目前位置（2026-10-31，**decision 032–036 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；Pilot 與 held-out 都跑完（合計約 $62），**下一步評分與比較**）
+## 目前位置（2026-10-31，**decision 032–036 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；Pilot 與 held-out 都跑完（合計約 $62）、已評分與比較，**等使用者 gold 盲標（475 項）**）
 
 - **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。main 保持凍結（tag `heldout-final` → e47f2c7）；程式只在 branch `explore/032-argon`。
 - **使用者批准總額**（「批准上限 $150」，032 §6 第 5 步）：`cost_ceiling_usd` 150（branch commit 04afdf3）。
@@ -20,8 +20,26 @@
     依 013 與 026 解讀 19，評分時補 `_abstain`、留在分母、算 `no_answer`，列在 `heldout.unanswered`。不另外重跑。
   - agent 有 25/49 題 `submitted_after_limit`；finish 都是 STOP；model_version 都是 `gemini-4-argon`。
   - 032 實驗累計（試用抵免額）：探測與診斷 $0.49 + Pilot $10.13 + held-out $51.66 = **約 $62.28**（上限 $150）。
-- **下一步（Mac，免費）**：在 branch 上 `python -m eval.explore score` 三個方法 → compare（對 stat-anomaly、對正式 qwen 的同一方法）→ gate 描述
-  → `gold-todo` 請使用者盲標新增的 evidence → `gold-add` → 重新評分 → 寫 101（只寫一次）。
+- **評分、比較、Gate 描述（032 §6 第 8 步，2026-10-31，branch 上的 `eval.explore`，都 exit 0）**：結果在 `data/external/results/explore-032/heldout/`
+  （各方法 `table.md`、`scores.json`；`compare-<m>-vs-formal-{stat-anomaly,<m>}.md`；`agent/gate.md`）。主要指標（平均；stat-anomaly 與 qwen 取自 100）：
+
+  | metric | stat-anomaly | retrieval qwen → Argon | dump-all qwen → Argon | agent qwen → Argon |
+  |---|---:|---:|---:|---:|
+  | fault_type | 0.320 | 0.480 → 0.880 | 0.460 → 0.900 | 0.480 → 0.940 |
+  | origin_top1 | 0.660 | 0.620 → 0.860 | 0.720 → 0.840 | 0.580 → 0.820 |
+  | affected_f1 | 0.800 | 0.811 → 0.876 | 0.738 → 0.881 | 0.697 → 0.855 |
+  | symptom_exact | 0.400 | 0.500 → 0.740 | 0.460 → 0.760 | 0.460 → 0.760 |
+
+  - Gate 條件的描述（EXPLORATORY，不是 Gate 判定）：條件 1 agent − stat-anomaly origin_top1 **+0.160 [0.000, 0.320]**，下界不大於 0 → 未達成；
+    條件 2 達成（paymentUnreachable、productCatalogLockContention）；條件 3 達成（8 / 11 = 0.73）。三個條件同時達成：否。
+  - dump-all 與 retrieval 在同一個 incident 自己提交了「沒有 fault」（origin 空清單，`no_answer`）；agent 的 INC-056 是補位的 `_abstain`。
+  - agent 的 table.md「Total cost (USD): -」：補位的 `_abstain` 沒有 usage，凍結的 `_usage_lines` 在有缺值時印 `-`；實際費用看「Model and cost」段（$19.02，含失敗的 attempt）。
+- **gold（032 §5，需要使用者）**：`python -m eval.explore gold-todo --set heldout` 寫出 50 個工作表（ground truth 側的 `evidence_gold_todo.explore-032.json`），
+  共 **475 項**（已在正式 604 項判定過的沿用，不重判）。照正式 held-out 的做法，method-blind 的精簡版依 fault 分 10 組：
+  `data/external/logs/explore-032/gold/group-01.md` … `group-10.md`（索引 `group-index.md`；工具是 `logs/heldout-gold/` 兩個腳本的副本，只改檔名與指令）。
+  使用者每組回「INC-xxx 1是 2否 3略 …」（可附註記）；主 session 只用 `gold/gold_fill.py`（`eval.explore gold-add`，human:jingwen）照答案寫入，不代替判斷。
+  gold 不影響主要指標與 Gate 條件，只改 evidence 的 gold 欄位。
+- **gold 之後**：重新評分三個方法（compare、gate 也重跑一次）→ 寫 101（只寫一次；commit 只有 `A 101`、`M NEXT.md`，前後各跑三項唯讀確認）。
 
 ### 之前的「目前位置」（2026-10-31，decision 032–035 探索性實驗：探測通過、Pilot 第 1 題完成（$0.84），等使用者批准總額）
 
