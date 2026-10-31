@@ -1,33 +1,36 @@
 # NEXT
 
-## 目前位置（2026-10-31，**decision 032 / 033 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；程式完成，Vertex 探測 retrieval 失敗（$0.21），等使用者批准小診斷）
+## 目前位置（2026-10-31，**decision 032–035 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；探測通過、Pilot 第 1 題完成（$0.84），**等使用者批准總額**）
 
 - **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。使用者 2026-10-31 選了 Google Cloud 的 Gemini、模型 Argon、做法 A
-  （沿用這 50 個 held-out incident 的探索性補充）、三個 LLM 方法都跑；[decision 032](docs/decisions/032-exploratory-gemini-argon.md) 已 Accepted
-  （「三點都同意，commit 並 push 後開始實作」）。
-- **main 保持凍結**：tag `heldout-final` 指向發布 100 的 commit e47f2c7（已推到 origin）。程式只在 branch `explore/032-argon`（已推到 origin，**永不 merge 回 main**）；
-  main 只加文件與 NEXT。main 的三項唯讀確認在 032 commit 之後仍通過（freeze_problems `[]`、version-check exit 0）。
-- **branch 上已完成（TDD；完整測試 1145 passed，沒有任何付費呼叫）**：
-  - `agent/gemini.py`：Vertex AI Gemini adapter（Anthropic Messages 形狀 ↔ Gemini；thought signature 原樣送回；408/429/5xx 在呼叫內重試；
-    400 = bad_request、被安全過濾擋下 = blocked，都不重試；每次回覆記錄 model version，途中改變就停）。
-  - `eval/explore.py`（`python -m eval.explore probe|run|score|compare|gate|gold-todo|gold-add|cost|archive-pilot`）：結果只寫
-    `data/external/results/explore-032/`；held-out 只認 032 登記的 freeze.json 與 heldout_incidents.json sha；評分用凍結的 `score_method`
-    （gold = 正式判定加 `evidence_gold.explore-032.json`）；累計費用到 `cost_ceiling_usd` 就停。
-  - `eval/llm_methods.explore-032.json`：status `draft`（什麼都不能跑）。測試確認 branch 對 heldout-final 的程式只有新增檔案。
-- **[decision 033](docs/decisions/033-explore-gemini-api-key.md) → [034](docs/decisions/034-explore-back-to-vertex.md)（2026-10-31）**：
-  Gemini API 用 API key 的探測被拒（HTTP 402，預付點數；$0），改回 Vertex AI（global，project `lyrical-link-483206-r8`，使用者自己登入的 ADC，
-  付款用 Google Cloud 試用抵免額）。主 session 經同意用 Homebrew 裝了 `gcloud-cli` 591.0.0；登入與 quota project 由使用者自己執行。
-  免費檢查（models.get）通過。設定檔 `status` 是 probe（使用者「批准探測」「探測費用也同意」）；Pilot 與 held-out 還不能跑（要 approved 與總上限）。
-- **合成範例探測（Vertex，2026-10-31，實際 $0.21）**：報告在 `data/external/logs/explore-032/`（probe-1 是 402 那次，probe-2 是這次）。
-  - dump-all：1 次呼叫、合格答案、68,187 input tokens、$0.139。agent：3 次呼叫（5 次工具呼叫，平行）、合格答案、cache 命中 16,335、$0.051。
-  - temperature 0、seed 42、thinking LOW 都被接受（thinking tokens 都是 0）。回覆的 model_version 是 `gemini-4-argon`（只是模型名稱，
-    models.get 的 version 是 "default"）：版本釘選只能抓到換模型，抓不到 Google 靜默更新，要寫進下一份 decision 的限制。
-  - **retrieval 失敗**：第 2 次呼叫（submit_round）HTTP 400 "Requests ending with a model turn are not supported"（adapter 的 bad_request，
-    不重試）。離線重建的請求結構是 user → model（propose_queries 的 function_call）→ user（function_response + 文字），結尾是 user；
-    免費的 count_tokens 不檢查結構，重現不了。可能的觸發：同一個 user turn 混了 function_response 與文字、或歷史裡的 propose_queries 沒有在這次請求宣告。
-  - 使用者離開前的規則（「如果成功你就直接開始」；主 session 回覆：不成功就不再花錢、只做免費的找原因與修正）：**沒有進 Pilot**。
-- **下一步（需要使用者）**：批准一個很小的診斷（幾次各約百個 tokens 的呼叫，< $0.01），找出是哪一種結構觸發 400；修 adapter（TDD，
-  另寫 decision 035，main 只允許新增）；再跑一次探測（實測約 $0.25）。成功後才依 032 §6 第 5 步跑 Pilot 第 1 個 incident（上限 $15）並估總預算。
+  （沿用這 50 個 held-out incident 的探索性補充）、三個 LLM 方法都跑；[decision 032](docs/decisions/032-exploratory-gemini-argon.md) 已 Accepted。
+- **main 保持凍結**：tag `heldout-final` 指向發布 100 的 commit e47f2c7。程式只在 branch `explore/032-argon`（已推到 origin，**永不 merge 回 main**）；
+  main 只加 decision 與 NEXT。三項唯讀確認在 035 commit 之後仍通過（freeze_problems `[]`、version-check exit 0）。
+- **branch 上的程式**：`agent/gemini.py`（Vertex AI Gemini adapter）、`eval/explore.py`（`python -m eval.explore check|probe|run|score|compare|gate|gold-todo|gold-add|cost|archive-pilot`，
+  結果只寫 `data/external/results/explore-032/`）、`eval/llm_methods.explore-032.json`。測試確認 branch 對 heldout-final 的程式只有新增檔案；完整測試 1164 passed。
+- **連線**（[033](docs/decisions/033-explore-gemini-api-key.md) → [034](docs/decisions/034-explore-back-to-vertex.md)）：Vertex AI global，project `lyrical-link-483206-r8`，
+  使用者自己登入的 ADC，付款用 Google Cloud 試用抵免額。單價到 2026-11-30 是 input $2 / cached $0.10 / output $10（每 1M tokens），12-01 起加倍。
+- **[decision 035](docs/decisions/035-explore-gemini-turns-and-weak-pin.md)**：第一次 Vertex 探測（$0.21）的 retrieval 第 2 次呼叫 HTTP 400。
+  小診斷（使用者「批准診斷和重跑探測」，$0.0027）確認原因是同一則 user turn 裡文字接在 function_response 後面；adapter 改成把那段文字放進下一則
+  user turn（與 Ollama adapter 的順序相同，文字不變；branch commit 328a5a1）。agent 用完回合或工具預算時的 `SUBMIT_NOW` 也是同一形狀，一併修正。
+  另記：Vertex 的 model_version 只是模型名稱 `gemini-4-argon`，版本釘選抓不到同名更新，101 必須寫明。
+- **重跑探測（$0.28）**：三個方法都交出合格答案；032 §3 的設定（thinking LOW、temperature 0、seed 42）不變。報告 `data/external/logs/explore-032/probe-3-vertex.json`。
+- **Pilot 第 1 題（INC-002，status approved、上限 $15、`--limit 1`）**：三個方法都 submitted，attempt 都是 ok。log `data/external/logs/explore-032/pilot-1.log`。
+
+  | 方法 | 呼叫 | Gemini input（cached） | output | 費用 |
+  |---|---:|---:|---:|---:|
+  | dump-all | 1 | 219,783（0） | 251 | $0.442 |
+  | retrieval | 2 | 98,951（0） | 374 | $0.202 |
+  | agent | 5（28 次工具呼叫） | 200,219（115,399） | 1,068 | $0.192 |
+
+  - 032 實驗累計花費（試用抵免額）：探測 $0.21 + 診斷 $0.003 + 探測 $0.28 + Pilot 第 1 題 $0.84 = **約 $1.33**。
+- **剩下 59 題（Pilot 9 + held-out 50）的估計**：
+  - A：INC-002 的費用 × 題數 = **$49**；B：正式結果（qwen）各題 token 數 × INC-002 的 Gemini／qwen 比例 = **$70**
+    （dump-all $30、retrieval $11、agent $30；單題最高約 $1）。
+  - agent 的變異最大（Gemini 一次平行呼叫很多工具）；建議上限 $150（約 B 的 2 倍，含重試餘裕）。上限只是到了就停，不是預計花費。
+  - 時間：Pilot 第 1 題三個方法約 3 分鐘，59 題約 3 小時，會在 2026-12-01 漲價前完成。
+- **下一步（需要使用者）**：批准總額（032 §6 第 5 步）。批准後把 `cost_ceiling_usd` 改成批准的數字，跑 Pilot 其餘 9 題（032 §6 第 6 步，
+  adapter 的 bug 可以修），再跑 held-out（第 7 步）。之後評分、比較、gate 描述、gold 補標（使用者判定），最後寫 101（只寫一次）。
 
 ### 之前的「目前位置」（2026-10-31，**Core 正式收尾**：held-out Gate 判定 NOT PASSED，使用者決定照現在的結果收尾，不改題、不進 Advanced；最終結果已發布）
 
