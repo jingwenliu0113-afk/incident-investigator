@@ -1,6 +1,29 @@
 # NEXT
 
-## 目前位置（2026-10-31，**decision 032–035 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；探測通過、Pilot 第 1 題完成（$0.84），**等使用者批准總額**）
+## 目前位置（2026-10-31，**decision 032–036 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；Pilot 與 held-out 都跑完（合計約 $62），**下一步評分與比較**）
+
+- **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。main 保持凍結（tag `heldout-final` → e47f2c7）；程式只在 branch `explore/032-argon`。
+- **使用者批准總額**（「批准上限 $150」，032 §6 第 5 步）：`cost_ceiling_usd` 150（branch commit 04afdf3）。
+- **[decision 036](docs/decisions/036-explore-method-order.md)**：執行順序實際是 dump-all → retrieval → agent，與 032 §2 登記的（retrieval → agent → dump-all）不同；
+  在第一個 held-out attempt 進行中發現，當時沒有任何 held-out 結果。不中斷、不重跑，101 照實寫明。
+- **Pilot（032 §6 第 6 步，2026-10-31 08:46–09:26Z）**：10 題 × 3 方法，30/30 attempt ok；finish 都是 STOP、只有一個 model_version、沒有 adapter 錯誤。
+  agent 有 5 題 `submitted_after_limit`（Gemini 一次平行呼叫很多工具，工具預算用得快；預算不改）。費用 $10.125。
+- **held-out（第 7 步，09:26:59Z–15:30:31Z）**：log `data/external/logs/explore-032/run-heldout.log`；健康檢查 `inspect-run.py heldout`。
+
+  | 方法 | prediction | attempt | 呼叫 | 費用 |
+  |---|---:|---|---:|---:|
+  | dump-all | 50 | 50 ok | 50 | $22.518 |
+  | retrieval | 50 | 50 ok | 100 | $10.121 |
+  | agent | 49 | 49 ok、2 transport_error | 389 | $19.021 |
+
+  - agent 的 INC-056：兩次 attempt 都在某一次呼叫等了 3600 秒（adapter 的 timeout）後 `ReadTimeout`，重試規則用完（`HELDOUT_MAX_ATTEMPTS` 2）。
+    依 013 與 026 解讀 19，評分時補 `_abstain`、留在分母、算 `no_answer`，列在 `heldout.unanswered`。不另外重跑。
+  - agent 有 25/49 題 `submitted_after_limit`；finish 都是 STOP；model_version 都是 `gemini-4-argon`。
+  - 032 實驗累計（試用抵免額）：探測與診斷 $0.49 + Pilot $10.13 + held-out $51.66 = **約 $62.28**（上限 $150）。
+- **下一步（Mac，免費）**：在 branch 上 `python -m eval.explore score` 三個方法 → compare（對 stat-anomaly、對正式 qwen 的同一方法）→ gate 描述
+  → `gold-todo` 請使用者盲標新增的 evidence → `gold-add` → 重新評分 → 寫 101（只寫一次）。
+
+### 之前的「目前位置」（2026-10-31，decision 032–035 探索性實驗：探測通過、Pilot 第 1 題完成（$0.84），等使用者批准總額）
 
 - **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。使用者 2026-10-31 選了 Google Cloud 的 Gemini、模型 Argon、做法 A
   （沿用這 50 個 held-out incident 的探索性補充）、三個 LLM 方法都跑；[decision 032](docs/decisions/032-exploratory-gemini-argon.md) 已 Accepted。
