@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "Can an LLM agent reliably do production root-cause analysis on frozen OTel Demo incident snapshots?"
 requires-python = ">=3.12"
 dependencies = [
+    "google-genai>=1.0",
     "jsonschema>=4.23",
 ]
 
