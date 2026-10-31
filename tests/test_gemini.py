@@ -74,10 +74,10 @@ def test_messages_become_gemini_contents_with_signatures_ids_and_function_respon
             {"text": "look", "thought_signature": SIG},
             {"function_call": {"name": "search_spans", "args": {"status": "error"}, "id": "c1"}},
             {"function_call": {"name": "list_services", "args": {}}}]},
-        {"role": "user", "parts": [  # consecutive user messages are one turn
+        {"role": "user", "parts": [
             {"function_response": {"name": "search_spans", "response": {"output": "3 spans"}, "id": "c1"}},
-            {"function_response": {"name": "list_services", "response": {"error": "error: no more tool calls"}}},
-            {"text": "submit now"}, {"text": "plain string"}]},
+            {"function_response": {"name": "list_services", "response": {"error": "error: no more tool calls"}}}]},
+        {"role": "user", "parts": [{"text": "submit now"}, {"text": "plain string"}]},  # consecutive texts are one turn
     ]
     with pytest.raises(ValueError, match="unknown tool_use id"):
         to_gemini_contents([{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "x", "content": ""}]}])
@@ -91,6 +91,30 @@ def test_an_empty_reply_leaves_no_empty_model_turn():
     messages = [*USER, {"role": "assistant", "content": []},
                 {"role": "user", "content": [{"type": "text", "text": "Continue"}]}]
     assert to_gemini_contents(messages) == [{"role": "user", "parts": [{"text": "task"}, {"text": "Continue"}]}]
+
+
+def test_text_after_function_responses_is_its_own_user_turn():
+    """Vertex refuses a user turn with text after a function_response (HTTP 400 "Requests ending with a model turn are
+    not supported"; decision 035). The text goes in the next user turn, in the same order as the Ollama adapter's tool
+    messages then user message; text before the function_responses stays in their turn."""
+    from agent.gemini import to_gemini_contents
+
+    call = {"role": "assistant", "content": [{"type": "tool_use", "id": "t0", "name": "propose_queries", "input": {},
+                                               "thought_signature": SIG}]}
+    result = {"type": "tool_result", "tool_use_id": "t0", "content": "records"}
+    ask = {"type": "text", "text": "Now call submit_diagnosis."}
+    response = {"function_response": {"name": "propose_queries", "response": {"output": "records"}}}
+    head = [{"role": "user", "parts": [{"text": "task"}]},
+            {"role": "model", "parts": [{"function_call": {"name": "propose_queries", "args": {}}, "thought_signature": SIG}]}]
+
+    assert to_gemini_contents([*USER, call, {"role": "user", "content": [result, ask]}]) == [
+        *head, {"role": "user", "parts": [response]}, {"role": "user", "parts": [{"text": "Now call submit_diagnosis."}]}]
+    assert to_gemini_contents([*USER, call, {"role": "user", "content": [ask, result]}]) == [
+        *head, {"role": "user", "parts": [{"text": "Now call submit_diagnosis."}, response]}]
+    # a correction after an empty reply (left out) does not join the function_responses before it
+    assert to_gemini_contents([*USER, call, {"role": "user", "content": [result]}, {"role": "assistant", "content": []},
+                               {"role": "user", "content": [{"type": "text", "text": "Continue"}]}]) == [
+        *head, {"role": "user", "parts": [response]}, {"role": "user", "parts": [{"text": "Continue"}]}]
 
 
 def test_tools_become_function_declarations_with_the_json_schema_as_given():

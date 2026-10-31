@@ -63,7 +63,8 @@ def _signature(block: dict) -> dict:
 
 def to_gemini_contents(messages: list[dict]) -> list[dict]:
     """Anthropic-shaped messages as Gemini contents (role user / model). A message without parts (an empty reply kept in
-    the transcript) is left out, and consecutive messages of one role become one turn."""
+    the transcript) is left out, and consecutive messages of one role become one turn, except that text after a
+    function_response starts the next user turn: Vertex refuses it in the same turn (HTTP 400, decision 035)."""
     out: list[dict] = []
     names: dict[str, str] = {}
     call_ids: dict[str, str] = {}
@@ -103,12 +104,12 @@ def to_gemini_contents(messages: list[dict]) -> list[dict]:
                     raise ValueError(f"unsupported content block {kind!r}")
         else:
             raise ValueError(f"unsupported role {message['role']!r}")
-        if not parts:
-            continue
-        if out and out[-1]["role"] == role:
-            out[-1]["parts"].extend(parts)
-        else:
-            out.append({"role": role, "parts": parts})
+        for part in parts:
+            if (out and out[-1]["role"] == role
+                    and not ("function_response" in out[-1]["parts"][-1] and "function_response" not in part)):
+                out[-1]["parts"].append(part)
+            else:
+                out.append({"role": role, "parts": [part]})
     return out
 
 
