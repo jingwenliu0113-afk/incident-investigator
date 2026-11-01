@@ -1,6 +1,16 @@
 # NEXT
 
-## 目前位置（2026-11-01，**decision 032–036 探索性實驗完成**：[101](docs/decisions/101-exploratory-argon-results.md) 已發布；Core 結論仍是 NOT PASSED）
+## 目前位置（2026-11-01，**作品集首頁**：[decision 037](docs/decisions/037-portfolio-front-page.md) 新增 `.github/README.md`（中英雙語）；**等使用者確認首頁並自己決定是否公開**）
+
+- 使用者的目的：GitHub 上有作品、放進履歷。repo 目前是 **Private**（使用者的規則，主 session 不改），履歷上的連結在公開前別人打不開。
+- 新首頁 `.github/README.md`：GitHub 優先顯示它，根目錄的 README 維持凍結不改。內容只轉寫 100、101 的數字；「How this was built / 怎麼做出來的」
+  寫明程式由 Claude Code 撰寫，以及使用者負責的部分（**這段要使用者確認是否正確**）。
+- **freeze 檢查的例外（037 第 2 點）**：從 037 的 commit 起，`collect status --set heldout` 的 `freeze_problems` 只會列出 `.github/README.md (A)`，這是預期的；
+  main 上 `--set heldout` 的收集與執行因此被拒絕（held-out 已完成；凍結狀態在 tag `heldout-final`）。
+- 公開前掃過 main：沒有密碼、token、IP 或 Tailscale 主機名稱；看得到的有 Google Cloud project ID（034、NEXT）、commit email、`Co-Authored-By: Claude`。
+- **下一步（需要使用者）**：看首頁 → 確認「怎麼做出來的」那段 → 自己在 GitHub 的 Settings 改成 Public（或明確告訴主 session 去改）。
+
+### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
 - **這不是 Gate 判定**：Gate 判定仍是 100、031 的 NOT PASSED，不進 Advanced。main 保持凍結（tag `heldout-final` → e47f2c7）；程式只在 branch `explore/032-argon`（永不 merge）。
 - **gold（032 §5）完成**：使用者 human:jingwen 2026-11-01 一次給 10 組答案與註記，475 項全部判定（relevant 375、not relevant 100、略 0）。主 session 先檢查每個 incident
