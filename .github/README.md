@@ -97,6 +97,12 @@ The demo reads a small synthetic incident. It needs no Docker and no model, and 
 ```bash
 uv sync
 uv run python -m eval demo
+```
+
+The tests also read the pinned OpenTelemetry Demo source. `env fetch-upstream` makes a shallow clone of the pinned tag and checks its commit; it needs no Docker.
+
+```bash
+uv run python -m env fetch-upstream
 uv run pytest -q -m "not network and not docker_daemon"
 ```
 
@@ -197,7 +203,7 @@ Code is MIT-licensed ([LICENSE](https://github.com/jingwenliu0113-afk/incident-i
 
 ### 試跑
 
-demo 只讀一個小型的合成事故，不需要 Docker 和模型，分數也不是結果。指令見上方英文版的「Try it」。真實事故的 snapshot 不進 git。
+demo 只讀一個小型的合成事故，不需要 Docker 和模型，分數也不是結果。測試還需要鎖定版本的 OpenTelemetry Demo 原始碼：先跑 `uv run python -m env fetch-upstream`（淺層 clone 鎖定的 tag 並核對 commit，不需要 Docker）。指令見上方英文版的「Try it」。真實事故的 snapshot 不進 git。
 
 ### 怎麼做出來的
 

@@ -12,7 +12,8 @@
 - 依 `../PORTFOLIO.md`「GitHub 公開策略」（README 最上方寫目前狀態），首頁標題下加了狀態行（commit c9d114b）。
 - **[decision 038](docs/decisions/038-mit-license.md)**（使用者「用mit吧」等）：根目錄 `LICENSE`（MIT，與 llm-serving-lab 相同）、首頁加授權一節；About 描述與 topics；本 repo 的 `user.email` 改成 noreply（之後的 commit 生效，不改寫歷史）。
   freeze 檢查從此列出 `.github/README.md` 與 `LICENSE` 兩項（038 第 2 點，預期的）。
-- 乾淨 clone 的確認（038 第 5 點）：見下一項（結果寫入後更新）。
+- **乾淨 clone 的確認（038 第 5 點，2026-11-01）**：匿名 clone 公開的 repo（660dfa5）→ `uv sync` → demo 正常；測試第一次 23 個失敗，原因都是缺 gitignored 的 `env/upstream/opentelemetry-demo/`。`python -m env fetch-upstream`（commit dedc017）之後 1116 passed、5 deselected。
+  首頁的「Try it」原本漏了這一步，已補上。GitHub 偵測到 MIT；About 描述與 7 個 topics 已設定。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
