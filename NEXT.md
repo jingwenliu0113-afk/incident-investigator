@@ -10,7 +10,9 @@
   main 上 `--set heldout` 的收集與執行因此被拒絕（held-out 已完成；凍結狀態在 tag `heldout-final`）。
 - 公開前掃過 main：沒有密碼、token、IP 或 Tailscale 主機名稱；看得到的有 Google Cloud project ID（034、NEXT）、commit email、`Co-Authored-By: Claude`。
 - 依 `../PORTFOLIO.md`「GitHub 公開策略」（README 最上方寫目前狀態），首頁標題下加了狀態行（commit c9d114b）。
-- **待使用者決定**（對照其他公開的 repo：都有 LICENSE、description，commit email 用 noreply）：要不要加 LICENSE（另需一份 decision，因為 freeze 檢查）、repo 的 About 描述與 topics、之後的 commit 改用 noreply email。
+- **[decision 038](docs/decisions/038-mit-license.md)**（使用者「用mit吧」等）：根目錄 `LICENSE`（MIT，與 llm-serving-lab 相同）、首頁加授權一節；About 描述與 topics；本 repo 的 `user.email` 改成 noreply（之後的 commit 生效，不改寫歷史）。
+  freeze 檢查從此列出 `.github/README.md` 與 `LICENSE` 兩項（038 第 2 點，預期的）。
+- 乾淨 clone 的確認（038 第 5 點）：見下一項（結果寫入後更新）。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 

@@ -87,7 +87,7 @@ flowchart LR
   - The Pilot set (10 incidents) is kept apart from the held-out set (50 incidents).
   - A freeze record keeps code, prompts and model byte-identical during the held-out runs.
   - Each method runs once per incident.
-  - Every design change is written in a [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions) (39 records).
+  - Every design change is written in a [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions) (40 records).
 - **Engineering.** Python with `uv` and over 1,100 automated tests, written test-first. Local inference ran on an RTX 5070 Ti desktop through Ollama; the exploratory run used Vertex AI.
 
 ### Try it
@@ -129,6 +129,10 @@ My part (Jingwen Liu):
 - reviewed every incident label by hand;
 - made about 1,200 method-blind evidence relevance judgments;
 - decided how to close the project after the Gate failed.
+
+### License
+
+Code is MIT-licensed ([LICENSE](https://github.com/jingwenliu0113-afk/incident-investigator/blob/main/LICENSE)). The OpenTelemetry Demo (Apache-2.0) is only referenced by image digest, not copied.
 
 ---
 
@@ -188,7 +192,7 @@ My part (Jingwen Liu):
   - Pilot（10 個事故）與 held-out（50 個事故）分開；
   - held-out 執行期間用 freeze 紀錄鎖住程式、prompt 與模型；
   - 每個方法每個事故只跑一次；
-  - 所有設計變更都寫進 [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions)（39 份）。
+  - 所有設計變更都寫進 [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions)（40 份）。
 - **工程**：Python 加 `uv`，1,100 個以上的自動測試，先寫測試再寫程式。本機推論在 RTX 5070 Ti 桌機（Ollama）上跑，探索性重跑用 Vertex AI。
 
 ### 試跑
@@ -206,3 +210,7 @@ demo 只讀一個小型的合成事故，不需要 Docker 和模型，分數也�
 - 人工 review 每個事故的 label；
 - 完成約 1,200 筆方法盲標的 evidence 相關性判定；
 - 在 Gate 沒有通過後決定如何收尾。
+
+### 授權
+
+程式碼以 MIT 授權（[LICENSE](https://github.com/jingwenliu0113-afk/incident-investigator/blob/main/LICENSE)）。OpenTelemetry Demo（Apache-2.0）只以 image digest 引用，沒有複製它的程式碼。
