@@ -1,14 +1,16 @@
 # NEXT
 
-## 目前位置（2026-11-01，**作品集首頁**：[decision 037](docs/decisions/037-portfolio-front-page.md) 新增 `.github/README.md`（中英雙語）；**等使用者確認首頁並自己決定是否公開**）
+## 目前位置（2026-11-01，**repo 已公開**：[decision 037](docs/decisions/037-portfolio-front-page.md) 的作品集首頁 `.github/README.md`（中英雙語）；使用者「把 repo 改成 Public」）
 
-- 使用者的目的：GitHub 上有作品、放進履歷。repo 目前是 **Private**（使用者的規則，主 session 不改），履歷上的連結在公開前別人打不開。
+- 使用者的目的：GitHub 上有作品、放進履歷。2026-11-01 使用者確認「怎麼做出來的」那段正確（SPEC 是使用者寫的），並要求「把 repo 改成 Public」：
+  主 session 先掃過兩個 branch 的完整歷史（沒有 API key、token、私鑰），再用 `gh repo edit --visibility public` 公開；未登入的瀏覽器打得開首頁。
 - 新首頁 `.github/README.md`：GitHub 優先顯示它，根目錄的 README 維持凍結不改。內容只轉寫 100、101 的數字；「How this was built / 怎麼做出來的」
   寫明程式由 Claude Code 撰寫，以及使用者負責的部分（**這段要使用者確認是否正確**）。
 - **freeze 檢查的例外（037 第 2 點）**：從 037 的 commit 起，`collect status --set heldout` 的 `freeze_problems` 只會列出 `.github/README.md (A)`，這是預期的；
   main 上 `--set heldout` 的收集與執行因此被拒絕（held-out 已完成；凍結狀態在 tag `heldout-final`）。
 - 公開前掃過 main：沒有密碼、token、IP 或 Tailscale 主機名稱；看得到的有 Google Cloud project ID（034、NEXT）、commit email、`Co-Authored-By: Claude`。
-- **下一步（需要使用者）**：看首頁 → 確認「怎麼做出來的」那段 → 自己在 GitHub 的 Settings 改成 Public（或明確告訴主 session 去改）。
+- 依 `../PORTFOLIO.md`「GitHub 公開策略」（README 最上方寫目前狀態），首頁標題下加了狀態行（commit c9d114b）。
+- **待使用者決定**（對照其他公開的 repo：都有 LICENSE、description，commit email 用 noreply）：要不要加 LICENSE（另需一份 decision，因為 freeze 檢查）、repo 的 About 描述與 topics、之後的 commit 改用 noreply email。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
