@@ -1,5 +1,9 @@
 # Incident Investigator
 
+> **Status (November 2026): complete.** Gate **NOT PASSED** with the frozen local model; an exploratory rerun with Gemini 4 Argon is reported separately and does not change the decision. No further experiments are planned.
+>
+> **狀態（2026 年 11 月）：已完成。** 以凍結的本機模型判定 Gate **NOT PASSED**；Gemini 4 Argon 的探索性重跑另外報告，不改變判定。不再進行新的實驗。
+
 **Can an LLM agent find the root cause of a production incident from a frozen telemetry snapshot, and beat simple baselines?**
 
 [English](#english) · [中文](#中文)
