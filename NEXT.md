@@ -1,6 +1,24 @@
 # NEXT
 
-## 目前位置（2026-10-31，**decision 032–036 探索性實驗**：Gemini 4 Argon 重跑三個 LLM 方法；Pilot 與 held-out 都跑完（合計約 $62）、已評分與比較，**等使用者 gold 盲標（475 項）**）
+## 目前位置（2026-11-01，**decision 032–036 探索性實驗完成**：[101](docs/decisions/101-exploratory-argon-results.md) 已發布；Core 結論仍是 NOT PASSED）
+
+- **這不是 Gate 判定**：Gate 判定仍是 100、031 的 NOT PASSED，不進 Advanced。main 保持凍結（tag `heldout-final` → e47f2c7）；程式只在 branch `explore/032-argon`（永不 merge）。
+- **gold（032 §5）完成**：使用者 human:jingwen 2026-11-01 一次給 10 組答案與註記，475 項全部判定（relevant 375、not relevant 100、略 0）。主 session 先檢查每個 incident
+  的項數、註記與答案一致，抽查 26 項註記描述與工作表一致，再用 `data/external/logs/explore-032/gold/parse_answers.py --fill`（`gold_fill.py` → `eval.explore gold-add`）
+  照答案寫入 `evidence_gold.explore-032.json`（原文 `gold/answers.md`、log `gold/fill.log`）。之後 `gold-todo` 剩 0 項。
+- **gold 之後重算**（branch `80de29e`，`data/external/logs/explore-032/post-gold.log`，都 exit 0）：三個方法 score、6 份 compare、gate。
+  scores.json 除了 gold 欄位之外沒有改變，compare 完全相同，gate.json 只有 inputs 的 sha 不同（gold 前的備份在 `data/external/logs/explore-032/pre-gold/`）。
+- **101 的重點**：
+  - 三個方法的四個主要指標平均都比 qwen 高（例如 origin_top1：retrieval 0.62 → 0.86、dump-all 0.72 → 0.84、agent 0.58 → 0.82）。
+  - Gate 條件的描述：條件 1 agent − stat-anomaly origin_top1 **+0.160 [0.000, 0.320]，未達成**；條件 2、3 達成；三個條件沒有同時達成。
+  - gold precision（Argon）：retrieval 0.820、dump-all 0.725、agent 0.942。
+  - 費用合計約 $62.28（試用抵免額，上限 $150）。
+  - 寫明的限制：035 的弱釘選（649 次回覆都是同一個名稱，抓不到同名更新）、036 的執行順序、032 §4 的設定檔 sha256 沒有記在 run_config（寫 101 時發現，
+    設定在探測之後沒有改過）、同一組 held-out 用過兩次（不是盲測）、agent 的 1 個 transport 放棄作答。
+- **之後**：沒有自動的下一步。要成為 Gate 等級的結論需要新的 held-out 集合（023 §7、032 §1 第 4 點），由使用者決定、另寫 decision。
+  keychain 裡 033 用的 `gemini-api-key` 與 branch 上的 `tools/with-gemini-key` 已經不用（034 改回 Vertex）；要不要刪由使用者決定，主 session 不動 credential。
+
+### 之前的「目前位置」（2026-10-31，decision 032–036 探索性實驗：Pilot 與 held-out 都跑完（合計約 $62）、已評分與比較，等使用者 gold 盲標（475 項））
 
 - **這不是 Gate 判定**：Core 的結論（NOT PASSED，100、031）不變。main 保持凍結（tag `heldout-final` → e47f2c7）；程式只在 branch `explore/032-argon`。
 - **使用者批准總額**（「批准上限 $150」，032 §6 第 5 步）：`cost_ceiling_usd` 150（branch commit 04afdf3）。
