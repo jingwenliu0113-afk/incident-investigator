@@ -1,6 +1,6 @@
 # Incident Investigator
 
-[![CI](https://github.com/jingwenliu0113-afk/incident-investigator/actions/workflows/ci.yml/badge.svg)](https://github.com/jingwenliu0113-afk/incident-investigator/actions/workflows/ci.yml)
+[![CI](https://github.com/jingwenliu0113-afk/incident-investigator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jingwenliu0113-afk/incident-investigator/actions/workflows/ci.yml)
 
 > **Status (November 2026): complete.** Gate **NOT PASSED** with the frozen local model; an exploratory rerun with Gemini 4 Argon is reported separately and does not change the decision. No further experiments are planned.
 >

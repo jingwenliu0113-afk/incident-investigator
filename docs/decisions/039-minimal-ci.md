@@ -30,32 +30,42 @@
    - action 的版本與 llm-serving-lab、agent-gym、inspection-robot-active-perception 的 CI 相同：`actions/checkout@v7`、`astral-sh/setup-uv@v10.2.0`。
      權限只有 `contents: read`。
    - CI 只做檢查：不收集 incident、不執行任何方法、不需要 Docker、GPU、模型或 `data/external/`，也不改任何結果。
-2. **新增根目錄的 `ruff.toml`**：ruff 的預設規則，加兩個只限定在現有位置的例外；不重排、不修改任何程式：
+2. **新增根目錄的 `ruff.toml`**：ruff 的預設規則，加兩個只限定在現有位置的例外；ruff.toml 本身不需要重排或修改任何程式：
    - `tests/test_cli.py`、`tests/test_lock.py`、`tests/test_runtime.py` 忽略 F811（fixture 的慣用寫法）；
    - `env/soak.py` 忽略 F541（凍結的程式，不改）。
    其他檔案出現 F811、F541，ruff 照樣會報。
 3. **首頁 `.github/README.md`**：標題下加 CI badge；decision log 的份數從 40 改成 41（加上本文件）。
-4. **freeze 檢查的第三個例外**：與 037 第 2 點、038 第 2 點相同的理由。從本 commit 起，`collect status --set heldout` 的 `freeze_problems` 會列出五項：
+4. **freeze 檢查的第三個例外**：四個 `A` 的理由與 037 第 2 點、038 第 2 點相同；`M` 的理由見第 6 點。合併後，`collect status --set heldout` 的
+   `freeze_problems` 會列出五項：
    `.github/README.md`、`LICENSE`、`.github/workflows/ci.yml`、`ruff.toml`（都是 `A`）與 `tools/with-remote-ollama`（`M`，第 6 點），這是預期的。之後的三項唯讀確認改成：
    - `freeze_problems` 只有這五項；
    - `eval version-check --set pilot` exit 0（第 6 點只改 tunnel 被信號中斷時的收尾，不改方法的程式或 Pilot 資料）；
    - `git diff --name-status 4b42a4a..HEAD` 只有 freeze 允許的路徑，加上這四個 `A` 與一個 `M`。
    held-out 結果的完整性仍由 tag `heldout-final`（e47f2c7）保留。
 5. **第一次 CI 的結果**記在 NEXT.md。Linux runner 上若出現本機沒有的失敗，先記錄，再另寫 decision 處理，不在 CI 裡跳過測試。
-6. **第一次 Linux CI 找到的問題（2026-11-02，合併前）**：這個 PR 上沒有觸發 workflow，所以在暫時分支 `ci-check/first-run` 上執行同一個 workflow
-   （只多一個讓 push 也觸發的 commit）。ubuntu-24.04 的結果是 1109 passed、1 failed、11 deselected，失敗的是
-   `tests/test_with_remote_ollama.py::test_a_signal_while_the_remote_side_is_still_starting_still_stops_the_server_it_starts[INT]`；
-   同一個測試的 TERM、HUP 都通過。因為 039 還沒合併，第 5 點的「另寫 decision」改為在本文件記錄。
-   - 原因：wrapper 在背景 ssh 的 subshell 裡只寫 `trap '' TERM HUP`，SIGINT 靠背景程序忽略 SIGINT 的規則；主程式在那之前設了
-     `trap 'exit 130' INT`。runner 的 bash 5.2.21 在 subshell `exec ssh` 時把 SIGINT 恢復成原本的預設，所以送給整個 process group 的
-     SIGINT 會在遠端還在啟動時結束本機的 ssh，wrapper 就無法確認、也無法停止遠端可能已啟動的 server（它會占著 GPU lock）。
-     本機 macOS 的 `bash`（`/bin/bash` 3.2）保留忽略，所以本機測試一直通過。同一個 runner 上的對照：原本的寫法 exec 之後
-     SIGINT 是預設的處理，加上 INT 之後是忽略。
+6. **第一次 Linux CI 找到的問題（2026-11-02，合併前）**：這個 PR 上沒有觸發 workflow，所以在暫時分支 `ci-check/*` 上執行同一個 workflow
+   （push 的觸發條件加上 `ci-check/**`；診斷那一次另外多一個印出信號狀態的步驟與試驗中的修正）。因為 039 還沒合併，第 5 點的
+   「另寫 decision」改為在本文件記錄。
+   - 第一次執行（run 41393212011，ubuntu-24.04）：1109 passed、1 failed、11 deselected。失敗的是
+     `tests/test_with_remote_ollama.py::test_a_signal_while_the_remote_side_is_still_starting_still_stops_the_server_it_starts[INT]`；
+     同一個測試的 TERM、HUP 都通過。
+   - 原因：wrapper 在背景 ssh 的 subshell 裡只寫 `trap '' TERM HUP`，SIGINT 靠背景程序忽略 SIGINT 的規則。bash 4.3 到 5.2 在背景
+     subshell 只把 SIGINT 設成忽略、沒有把它記成原本的狀態，`exec` 時又把信號恢復成原本的狀態，所以 `exec ssh` 拿到的是預設的 SIGINT
+     （bash 原始碼的 `setup_async_signals`：4.2 另呼叫 `set_signal_ignored`，4.3–5.2 沒有，5.3 改用 `set_signal_async_ignored`）。
+     送給整個 process group 的 SIGINT 因此會在遠端還在啟動時結束本機的 ssh，wrapper 就無法確認、也無法停止遠端可能已啟動的 server
+     （它會占著 GPU lock）。本機 macOS 的 `bash` 是 `/bin/bash` 3.2，保留忽略，所以本機測試一直通過。runner（bash 5.2.21）上的對照
+     （run 41393908524）：原本的寫法 exec 之後印出 `<built-in function default_int_handler>`，加上 INT 之後印出 `1`（忽略）。
+   - 依 023 §6，這是 bug 修正，不是設計變更：029 修訂 1 寫明 signal 送到整個 process group 時也照樣停止遠端 server，理由是
+     「SIGINT 本來就被背景程序忽略」；在 bash 4.3–5.2 上這個前提不成立，程式與這個書面定義不一致。029 是凍結的紀錄，不改，
+     前提的更正記在這裡。測試用的是假的 ssh 與遠端（`tests/test_with_remote_ollama.py`），沒有用 held-out 資料。
    - 修正：subshell 改成 `trap '' INT TERM HUP`，三個信號都明確忽略，不再取決於 bash 的版本；說明這件事的兩處註解一起改。
-     這是 freeze 之後第一次修改既有的程式檔，所以列為 freeze 檢查的第五項（`M`）。
-   - 為什麼可以改：這一行只影響被信號中斷時的收尾（能不能停止這次啟動的遠端 server），不影響收集、方法的輸入輸出、評分
-     或任何已記錄的結果。凍結時的版本仍由 tag `heldout-final` 保留。
-   - 修正後，同一個 workflow 在 ubuntu-24.04 上是 1110 passed、11 deselected，ruff 通過。
+     這是 freeze 之後第一次修改既有的程式檔，所以列為 freeze 檢查的第五項（`M`）。`env/soak.py:266` 的 F541 不同：那不是 bug
+     （行為與書面定義一致），所以仍然不改（見「放棄的替代方案」）。
+   - 影響：這一行只影響被信號中斷時的收尾（能不能停止這次啟動的遠端 server），不影響收集、方法的輸入輸出、評分或任何已記錄的結果；
+     held-out 評測已經完成，沒有重跑任何東西。凍結時的版本仍由 tag `heldout-final` 保留。
+   - 由使用者決定：依 023 追加（2026-10-10）第 3 項與追加（2026-10-16）A4，freeze 之後發現的 bug 由使用者決定，不自行修改研究規則。
+     這個修正不改任何研究規則、門檻或結果；是否接受由使用者決定，合併本 PR 即為這個決定。
+   - 修正後，同一個 workflow 在 ubuntu-24.04 上是 1110 passed、11 deselected，ruff 通過（run 41394332075，測的是 e829fba）。
 
 ## 為什麼
 
@@ -72,7 +82,7 @@
 - **把 ruff 加進 dev 依賴、設定寫進 `pyproject.toml`**：要改兩個封存的檔案（`pyproject.toml`、`uv.lock`）。
 - **整個 `tests/` 忽略 F811，或全域忽略 F541**：範圍比需要的大，之後真正的問題會被藏起來。
 - **快取 `env/upstream/`**：見「為什麼」。
-- **在 CI 裡 deselect 第 6 點那個 INT 測試**：第 5 點不在 CI 裡跳過測試；而且測試抓到的是真的問題：用 bash 5 執行 wrapper 時，
+- **在 CI 裡 deselect 第 6 點那個 INT 測試**：第 5 點不在 CI 裡跳過測試；而且測試抓到的是真的問題：用 bash 4.3–5.2 執行 wrapper 時，
   中斷可能留下一個占著 GPU lock 的遠端 server。
 - **CI 改在 macOS runner 上跑**：結果只會取決於 runner 上剛好是哪一版 bash，問題本身還在。
 
