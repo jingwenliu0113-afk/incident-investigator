@@ -23,7 +23,7 @@
   exec 把 SIGINT 恢復成預設）；wrapper 改成明確忽略 SIGINT 之後 1110 passed、11 deselected，ruff 通過（039 第 6 點）。
 - **[decision 040](docs/decisions/040-front-page-claims-and-limitations.md)（2026-11-02，Proposed；合併到 main 即為 Accepted）**：首頁兩句改成與 022、016 一致的說法
   （「看過」的定義偏寬；10 個故障、7 種故障類型），加「Limitations / 限制」一節（6 點，出處是 011、016、017、022、023、032、100、101；
-  唯一推得的數字是由 100 各 fault 表算出的 28 或 30：origin top-1 一方答對、另一方答錯的事故數，算法在 040）。freeze 檢查仍是 039 第 4 點的四項。
+  唯一推得的數字是由 100 各 fault 表算出的 28 或 30：origin top-1 一方答對、另一方答錯的事故數，算法在 040）。freeze 檢查仍是 039 第 4、6 點的五項。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
