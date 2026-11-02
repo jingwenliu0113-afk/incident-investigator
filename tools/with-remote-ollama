@@ -19,7 +19,8 @@
 #        `OLLAMA_HOST=127.0.0.1:11434 OLLAMA_NUM_PARALLEL=1 OLLAMA_NO_CLOUD=1 OLLAMA_MODELS=<models> <binary> serve` 啟動。
 #      GPU lock 被占用 → exit 75（與 with-mac-lock 相同的意思），什麼都不執行。ssh 本身失敗（離線、轉送失敗）→ exit 3：
 #      LLM 的步驟標記 blocked，繼續 Mac 上的工作（MACHINE_POLICY）。
-#      本機的 ssh 忽略 SIGTERM / SIGHUP（SIGINT 本來就被背景程序忽略）：送給整個 process group 的信號不會在遠端還在啟動時切斷它，
+#      本機的 ssh 明確忽略 SIGINT / SIGTERM / SIGHUP（SIGINT 不能只靠背景程序忽略 SIGINT 的規則：bash 5 在背景 subshell 的 exec
+#      會把它恢復成預設，decision 039 第 6 點）：送給整個 process group 的信號不會在遠端還在啟動時切斷它，
 #      wrapper 才能等到啟動標記、停止這次啟動的 server；結束時由 wrapper 明確停止它。
 #   3. 先等這次 session 的啟動標記出現在 log（已取得 lock、遠端 port 空著），在那之前不經 tunnel 送任何請求：-L 轉送在認證後就開始運作，
 #      比 wsl.exe 與 login shell 走到 flock 早好幾秒，那時回應的只可能是別人的 server。然後經 tunnel 送 /api/version?ii_session=<這次的隨機值>
@@ -166,9 +167,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-# SIGTERM / SIGHUP ignored in the ssh only (an ignored signal stays ignored in ssh): a signal to the whole process group
-# while the remote side is still starting leaves the session up, so stop_remote can wait for the marker
-( trap '' TERM HUP; exec ssh -n -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+# SIGINT / SIGTERM / SIGHUP ignored in the ssh only (an ignored signal stays ignored in ssh). SIGINT is named too: bash 5
+# restores it at exec in a background subshell (decision 039 point 6). A signal to the whole process group while the
+# remote side is still starting leaves the session up, so stop_remote can wait for the marker
+( trap '' INT TERM HUP; exec ssh -n -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
   -o ServerAliveCountMax=4 -o ConnectTimeout=30 -o ControlPath=none -L "127.0.0.1:$PORT:127.0.0.1:$REMOTE_PORT" "$REMOTE" \
   "wsl.exe -d $DISTRO -- bash -lc \"$serve_payload\"" ) >"$log" 2>&1 &
 ssh_pid=$!
