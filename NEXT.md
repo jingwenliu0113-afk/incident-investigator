@@ -9,6 +9,7 @@
 - **freeze 檢查的例外（037 第 2 點）**：從 037 的 commit 起，`collect status --set heldout` 的 `freeze_problems` 只會列出 `.github/README.md (A)`，這是預期的；
   main 上 `--set heldout` 的收集與執行因此被拒絕（held-out 已完成；凍結狀態在 tag `heldout-final`）。
 - 公開前掃過 main：沒有密碼、token、IP 或 Tailscale 主機名稱；看得到的有 Google Cloud project ID（034、NEXT）、commit email、`Co-Authored-By: Claude`。
+  （2026-11-02：NEXT 裡的 project ID 已改成 `<project-id>`；034 與 git 歷史仍有。）
 - 依 `../PORTFOLIO.md`「GitHub 公開策略」（README 最上方寫目前狀態），首頁標題下加了狀態行（commit c9d114b）。
 - **[decision 038](docs/decisions/038-mit-license.md)**（使用者「用mit吧」等）：根目錄 `LICENSE`（MIT，與 llm-serving-lab 相同）、首頁加授權一節；About 描述與 topics；本 repo 的 `user.email` 改成 noreply（之後的 commit 生效，不改寫歷史）。
   freeze 檢查從此列出 `.github/README.md` 與 `LICENSE` 兩項（038 第 2 點，預期的）。
@@ -89,7 +90,7 @@
   main 只加 decision 與 NEXT。三項唯讀確認在 035 commit 之後仍通過（freeze_problems `[]`、version-check exit 0）。
 - **branch 上的程式**：`agent/gemini.py`（Vertex AI Gemini adapter）、`eval/explore.py`（`python -m eval.explore check|probe|run|score|compare|gate|gold-todo|gold-add|cost|archive-pilot`，
   結果只寫 `data/external/results/explore-032/`）、`eval/llm_methods.explore-032.json`。測試確認 branch 對 heldout-final 的程式只有新增檔案；完整測試 1164 passed。
-- **連線**（[033](docs/decisions/033-explore-gemini-api-key.md) → [034](docs/decisions/034-explore-back-to-vertex.md)）：Vertex AI global，project `lyrical-link-483206-r8`，
+- **連線**（[033](docs/decisions/033-explore-gemini-api-key.md) → [034](docs/decisions/034-explore-back-to-vertex.md)）：Vertex AI global，project `<project-id>`，
   使用者自己登入的 ADC，付款用 Google Cloud 試用抵免額。單價到 2026-11-30 是 input $2 / cached $0.10 / output $10（每 1M tokens），12-01 起加倍。
 - **[decision 035](docs/decisions/035-explore-gemini-turns-and-weak-pin.md)**：第一次 Vertex 探測（$0.21）的 retrieval 第 2 次呼叫 HTTP 400。
   小診斷（使用者「批准診斷和重跑探測」，$0.0027）確認原因是同一則 user turn 裡文字接在 function_response 後面；adapter 改成把那段文字放進下一則
