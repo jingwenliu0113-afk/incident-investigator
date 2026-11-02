@@ -16,10 +16,11 @@
   首頁的「Try it」原本漏了這一步，已補上。GitHub 偵測到 MIT；About 描述與 7 個 topics 已設定。
 - **[decision 039](docs/decisions/039-minimal-ci.md)（2026-11-02，Proposed；合併到 main 即為 Accepted）**：GitHub Actions CI（`.github/workflows/ci.yml`：`uv sync --locked` →
   `python -m env fetch-upstream` → `pytest -m "not network and not docker_daemon and not docker_cli"` → `uvx ruff@0.12.0 check .`）與最小的 `ruff.toml`
-  （只在三個測試檔忽略 fixture 慣用寫法的 F811、在 `env/soak.py` 忽略 F541，程式不改）；首頁標題下加 CI badge。
+  （只在三個測試檔忽略 fixture 慣用寫法的 F811、在 `env/soak.py` 忽略 F541；lint 的項目不改程式）；首頁標題下加 CI badge。
   freeze 檢查從此列出 `.github/README.md`、`LICENSE`、`.github/workflows/ci.yml`、`ruff.toml` 與 `tools/with-remote-ollama`（`M`）五項（039 第 4、6 點，預期的）。
-  第一次 Linux CI（合併前，暫時分支 `ci-check/first-run`）：1109 passed、1 failed（`test_with_remote_ollama` 的 INT：bash 5.2 在背景 subshell 的
-  exec 把 SIGINT 恢復成預設）；wrapper 改成明確忽略 SIGINT 之後 1110 passed、11 deselected，ruff 通過（039 第 6 點）。
+  第一次 Linux CI（合併前，暫時分支 `ci-check/first-run`，run 41393212011）：1109 passed、1 failed（`test_with_remote_ollama` 的 INT：bash 4.3–5.2
+  在背景 subshell 的 exec 把 SIGINT 恢復成預設，runner 是 5.2.21）；wrapper 改成明確忽略 SIGINT 之後 1110 passed、11 deselected，ruff 通過
+  （run 41394332075；039 第 6 點：依 023 §6 是 bug 修正，是否接受由使用者合併決定）。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
