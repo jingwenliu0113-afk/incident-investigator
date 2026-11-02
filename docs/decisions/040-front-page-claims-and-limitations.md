@@ -22,7 +22,7 @@
 
 1. **兩句改寫**（英文與中文同步）：
    - 「The method looked at…」改成：那些事故裡，方法的 exposure 紀錄（方法看過哪些資料）至少有一項依偏寬的「看過」定義算作看過 origin 服務：
-     origin 在故障期間的紀錄、origin 的任何一條 metric series，或涵蓋 origin 的每分鐘統計（022，見「限制」第 2 點）。
+     origin 在故障期間的紀錄、origin 的任何一條 metric series，或涵蓋 origin 故障期間的每分鐘統計（022，見「限制」第 2 點）。
      不寫成「含有 origin 在故障期間的資料」：metric series 與 `stats:*` 不看是否在故障期間（見「背景」）。
    - 粗體的那一句不變。payment-unreachable 的例子後面加「這個故障的 origin 是 label 的慣例，見限制第 1 點」：這個例子就是第 1 點的 fault。
    - 「There are 10 fault types」改成「10 faults across 7 fault types」；中文改成「10 個故障，分屬 7 種故障類型」，

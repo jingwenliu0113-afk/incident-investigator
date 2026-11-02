@@ -48,7 +48,7 @@ What the numbers say:
 
 - **A small local model did not beat a statistical baseline at locating the origin service.**
 - **A stronger model lifts every LLM method.** But the agent is no better than the simpler pipelines: with Argon, retrieval reaches 0.86 and dump-all 0.84 on origin top-1.
-- **Most of Argon's remaining errors are "seen but misread".** In those incidents the method's exposure log (the record of what it was shown) had at least one entry that counts as seeing the origin service under a loose definition of "seen": a record of the origin from the fault window, any of the origin's metric series, or per-minute statistics that cover the origin (decision 022; see [Limitations](#limitations), point 2). One example: on the payment-unreachable fault, the agent found the right origin in 1 of 5 incidents; the baseline found it in 5 of 5 (that fault's origin is a labeling convention; see Limitations, point 1).
+- **Most of Argon's remaining errors are "seen but misread".** In those incidents the method's exposure log (the record of what it was shown) had at least one entry that counts as seeing the origin service under a loose definition of "seen": a record of the origin from the fault window, any of the origin's metric series, or per-minute statistics that cover the origin in the fault window (decision 022; see [Limitations](#limitations), point 2). One example: on the payment-unreachable fault, the agent found the right origin in 1 of 5 incidents; the baseline found it in 5 of 5 (that fault's origin is a labeling convention; see Limitations, point 1).
 - Negative results are reported in full. No metric, split or protocol was changed after results were seen.
 
 Full reports:
@@ -100,7 +100,7 @@ The numbers below come from the decision records named in each point.
 2. **"Seen" is defined loosely.** A wrong origin counts as "seen but misread" when the method's exposure log has any record of the origin service from the fault window (a normal-looking one counts too), any of the origin's metric series, its per-minute statistics for a fault minute, or the per-minute overview given to retrieval and dump-all, which covers every service (decision 022 §2 and its known limitations). So retrieval and dump-all have no "not seen" failures in these results (decisions 100 §7, 101 §7).
 3. **The agent often ran out of budget.** The qwen agent reached a limit in 15 of 50 incidents (12 then submitted, 3 stopped at the turn limit). The Argon agent, which often called several tools in one reply, submitted after reaching a limit in 25 of 49 (decisions 100 §9, 101 §9). Both runs used the same budgets: 40 tool calls, 120,000 proxy tokens and 30 turns (decision 032 §2).
 4. **Power is limited.** Before any held-out data existed, the protocol estimated about 0.74 power for a true difference of 0.20 in origin top-1, simulated with one method right and the other wrong in 30% of incidents (decision 023 §2). In the Gate run, the agent and the baseline had one right and the other wrong on origin top-1 in 28 or 30 of the 50 incidents, more often than assumed (the range the per-fault table in decision 100 §5 allows; decision 040 shows the count), and Argon's lead (+0.16, decision 101 §5) is smaller than 0.20. A difference that is not significant here does not show that the methods are equal.
-5. **No fault-free control, and one annotator.** Every incident has an injected fault, so false alarms are not measured. One person reviewed the labels and made the evidence judgments; the judgments were blind to the method but not to the ground truth (decision 017).
+5. **No fault-free control, and one annotator.** Every incident has an injected fault, so false alarms are not measured. One person reviewed the labels and made the evidence judgments; the judgments were blind to the method but not to the ground truth (decisions 031, 100 §8 and 017).
 6. **Leftover fault text and public scenarios.** The productCatalogFailure snapshots keep a residue of the injected error message (for example `Product Catalog Fail Enabled`), accepted in decisions 011 and 016. Methods that read the snapshot's text (the three LLM methods; the statistical baseline uses only per-minute statistics) can see it, so their results on this fault may be better than they would be without it; this evaluation does not measure that. The OpenTelemetry Demo and its fault flags are public, so the models may already know these scenarios; this evaluation does not test for that either.
 
 ### Try it
@@ -181,7 +181,7 @@ Code is MIT-licensed ([LICENSE](https://github.com/jingwenliu0113-afk/incident-i
 
 - **小型本機模型找根源服務沒有勝過統計 baseline。**
 - **換成較強的模型，每個 LLM 方法都進步。** 但 agent 沒有比簡單的做法好：用 Argon 時，retrieval 的 origin top-1 是 0.86、dump-all 是 0.84。
-- **Argon 剩下的錯誤大多是「看過但判讀錯」**：這些事故裡，方法的 exposure 紀錄（方法看過哪些資料）至少有一項依偏寬的「看過」定義算作看過 origin 服務：origin 在故障期間的紀錄、origin 的任何一條 metric series，或涵蓋 origin 的每分鐘統計（decision 022，見[限制](#限制)第 2 點）。例如 payment 連不上的故障，agent 5 次只找對 1 次根源，baseline 5 次都對（這個故障的 origin 是 label 的慣例，見限制第 1 點）。
+- **Argon 剩下的錯誤大多是「看過但判讀錯」**：這些事故裡，方法的 exposure 紀錄（方法看過哪些資料）至少有一項依偏寬的「看過」定義算作看過 origin 服務：origin 在故障期間的紀錄、origin 的任何一條 metric series，或涵蓋 origin 故障期間的每分鐘統計（decision 022，見[限制](#限制)第 2 點）。例如 payment 連不上的故障，agent 5 次只找對 1 次根源，baseline 5 次都對（這個故障的 origin 是 label 的慣例，見限制第 1 點）。
 - 負面結果完整報告。看到結果之後，沒有修改任何指標、資料切分或評測流程。
 
 完整報告：
@@ -222,7 +222,7 @@ Code is MIT-licensed ([LICENSE](https://github.com/jingwenliu0113-afk/incident-i
 2. **「看過」的定義偏寬。** origin 答錯時，只要方法的 exposure 紀錄裡有 origin 服務在故障期間的任何紀錄（看起來正常的也算）、origin 的任何一條 metric series、origin 在故障期間的每分鐘統計，或 retrieval 與 dump-all 拿到的每分鐘概覽（涵蓋所有服務），就算「看過但判讀錯」（decision 022 §2 與「已知限制」）。所以在這些結果裡，retrieval 與 dump-all 沒有任何「沒看過」的失敗（decision 100 §7、101 §7）。
 3. **agent 常用完預算。** qwen agent 50 題中有 15 題撞到上限（12 題之後提交、3 題停在回合上限）；Argon agent 一次回覆常平行呼叫多個工具，49 題中有 25 題在用完預算之後才提交（decision 100 §9、101 §9）。兩次執行的預算相同：40 次工具呼叫、120,000 proxy tokens、30 回合（decision 032 §2）。
 4. **檢定力有限。** 在任何 held-out 資料出現之前，協定估計 origin top-1 的真實差異 0.20、30% 的事故一方答對另一方答錯時，Gate 的 power 約 0.74（decision 023 §2）。正式執行（qwen）時，agent 與 baseline 在 origin top-1 一方答對、另一方答錯的事故，50 個中有 28 或 30 個，比假設的多（decision 100 §5 的各 fault 表所允許的範圍，算法見 decision 040）；Argon 的領先 +0.16（decision 101 §5）也小於 0.20。這裡的「不顯著」不代表兩種方法一樣好。
-5. **沒有無故障的對照，也只有一位標註者。** 每個事故都注入了故障，所以沒有量到誤報。label 的 review 與 evidence 的判定都由同一個人完成；判定時看不到是哪個方法，但看得到標準答案（decision 017）。
+5. **沒有無故障的對照，也只有一位標註者。** 每個事故都注入了故障，所以沒有量到誤報。label 的 review 與 evidence 的判定都由同一個人完成；判定時看不到是哪個方法，但看得到標準答案（decision 031、100 §8、017）。
 6. **注入的殘字與公開的故障情境。** productCatalogFailure 的 snapshot 留有注入錯誤訊息的殘字（例如 `Product Catalog Fail Enabled`），decision 011、016 已接受。讀 snapshot 文字的方法（三個 LLM 方法；統計 baseline 只用每分鐘統計）看得到它，所以它們在這個 fault 的結果可能比沒有殘字時好；本評測沒有量這個影響。OpenTelemetry Demo 與它的故障旗標都是公開的，模型可能事先就知道這些情境；本評測也沒有檢查這一點。
 
 ### 試跑
