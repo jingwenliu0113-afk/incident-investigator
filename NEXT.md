@@ -18,6 +18,9 @@
   `python -m env fetch-upstream` → `pytest -m "not network and not docker_daemon and not docker_cli"` → `uvx ruff@0.12.0 check .`）與最小的 `ruff.toml`
   （只在三個測試檔忽略 fixture 慣用寫法的 F811、在 `env/soak.py` 忽略 F541，程式不改）；首頁標題下加 CI badge。
   freeze 檢查從此列出 `.github/README.md`、`LICENSE`、`.github/workflows/ci.yml`、`ruff.toml` 四項（039 第 4 點，預期的）。第一次 CI 的結果：push 之後補記。
+- **[decision 040](docs/decisions/040-front-page-claims-and-limitations.md)（2026-11-02，Proposed；合併到 main 即為 Accepted）**：首頁兩句改成與 022、016 一致的說法
+  （「看過」的定義偏寬；10 個故障、7 種故障類型），加「Limitations / 限制」一節（6 點，出處是 011、016、017、022、023、032、100、101；
+  唯一推得的數字是由 100 各 fault 表算出的 28 或 30：origin top-1 一方答對、另一方答錯的事故數，算法在 040）。freeze 檢查仍是 039 第 4 點的四項。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
