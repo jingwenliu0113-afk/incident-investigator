@@ -1,0 +1,12 @@
+# Minimal lint configuration for CI (decision 039): ruff's default rules, plus two exceptions scoped to the files
+# where the existing findings are. No code is reformatted or edited: after the held-out freeze only NEXT.md and new
+# decision files may change (decision 023 §6, collect/freeze.py), so the findings are scoped here instead.
+
+[lint.per-file-ignores]
+# F811: these modules import the pytest fixture `tree` from tests/lockfixtures.py and request it as a test argument;
+# ruff reads each such argument as a redefinition of the import (the usual pytest fixture idiom, not a bug).
+"tests/test_cli.py" = ["F811"]
+"tests/test_lock.py" = ["F811"]
+"tests/test_runtime.py" = ["F811"]
+# F541: one f-string without placeholders (line 266); frozen code, left as it is.
+"env/soak.py" = ["F541"]

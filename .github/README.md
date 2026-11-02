@@ -1,5 +1,7 @@
 # Incident Investigator
 
+[![CI](https://github.com/jingwenliu0113-afk/incident-investigator/actions/workflows/ci.yml/badge.svg)](https://github.com/jingwenliu0113-afk/incident-investigator/actions/workflows/ci.yml)
+
 > **Status (November 2026): complete.** Gate **NOT PASSED** with the frozen local model; an exploratory rerun with Gemini 4 Argon is reported separately and does not change the decision. No further experiments are planned.
 >
 > **狀態（2026 年 11 月）：已完成。** 以凍結的本機模型判定 Gate **NOT PASSED**；Gemini 4 Argon 的探索性重跑另外報告，不改變判定。不再進行新的實驗。
@@ -87,7 +89,7 @@ flowchart LR
   - The Pilot set (10 incidents) is kept apart from the held-out set (50 incidents).
   - A freeze record keeps code, prompts and model byte-identical during the held-out runs.
   - Each method runs once per incident.
-  - Every design change is written in a [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions) (40 records).
+  - Every design change is written in a [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions) (41 records).
 - **Engineering.** Python with `uv` and over 1,100 automated tests, written test-first. Local inference ran on an RTX 5070 Ti desktop through Ollama; the exploratory run used Vertex AI.
 
 ### Try it
@@ -198,7 +200,7 @@ Code is MIT-licensed ([LICENSE](https://github.com/jingwenliu0113-afk/incident-i
   - Pilot（10 個事故）與 held-out（50 個事故）分開；
   - held-out 執行期間用 freeze 紀錄鎖住程式、prompt 與模型；
   - 每個方法每個事故只跑一次；
-  - 所有設計變更都寫進 [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions)（40 份）。
+  - 所有設計變更都寫進 [decision log](https://github.com/jingwenliu0113-afk/incident-investigator/tree/main/docs/decisions)（41 份）。
 - **工程**：Python 加 `uv`，1,100 個以上的自動測試，先寫測試再寫程式。本機推論在 RTX 5070 Ti 桌機（Ollama）上跑，探索性重跑用 Vertex AI。
 
 ### 試跑

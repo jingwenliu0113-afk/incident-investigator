@@ -14,6 +14,10 @@
   freeze 檢查從此列出 `.github/README.md` 與 `LICENSE` 兩項（038 第 2 點，預期的）。
 - **乾淨 clone 的確認（038 第 5 點，2026-11-01）**：匿名 clone 公開的 repo（660dfa5）→ `uv sync` → demo 正常；測試第一次 23 個失敗，原因都是缺 gitignored 的 `env/upstream/opentelemetry-demo/`。`python -m env fetch-upstream`（commit dedc017）之後 1116 passed、5 deselected。
   首頁的「Try it」原本漏了這一步，已補上。GitHub 偵測到 MIT；About 描述與 7 個 topics 已設定。
+- **[decision 039](docs/decisions/039-minimal-ci.md)（2026-11-02，Proposed；合併到 main 即為 Accepted）**：GitHub Actions CI（`.github/workflows/ci.yml`：`uv sync --locked` →
+  `python -m env fetch-upstream` → `pytest -m "not network and not docker_daemon and not docker_cli"` → `uvx ruff@0.12.0 check .`）與最小的 `ruff.toml`
+  （只在三個測試檔忽略 fixture 慣用寫法的 F811、在 `env/soak.py` 忽略 F541，程式不改）；首頁標題下加 CI badge。
+  freeze 檢查從此列出 `.github/README.md`、`LICENSE`、`.github/workflows/ci.yml`、`ruff.toml` 四項（039 第 4 點，預期的）。第一次 CI 的結果：push 之後補記。
 
 ### 之前的「目前位置」（2026-11-01，decision 032–036 探索性實驗完成：101 已發布；Core 結論仍是 NOT PASSED）
 
