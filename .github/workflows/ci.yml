@@ -1,0 +1,42 @@
+# Lightweight CI (decision 039): no Docker, no GPU, no model, no telemetry (data/external/ is not in git).
+# CI only checks: it never collects an incident, runs a method or changes a result. The tests read the pinned
+# OpenTelemetry Demo source, so the workflow fetches it first (the "Try it" step of the front page).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.2.0  # this action publishes exact tags only
+        with:
+          enable-cache: true
+
+      - name: Install (Python >= 3.12 per pyproject.toml; jsonschema, pytest, pyyaml)
+        run: uv sync --locked
+
+      - name: Fetch the pinned OpenTelemetry Demo source (shallow clone of the locked tag, commit checked; gitignored)
+        run: uv run python -m env fetch-upstream
+
+      - name: Tests (network, Docker daemon and Docker CLI tests deselected)
+        run: uv run pytest -q -m "not network and not docker_daemon and not docker_cli"
+
+      # runs even when an earlier step fails, so a red run still reports the lint result (skipped only on cancel)
+      - name: Lint (ruff is not a project dependency; pinned to the version used locally; config in ruff.toml)
+        if: ${{ !cancelled() }}
+        run: uvx ruff@0.12.0 check .
